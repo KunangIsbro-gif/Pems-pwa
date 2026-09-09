@@ -1,3 +1,4 @@
+const PEMS_FRONTEND_VERSION = 'V14C-B2A-FIX2.2';
 const PEMS_GOOGLE_CLIENT_ID = '1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com';
 const BACKEND_KEY = 'pems_backend_webapp_url_v14c';
 const AUTH_USER_KEY = 'pems_last_verified_user_v14c_b2a';
@@ -320,7 +321,7 @@ if (lastUserRaw) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix21')
+  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix22')
     .then(async (registration) => {
       swStatus.textContent = 'REGISTERED';
       swStatus.className = 'value ok';
