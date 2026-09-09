@@ -4,19 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 3C</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step3c">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step3c">
+  <title>PEMS V14C-B2A Step 4A</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step4a">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step4a">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 3C</div>
-      <h1>Server Session Validation</h1>
+      <div class="badge">PEMS V14C-B2A STEP 4A</div>
+      <h1>Read Project Data</h1>
       <p class="lead">
-        Target tahap ini cuma satu: proof yang diterima PEMS divalidasi ulang di server.
-        Server memeriksa signature, expiry, versi, dan allowlist email.
+        Target tahap ini satu saja: session yang valid dipakai untuk membaca
+        <b>01_PROJECTS</b> secara <b>READ ONLY</b>.
       </p>
 
       <div class="status-grid">
@@ -35,7 +35,7 @@
       </div>
 
       <section id="proofResult" class="result muted">
-        Belum ada proof Step 3C.
+        Belum ada proof session.
       </section>
 
       <section class="panel">
@@ -59,7 +59,6 @@
       <section class="panel">
         <h2>2. Verifikasi Google di Server</h2>
         <p>
-          Token Google dikirim ke Apps Script lewat POST.
           Setelah <b>SERVER VERIFIED</b>, klik <b>KEMBALI KE PEMS</b>.
         </p>
         <button id="verifyBtn" class="primary-btn" type="button" disabled>
@@ -68,19 +67,20 @@
       </section>
 
       <section class="panel">
-        <h2>3. Validasi Proof di Server</h2>
+        <h2>3. Baca Project</h2>
         <p>
-          Tombol ini aktif setelah proof Step 3C diterima.
-          Proof akan dicek ulang sepenuhnya oleh server.
+          Tombol aktif setelah proof diterima. Server akan validasi proof dulu,
+          baru membaca sheet <b>01_PROJECTS</b>.
         </p>
-        <button id="validateBtn" class="primary-btn" type="button" disabled>
-          VALIDASI SESSION
+        <button id="readProjectsBtn" class="primary-btn" type="button" disabled>
+          READ PROJECT DATA
         </button>
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 3C</strong> bila tab server menampilkan
-        <strong>✓ SESSION VALID</strong>, email benar, dan <strong>Authorized: YES</strong>.
+        <strong>PASS STEP 4A</strong> bila tab server menampilkan
+        <strong>✓ PROJECT READ OK</strong> dan daftar project dari
+        <strong>01_PROJECTS</strong>.
       </div>
     </section>
   </main>
@@ -88,6 +88,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step3c"></script>
+  <script src="./app.js?v=b2a-step4a"></script>
 </body>
 </html>

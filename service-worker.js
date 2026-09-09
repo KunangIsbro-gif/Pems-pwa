@@ -1,11 +1,11 @@
 
-const CACHE_NAME = 'pems-v14c-b2a-step3c-v1';
+const CACHE_NAME = 'pems-v14c-b2a-step4a-v1';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=b2a-step3c',
-  './app.js?v=b2a-step3c',
-  './manifest.json?v=b2a-step3c'
+  './styles.css?v=b2a-step4a',
+  './app.js?v=b2a-step4a',
+  './manifest.json?v=b2a-step4a'
 ];
 
 self.addEventListener('install', event => {

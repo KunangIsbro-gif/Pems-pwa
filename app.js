@@ -5,7 +5,7 @@ const proofEl = document.getElementById('proofStatus');
 const proofResultEl = document.getElementById('proofResult');
 const loginResultEl = document.getElementById('loginResult');
 const verifyBtn = document.getElementById('verifyBtn');
-const validateBtn = document.getElementById('validateBtn');
+const readProjectsBtn = document.getElementById('readProjectsBtn');
 
 const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
 let currentGoogleCredential = '';
@@ -57,8 +57,8 @@ function acceptProof(proof){
     proofEl.textContent = 'INVALID / EXPIRED';
     proofEl.className = 'bad';
     proofResultEl.className = 'result errbox';
-    proofResultEl.textContent = 'Proof Step 3C tidak valid atau sudah kedaluwarsa.';
-    validateBtn.disabled = true;
+    proofResultEl.textContent = 'Proof session tidak valid atau sudah kedaluwarsa.';
+    readProjectsBtn.disabled = true;
     return false;
   }
 
@@ -73,10 +73,9 @@ function acceptProof(proof){
     '<strong>✓ SERVER PROOF RECEIVED</strong><br>' +
     'Email: ' + escapeHtml(payload.email || '-') + '<br>' +
     'Nama: ' + escapeHtml(payload.name || '-') + '<br>' +
-    'Version: ' + escapeHtml(payload.v || '-') + '<br>' +
-    '<small>Status ini belum dianggap SESSION VALID sampai proof dicek ulang oleh server.</small>';
+    '<small>Server akan memvalidasi proof lagi sebelum membaca project.</small>';
 
-  validateBtn.disabled = false;
+  readProjectsBtn.disabled = false;
   return true;
 }
 
@@ -87,8 +86,6 @@ function processServerHandoff(){
   if (hash.startsWith(prefix)) {
     const proof = decodeURIComponent(hash.slice(prefix.length));
     acceptProof(proof);
-
-    // Hapus proof dari address bar setelah dibaca.
     history.replaceState(null, '', location.pathname + location.search);
     return;
   }
@@ -98,7 +95,6 @@ function processServerHandoff(){
     acceptProof(stored);
   }
 }
-
 processServerHandoff();
 
 function decodeJwtPayload(token) {
@@ -150,25 +146,20 @@ verifyBtn.addEventListener('click', function(){
   });
 });
 
-validateBtn.addEventListener('click', function(){
+readProjectsBtn.addEventListener('click', function(){
   if (!currentServerProof) {
-    alert('Proof Step 3C belum ada.');
+    alert('Proof session belum ada / sudah expired. Login ulang dulu.');
     return;
   }
 
   submitHiddenPost({
-    action: 'validate_proof',
+    action: 'read_projects',
     proof: currentServerProof
   });
 });
 
 function submitHiddenPost(fields){
   const bridgeUrl = String(window.PEMS_BRIDGE_URL || '').trim();
-
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(bridgeUrl)) {
-    alert('URL Apps Script Bridge tidak valid.');
-    return;
-  }
 
   const form = document.createElement('form');
   form.method = 'POST';
