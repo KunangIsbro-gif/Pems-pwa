@@ -1,9 +1,9 @@
-const CACHE_NAME = 'pems-v14c-b1-shell-v1';
+const CACHE_NAME = 'pems-v14c-b2a-shell-v1';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css',
-  './app.js',
+  './styles.css?v=v14c-b2a-1',
+  './app.js?v=v14c-b2a-1',
   './manifest.json'
 ];
 
@@ -27,7 +27,6 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 

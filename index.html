@@ -4,16 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f3b66">
-  <title>PEMS V14C-B1 Backend Bridge</title>
+  <title>PEMS V14C-B2A Secure Login POC</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=v14c-b2a-1">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main class="shell">
     <section class="card">
-      <div class="badge">PEMS V14C-B1</div>
-      <h1>Backend Bridge POC</h1>
-      <p class="lead">Target test: PWA GitHub Pages dapat menghubungi backend Google Apps Script tanpa membuka data project dulu.</p>
+      <div class="badge">PEMS V14C-B2A</div>
+      <h1>Secure Login POC</h1>
+      <p class="lead">Target test: login Google berhasil, ID token diverifikasi di Apps Script Bridge, dan hanya akun yang diizinkan mendapat <b>ACCESS GRANTED</b>.</p>
 
       <div class="status-grid">
         <div class="status-box">
@@ -25,27 +26,35 @@
           <div id="swStatus" class="value">Memeriksa…</div>
         </div>
         <div class="status-box">
-          <div class="label">App Shell</div>
-          <div id="shellStatus" class="value">Belum siap</div>
+          <div class="label">Auth Bridge</div>
+          <div id="authBridgeStatus" class="value">Belum siap</div>
         </div>
       </div>
 
-      <div class="testbox backend-box">
-        <strong>Backend GAS Web App URL</strong>
-        <div class="helper">Paste URL deployment PEMS yang berakhiran <code>/exec</code>. URL disimpan hanya di browser ini, tidak ditulis ke repo GitHub.</div>
+      <div class="backend-box">
+        <strong>Apps Script Bridge URL</strong>
+        <div class="helper">URL bridge <code>/exec</code> yang sudah PASS pada B1. Disimpan hanya di browser ini.</div>
         <input id="backendUrl" type="url" placeholder="https://script.google.com/macros/s/...../exec" autocomplete="off">
-        <button id="saveBackendBtn" type="button" class="secondary-btn">SIMPAN URL BACKEND</button>
+        <button id="saveBackendBtn" type="button" class="secondary-btn">SIMPAN URL BRIDGE</button>
       </div>
 
-      <button id="testBridgeBtn" type="button">TEST KONEKSI BACKEND</button>
-      <div id="bridgeResult" class="bridge-result">Belum dites.</div>
+      <div class="login-box">
+        <div class="section-title">Login PEMS</div>
+        <div class="helper">Gunakan akun Google yang sudah dimasukkan sebagai Test User di Google Auth Platform.</div>
+        <div id="googleSignInButton" class="google-btn-wrap"></div>
+        <button id="logoutBtn" class="danger-btn" type="button" hidden>LOGOUT POC</button>
+      </div>
+
+      <div id="authResult" class="auth-result">Belum login.</div>
 
       <div class="note">
-        <b>PASS</b> bila hasil test menampilkan <b>BACKEND CONNECTED</b> dan versi <b>V14C-B1</b>.
+        <b>PASS</b> bila muncul <b>ACCESS GRANTED</b>, email user yang benar, dan tulisan <b>SERVER VERIFIED</b>.
       </div>
+
+      <iframe id="authBridgeFrame" title="PEMS Auth Bridge" class="hidden-frame" aria-hidden="true"></iframe>
     </section>
   </main>
 
-  <script src="./app.js"></script>
+  <script src="./app.js?v=v14c-b2a-1"></script>
 </body>
 </html>
