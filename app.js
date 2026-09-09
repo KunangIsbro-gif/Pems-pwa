@@ -1,4 +1,4 @@
-const PEMS_FRONTEND_VERSION = 'V14C-B2A-FIX2.2';
+const PEMS_FRONTEND_VERSION = 'V14C-B2A-FIX3';
 const PEMS_GOOGLE_CLIENT_ID = '1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com';
 const BACKEND_KEY = 'pems_backend_webapp_url_v14c';
 const AUTH_USER_KEY = 'pems_last_verified_user_v14c_b2a';
@@ -51,15 +51,27 @@ function cleanupBridgeProbe() {
   bridgeProbeCallbackName = '';
 }
 
-function jsonpRequest(url, params, timeoutMs = 8000) {
+function loadBridgeScriptFixed(url, mode, requestId, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
-    const callbackName = '__pemsJsonp_' + Date.now() + '_' + Math.random().toString(36).slice(2);
     const script = document.createElement('script');
     let settled = false;
+    let handlerName = '';
 
+    if (mode === 'bridge') handlerName = '__PEMS_BRIDGE_READY__';
+    else if (mode === 'auth_status') handlerName = '__PEMS_AUTH_STATUS__';
+    else {
+      reject(new Error('Mode Bridge tidak dikenal.'));
+      return;
+    }
+
+    const previous = window[handlerName];
     const cleanup = () => {
       if (script.parentNode) script.parentNode.removeChild(script);
-      try { delete window[callbackName]; } catch (e) { window[callbackName] = undefined; }
+      if (previous === undefined) {
+        try { delete window[handlerName]; } catch (e) { window[handlerName] = undefined; }
+      } else {
+        window[handlerName] = previous;
+      }
     };
 
     const timer = setTimeout(() => {
@@ -69,7 +81,7 @@ function jsonpRequest(url, params, timeoutMs = 8000) {
       reject(new Error('Timeout endpoint Bridge.'));
     }, timeoutMs);
 
-    window[callbackName] = (data) => {
+    window[handlerName] = (data) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -77,18 +89,12 @@ function jsonpRequest(url, params, timeoutMs = 8000) {
       resolve(data || {});
     };
 
-    // FIX2.1: bangun query secara eksplisit seperti mekanisme FIX1
-    // yang sudah terbukti READY di browser user. Hindari URLSearchParams
-    // pada JSONP Apps Script untuk mengeliminasi jalur encoding yang bermasalah.
-    const pairs = [];
-    Object.keys(params || {}).forEach((key) => {
-      if (params[key] === undefined || params[key] === null) return;
-      pairs.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(params[key])));
-    });
-    pairs.push('callback=' + encodeURIComponent(callbackName));
-    pairs.push('t=' + Date.now());
-
-    script.src = url + '?' + pairs.join('&');
+    // FIX3: satu query parameter saja. Tidak memakai callback= JSONP.
+    // Apps Script mengembalikan JavaScript yang memanggil handler global tetap.
+    let q = mode === 'bridge'
+      ? ('bridge_js|' + Date.now())
+      : ('auth_status_js|' + String(requestId || ''));
+    script.src = url + '?q=' + encodeURIComponent(q);
     script.async = true;
     script.onerror = () => {
       if (settled) return;
@@ -100,7 +106,6 @@ function jsonpRequest(url, params, timeoutMs = 8000) {
     document.head.appendChild(script);
   });
 }
-
 async function checkAuthBridgeReady() {
   const url = normalizeBackendUrl(backendUrlInput.value || localStorage.getItem(BACKEND_KEY));
   authBridgeReady = false;
@@ -115,7 +120,7 @@ async function checkAuthBridgeReady() {
   authBridgeStatus.className = 'value warn';
 
   try {
-    const data = await jsonpRequest(url, { api: 'bridge' }, 10000);
+    const data = await loadBridgeScriptFixed(url, 'bridge', '', 10000);
     const ok = !!(data && data.success === true);
     authBridgeReady = ok;
     authBridgeStatus.textContent = ok ? 'READY' : 'GAGAL';
@@ -227,7 +232,7 @@ async function pollAuthResult(url, requestId, generation) {
   while (Date.now() < deadline && generation === authPollGeneration) {
     attempt++;
     try {
-      const data = await jsonpRequest(url, { api: 'auth_status', requestId }, 7000);
+      const data = await loadBridgeScriptFixed(url, 'auth_status', requestId, 7000);
       if (generation !== authPollGeneration) return;
 
       if (data && data.success === true && data.pending === false && data.result) {
@@ -321,7 +326,7 @@ if (lastUserRaw) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix22')
+  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix3')
     .then(async (registration) => {
       swStatus.textContent = 'REGISTERED';
       swStatus.className = 'value ok';
