@@ -3,58 +3,53 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0f3b66">
-  <title>PEMS V14C-B2A FIX3 Secure Login POC</title>
-  <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=v14c-b2a-fix3">
+  <meta name="theme-color" content="#0f4c81">
+  <title>PEMS V14C-B2A Step 1</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step1">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step1">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
-  <main class="shell">
+  <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A FIX3</div>
-      <h1>Secure Login POC</h1>
-      <p class="lead">Target test: login Google berhasil, ID token diverifikasi di Apps Script Bridge, dan hanya akun yang diizinkan mendapat <b>ACCESS GRANTED</b>.</p>
+      <div class="badge">PEMS V14C-B2A STEP 1</div>
+      <h1>Google Login Only</h1>
+      <p class="lead">
+        Target tahap ini cuma satu: tombol Google berhasil login di GitHub Pages.
+        Belum ada Apps Script Bridge dan belum ada akses data project.
+      </p>
 
       <div class="status-grid">
-        <div class="status-box">
-          <div class="label">Browser</div>
-          <div id="networkStatus" class="value">Memeriksa…</div>
-        </div>
-        <div class="status-box">
-          <div class="label">Service Worker</div>
-          <div id="swStatus" class="value">Memeriksa…</div>
-        </div>
-        <div class="status-box">
-          <div class="label">Auth Bridge</div>
-          <div id="authBridgeStatus" class="value">Belum siap</div>
-        </div>
+        <div class="status-card"><span>BROWSER</span><strong id="browserStatus">...</strong></div>
+        <div class="status-card"><span>SERVICE WORKER</span><strong id="swStatus">...</strong></div>
+        <div class="status-card"><span>LOGIN</span><strong id="loginStatus">BELUM LOGIN</strong></div>
       </div>
 
-      <div class="backend-box">
-        <strong>Apps Script Bridge URL</strong>
-        <div class="helper">URL bridge <code>/exec</code> yang sudah PASS pada B1. Disimpan hanya di browser ini.</div>
-        <input id="backendUrl" type="url" placeholder="https://script.google.com/macros/s/...../exec" autocomplete="off">
-        <button id="saveBackendBtn" type="button" class="secondary-btn">SIMPAN URL BRIDGE</button>
+      <section class="panel">
+        <h2>Login PEMS</h2>
+        <p>Gunakan akun Google yang sudah dimasukkan sebagai Test User.</p>
+        <div id="g_id_onload"
+          data-client_id="1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com"
+          data-callback="handleGoogleCredential"
+          data-auto_prompt="false"></div>
+        <div class="g_id_signin"
+          data-type="standard"
+          data-shape="rectangular"
+          data-theme="outline"
+          data-text="signin_with"
+          data-size="large"
+          data-logo_alignment="left"></div>
+      </section>
+
+      <section id="result" class="result muted">Belum login.</section>
+
+      <div class="passbox">
+        <strong>PASS</strong> bila setelah klik Login dengan Google muncul
+        <strong>LOGIN OK</strong> dan email akun yang benar.
       </div>
-
-      <div class="login-box">
-        <div class="section-title">Login PEMS</div>
-        <div class="helper">Gunakan akun Google yang sudah dimasukkan sebagai Test User di Google Auth Platform.</div>
-        <div id="googleSignInButton" class="google-btn-wrap"></div>
-        <button id="logoutBtn" class="danger-btn" type="button" hidden>LOGOUT POC</button>
-      </div>
-
-      <div id="authResult" class="auth-result">Belum login.</div>
-
-      <div class="note">
-        <b>PASS</b> bila muncul <b>ACCESS GRANTED</b>, email user yang benar, dan tulisan <b>SERVER VERIFIED</b>.
-      </div>
-
-      <iframe id="authPostFrame" name="pemsAuthPostFrame" title="PEMS Auth Submit" class="hidden-frame" aria-hidden="true"></iframe>
     </section>
   </main>
 
-  <script src="./app.js?v=v14c-b2a-fix3"></script>
+  <script src="./app.js?v=b2a-step1"></script>
 </body>
 </html>

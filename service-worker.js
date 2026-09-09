@@ -1,54 +1,41 @@
-const CACHE_NAME = 'pems-v14c-b2a-fix3-shell-v1';
+const CACHE_NAME = 'pems-v14c-b2a-step1-login-only-v1';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=v14c-b2a-fix3',
-  './app.js?v=v14c-b2a-fix3',
-  './manifest.json'
+  './styles.css?v=b2a-step1',
+  './app.js?v=b2a-step1',
+  './manifest.json?v=b2a-step1'
 ];
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', event => {
+  self.skipWaiting();
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)));
+});
+
+self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      ))
-      .then(() => self.clients.claim())
-  );
-});
-
-self.addEventListener('fetch', (event) => {
+self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin) return;
 
-  // FIX2.2: network-first saat online supaya update PEMS tidak tertahan cache lama.
+  if (url.hostname.includes('accounts.google.com') || url.hostname.includes('gstatic.com')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
-      .then((response) => {
-        if (response && response.status === 200) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        }
-        return response;
+      .then(resp => {
+        const copy = resp.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+        return resp;
       })
-      .catch(async () => {
-        const cached = await caches.match(event.request);
-        if (cached) return cached;
-        if (event.request.mode === 'navigate') return caches.match('./index.html');
-        throw new Error('PEMS offline asset tidak tersedia di cache.');
-      })
+      .catch(() => caches.match(event.request).then(r => r || caches.match('./index.html')))
   );
-});
-
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
