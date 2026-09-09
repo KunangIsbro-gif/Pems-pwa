@@ -10,12 +10,13 @@ const saveBackendBtn = document.getElementById('saveBackendBtn');
 const googleSignInButton = document.getElementById('googleSignInButton');
 const logoutBtn = document.getElementById('logoutBtn');
 const authResult = document.getElementById('authResult');
-const authBridgeFrame = document.getElementById('authBridgeFrame');
 
-let authFrameReady = false;
+let authBridgeReady = false;
 let googleButtonRendered = false;
 let activeVerifyRequestId = '';
 let verifyTimer = null;
+let bridgeProbeScript = null;
+let bridgeProbeCallbackName = '';
 
 function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -41,16 +42,69 @@ function normalizeBackendUrl(value) {
   return url.split('?')[0];
 }
 
-function loadAuthFrame() {
+function cleanupBridgeProbe() {
+  if (bridgeProbeScript && bridgeProbeScript.parentNode) {
+    bridgeProbeScript.parentNode.removeChild(bridgeProbeScript);
+  }
+  bridgeProbeScript = null;
+  if (bridgeProbeCallbackName && window[bridgeProbeCallbackName]) {
+    try { delete window[bridgeProbeCallbackName]; } catch (e) { window[bridgeProbeCallbackName] = undefined; }
+  }
+  bridgeProbeCallbackName = '';
+}
+
+function checkAuthBridgeReady() {
   const url = normalizeBackendUrl(backendUrlInput.value || localStorage.getItem(BACKEND_KEY));
-  authFrameReady = false;
-  authBridgeStatus.textContent = url ? 'MENGHUBUNGKAN…' : 'URL BELUM ADA';
-  authBridgeStatus.className = 'value ' + (url ? 'warn' : 'bad');
+  authBridgeReady = false;
+
   if (!url) {
-    authBridgeFrame.removeAttribute('src');
+    authBridgeStatus.textContent = 'URL BELUM ADA';
+    authBridgeStatus.className = 'value bad';
     return;
   }
-  authBridgeFrame.src = url + '?mode=authframe&v=V14C-B2A&t=' + Date.now();
+
+  authBridgeStatus.textContent = 'MENGHUBUNGKAN…';
+  authBridgeStatus.className = 'value warn';
+
+  cleanupBridgeProbe();
+  const callbackName = '__pemsBridgeReady_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  bridgeProbeCallbackName = callbackName;
+
+  const timeout = setTimeout(() => {
+    if (bridgeProbeCallbackName !== callbackName) return;
+    cleanupBridgeProbe();
+    authBridgeReady = false;
+    authBridgeStatus.textContent = 'GAGAL';
+    authBridgeStatus.className = 'value bad';
+    authResult.innerHTML = '<div class="error-card">Auth Bridge tidak menjawab. Cek deployment / URL bridge.</div>';
+  }, 10000);
+
+  window[callbackName] = (data) => {
+    clearTimeout(timeout);
+    const ok = !!(data && data.success === true);
+    authBridgeReady = ok;
+    authBridgeStatus.textContent = ok ? 'READY' : 'GAGAL';
+    authBridgeStatus.className = 'value ' + (ok ? 'ok' : 'bad');
+    if (ok) {
+      authResult.innerHTML = '<span class="ok">Auth Bridge READY • ' + escapeHtml(data.version || '-') + '</span>';
+    } else {
+      authResult.innerHTML = '<div class="error-card">Bridge merespons tetapi status tidak valid.</div>';
+    }
+    cleanupBridgeProbe();
+  };
+
+  bridgeProbeScript = document.createElement('script');
+  bridgeProbeScript.src = url + '?api=bridge&callback=' + encodeURIComponent(callbackName) + '&t=' + Date.now();
+  bridgeProbeScript.async = true;
+  bridgeProbeScript.onerror = () => {
+    clearTimeout(timeout);
+    cleanupBridgeProbe();
+    authBridgeReady = false;
+    authBridgeStatus.textContent = 'GAGAL';
+    authBridgeStatus.className = 'value bad';
+    authResult.innerHTML = '<div class="error-card">Gagal memuat endpoint Auth Bridge.</div>';
+  };
+  document.head.appendChild(bridgeProbeScript);
 }
 
 const savedBackend = localStorage.getItem(BACKEND_KEY) || '';
@@ -64,8 +118,8 @@ saveBackendBtn.addEventListener('click', () => {
   }
   localStorage.setItem(BACKEND_KEY, url);
   backendUrlInput.value = url;
-  authResult.innerHTML = '<span class="ok">URL bridge tersimpan. Menyiapkan Auth Bridge…</span>';
-  loadAuthFrame();
+  authResult.innerHTML = '<span class="ok">URL bridge tersimpan. Mengecek Auth Bridge…</span>';
+  checkAuthBridgeReady();
 });
 
 function waitForGoogleIdentity(maxMs = 12000) {
@@ -108,14 +162,43 @@ async function initGoogleLogin() {
   }
 }
 
+function submitCredentialToBridge(credential, requestId) {
+  const url = normalizeBackendUrl(backendUrlInput.value || localStorage.getItem(BACKEND_KEY));
+  if (!url) throw new Error('URL Auth Bridge belum tersedia.');
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = url;
+  form.target = 'pemsAuthPostFrame';
+  form.style.display = 'none';
+
+  const fields = {
+    action: 'verify_google',
+    requestId: requestId,
+    credential: credential
+  };
+
+  Object.keys(fields).forEach((name) => {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.value = fields[name];
+    form.appendChild(input);
+  });
+
+  document.body.appendChild(form);
+  form.submit();
+  setTimeout(() => form.remove(), 1000);
+}
+
 function handleGoogleCredential(response) {
   const credential = response && response.credential ? String(response.credential) : '';
   if (!credential) {
     authResult.innerHTML = '<div class="error-card">Google tidak mengirim ID token.</div>';
     return;
   }
-  if (!authFrameReady || !authBridgeFrame.contentWindow) {
-    authResult.innerHTML = '<div class="error-card">Auth Bridge belum READY. Pastikan URL bridge benar lalu tunggu beberapa detik.</div>';
+  if (!authBridgeReady) {
+    authResult.innerHTML = '<div class="error-card">Auth Bridge belum READY. Klik SIMPAN URL BRIDGE lalu tunggu status READY.</div>';
     return;
   }
 
@@ -127,27 +210,25 @@ function handleGoogleCredential(response) {
     if (!activeVerifyRequestId) return;
     activeVerifyRequestId = '';
     authResult.innerHTML = '<div class="error-card">Timeout saat verifikasi server.</div>';
-  }, 15000);
+  }, 20000);
 
-  // Token hanya dikirim lewat postMessage ke iframe Apps Script Bridge; tidak disimpan ke localStorage/URL.
-  authBridgeFrame.contentWindow.postMessage({
-    type: 'PEMS_VERIFY_GOOGLE',
-    requestId: activeVerifyRequestId,
-    credential: credential
-  }, '*');
+  try {
+    submitCredentialToBridge(credential, activeVerifyRequestId);
+  } catch (error) {
+    clearTimeout(verifyTimer);
+    activeVerifyRequestId = '';
+    authResult.innerHTML = '<div class="error-card">' + escapeHtml(error.message || error) + '</div>';
+  }
+}
+
+function isAllowedBridgeMessageOrigin(origin) {
+  return origin === 'https://script.google.com' ||
+    /^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/i.test(String(origin || ''));
 }
 
 window.addEventListener('message', (event) => {
-  if (event.source !== authBridgeFrame.contentWindow) return;
+  if (!isAllowedBridgeMessageOrigin(event.origin)) return;
   const data = event.data || {};
-
-  if (data.type === 'PEMS_AUTH_FRAME_READY') {
-    authFrameReady = true;
-    authBridgeStatus.textContent = 'READY';
-    authBridgeStatus.className = 'value ok';
-    return;
-  }
-
   if (data.type !== 'PEMS_AUTH_VERIFY_RESULT') return;
   if (!activeVerifyRequestId || data.requestId !== activeVerifyRequestId) return;
 
@@ -197,7 +278,7 @@ if (lastUserRaw) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-1')
+  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix1')
     .then(async (registration) => {
       swStatus.textContent = 'REGISTERED';
       swStatus.className = 'value ok';
@@ -214,5 +295,5 @@ if ('serviceWorker' in navigator) {
   swStatus.className = 'value bad';
 }
 
-loadAuthFrame();
+checkAuthBridgeReady();
 initGoogleLogin();
