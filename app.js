@@ -1,11 +1,10 @@
 
 const browserEl = document.getElementById('browserStatus');
-const swEl = document.getElementById('swStatus');
 const loginEl = document.getElementById('loginStatus');
+const handoffEl = document.getElementById('handoffStatus');
+const handoffResultEl = document.getElementById('handoffResult');
 const loginResultEl = document.getElementById('loginResult');
 const verifyBtn = document.getElementById('verifyBtn');
-const heartbeatBtn = document.getElementById('heartbeatBtn');
-const heartbeatResultEl = document.getElementById('heartbeatResult');
 
 let currentGoogleCredential = '';
 
@@ -18,103 +17,83 @@ window.addEventListener('online', setConnectivity);
 window.addEventListener('offline', setConnectivity);
 setConnectivity();
 
-(async function registerSW(){
-  if (!('serviceWorker' in navigator)) {
-    swEl.textContent = 'TIDAK DIDUKUNG';
-    swEl.className = 'bad';
-    return;
-  }
+function base64UrlDecodeUtf8(value){
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=b2a-step3a', {scope:'./'});
-    swEl.textContent = 'REGISTERED';
-    swEl.className = 'ok';
-  } catch (err) {
-    swEl.textContent = 'GAGAL';
-    swEl.className = 'bad';
+    let b64 = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch (e) {
+    return '';
   }
-})();
+}
 
-heartbeatBtn.addEventListener('click', function(){
-  testPemsHeartbeat();
-});
+function processServerHandoff(){
+  const hash = String(location.hash || '');
+  const prefix = '#pems_auth=';
+  if (!hash.startsWith(prefix)) return;
 
-function testPemsHeartbeat(){
-  const bridgeUrl = String(window.PEMS_BRIDGE_URL || '').trim();
+  const token = decodeURIComponent(hash.slice(prefix.length));
+  const parts = token.split('.');
 
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(bridgeUrl)) {
-    heartbeatResultEl.className = 'result errbox';
-    heartbeatResultEl.textContent = 'URL Apps Script Bridge tidak valid.';
+  // Proof disimpan opaque untuk Step 3C. Frontend hanya membaca payload untuk UI.
+  // Keputusan akses data tidak boleh bergantung pada parsing client ini.
+  if (parts.length !== 2) {
+    handoffEl.textContent = 'INVALID';
+    handoffEl.className = 'bad';
+    handoffResultEl.className = 'result errbox';
+    handoffResultEl.textContent = 'Format handoff tidak valid.';
+    history.replaceState(null, '', location.pathname + location.search);
     return;
   }
 
-  heartbeatBtn.disabled = true;
-  heartbeatResultEl.className = 'result muted';
-  heartbeatResultEl.textContent = 'Mengecek koneksi server...';
+  let payload;
+  try {
+    payload = JSON.parse(base64UrlDecodeUtf8(parts[0]) || '{}');
+  } catch (e) {
+    payload = null;
+  }
 
-  const cbName = '__pemsHeartbeat_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-  let script = document.createElement('script');
-  let finished = false;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const validShape =
+    payload &&
+    payload.v === 'V14C-B2A-STEP3B' &&
+    typeof payload.email === 'string' &&
+    Number(payload.exp || 0) > nowSec;
 
-  const cleanup = function(){
-    if (script && script.parentNode) script.parentNode.removeChild(script);
-    try { delete window[cbName]; } catch(e) { window[cbName] = undefined; }
-    heartbeatBtn.disabled = false;
-  };
+  if (!validShape) {
+    handoffEl.textContent = 'INVALID / EXPIRED';
+    handoffEl.className = 'bad';
+    handoffResultEl.className = 'result errbox';
+    handoffResultEl.textContent = 'Proof tidak valid atau sudah kedaluwarsa.';
+    history.replaceState(null, '', location.pathname + location.search);
+    return;
+  }
 
-  const timer = setTimeout(function(){
-    if (finished) return;
-    finished = true;
-    cleanup();
-    heartbeatResultEl.className = 'result errbox';
-    heartbeatResultEl.textContent = 'Heartbeat timeout.';
-  }, 10000);
+  sessionStorage.setItem('PEMS_SERVER_PROOF_STEP3B', token);
 
-  window[cbName] = function(payload){
-    if (finished) return;
-    finished = true;
-    clearTimeout(timer);
-    cleanup();
+  handoffEl.textContent = 'RECEIVED';
+  handoffEl.className = 'ok';
 
-    if (payload && payload.success === true && payload.version === 'V14C-B2A-STEP3A') {
-      heartbeatResultEl.className = 'result okbox';
-      heartbeatResultEl.innerHTML =
-        '<strong>✓ PWA SERVER CONNECTED</strong><br>' +
-        'Version: ' + escapeHtml(payload.version || '-') + '<br>' +
-        'Bridge: ' + escapeHtml(payload.bridge || '-') + '<br>' +
-        'Server Time: ' + escapeHtml(payload.serverTime || '-');
-    } else {
-      heartbeatResultEl.className = 'result errbox';
-      heartbeatResultEl.textContent = 'Response heartbeat tidak sesuai.';
-    }
-  };
+  handoffResultEl.className = 'result okbox';
+  handoffResultEl.innerHTML =
+    '<strong>✓ SERVER HANDOFF RECEIVED</strong><br>' +
+    'Email: ' + escapeHtml(payload.email || '-') + '<br>' +
+    'Nama: ' + escapeHtml(payload.name || '-') + '<br>' +
+    'Version: ' + escapeHtml(payload.v || '-') + '<br>' +
+    '<small>Proof disimpan sementara di session browser. Step 3C akan meminta server memvalidasi proof ini sebelum akses dilanjutkan.</small>';
 
-  script.async = true;
-  script.onerror = function(){
-    if (finished) return;
-    finished = true;
-    clearTimeout(timer);
-    cleanup();
-    heartbeatResultEl.className = 'result errbox';
-    heartbeatResultEl.textContent = 'Gagal memuat heartbeat server.';
-  };
-
-  script.src =
-    bridgeUrl +
-    '?api=heartbeat&callback=' +
-    encodeURIComponent(cbName) +
-    '&_=' + Date.now();
-
-  document.head.appendChild(script);
+  // Hapus proof dari address bar setelah dibaca.
+  history.replaceState(null, '', location.pathname + location.search);
 }
+
+processServerHandoff();
 
 function decodeJwtPayload(token) {
   try {
     const parts = String(token || '').split('.');
     if (parts.length !== 3) return null;
-    let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4) b64 += '=';
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(base64UrlDecodeUtf8(parts[1]) || '{}');
   } catch (e) {
     return null;
   }
@@ -135,20 +114,16 @@ window.handleGoogleCredential = function(response) {
   }
 
   currentGoogleCredential = credential;
-
-  const email = String(claims.email || '');
-  const name = String(claims.name || '');
+  verifyBtn.disabled = false;
 
   loginEl.textContent = 'LOGIN OK';
   loginEl.className = 'ok';
-  verifyBtn.disabled = false;
 
   loginResultEl.className = 'result okbox';
   loginResultEl.innerHTML =
     '<strong>✓ LOGIN OK</strong><br>' +
-    'Nama: ' + escapeHtml(name || '-') + '<br>' +
-    'Email: ' + escapeHtml(email || '-') + '<br>' +
-    '<small>Login Step 1 tetap PASS.</small>';
+    'Nama: ' + escapeHtml(claims.name || '-') + '<br>' +
+    'Email: ' + escapeHtml(claims.email || '-');
 };
 
 verifyBtn.addEventListener('click', function(){

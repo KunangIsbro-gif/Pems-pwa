@@ -1,11 +1,11 @@
 
-const CACHE_NAME = 'pems-v14c-b2a-step3a-v1';
+const CACHE_NAME = 'pems-v14c-b2a-step3b-v1';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=b2a-step3a',
-  './app.js?v=b2a-step3a',
-  './manifest.json?v=b2a-step3a'
+  './styles.css?v=b2a-step3b',
+  './app.js?v=b2a-step3b',
+  './manifest.json?v=b2a-step3b'
 ];
 
 self.addEventListener('install', event => {
@@ -26,7 +26,6 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(event.request.url);
 
-  // Google Sign-In dan Apps Script heartbeat selalu network.
   if (
     url.hostname.includes('accounts.google.com') ||
     url.hostname.includes('gstatic.com') ||
