@@ -1,9 +1,9 @@
-const CACHE_NAME = 'pems-v14c-b2a-fix1-shell-v2';
+const CACHE_NAME = 'pems-v14c-b2a-fix2-shell-v3';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=v14c-b2a-fix1',
-  './app.js?v=v14c-b2a-fix1',
+  './styles.css?v=v14c-b2a-fix2',
+  './app.js?v=v14c-b2a-fix2',
   './manifest.json'
 ];
 
@@ -18,9 +18,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      ))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });

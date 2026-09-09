@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f3b66">
-  <title>PEMS V14C-B2A FIX1 Secure Login POC</title>
+  <title>PEMS V14C-B2A FIX2 Secure Login POC</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=v14c-b2a-fix1">
+  <link rel="stylesheet" href="./styles.css?v=v14c-b2a-fix2">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main class="shell">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A FIX1</div>
+      <div class="badge">PEMS V14C-B2A FIX2</div>
       <h1>Secure Login POC</h1>
       <p class="lead">Target test: login Google berhasil, ID token diverifikasi di Apps Script Bridge, dan hanya akun yang diizinkan mendapat <b>ACCESS GRANTED</b>.</p>
 
@@ -51,11 +51,11 @@
         <b>PASS</b> bila muncul <b>ACCESS GRANTED</b>, email user yang benar, dan tulisan <b>SERVER VERIFIED</b>.
       </div>
 
-      <!-- Target form POST cross-origin. Token tidak ditaruh di URL. -->
-      <iframe id="authPostFrame" name="pemsAuthPostFrame" title="PEMS Auth Result" class="hidden-frame" aria-hidden="true"></iframe>
+      <!-- POST membawa token ke Bridge tanpa menaruh token di URL. -->
+      <iframe id="authPostFrame" name="pemsAuthPostFrame" title="PEMS Auth Submit" class="hidden-frame" aria-hidden="true"></iframe>
     </section>
   </main>
 
-  <script src="./app.js?v=v14c-b2a-fix1"></script>
+  <script src="./app.js?v=v14c-b2a-fix2"></script>
 </body>
 </html>

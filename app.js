@@ -13,8 +13,7 @@ const authResult = document.getElementById('authResult');
 
 let authBridgeReady = false;
 let googleButtonRendered = false;
-let activeVerifyRequestId = '';
-let verifyTimer = null;
+let authPollGeneration = 0;
 let bridgeProbeScript = null;
 let bridgeProbeCallbackName = '';
 
@@ -43,9 +42,7 @@ function normalizeBackendUrl(value) {
 }
 
 function cleanupBridgeProbe() {
-  if (bridgeProbeScript && bridgeProbeScript.parentNode) {
-    bridgeProbeScript.parentNode.removeChild(bridgeProbeScript);
-  }
+  if (bridgeProbeScript && bridgeProbeScript.parentNode) bridgeProbeScript.parentNode.removeChild(bridgeProbeScript);
   bridgeProbeScript = null;
   if (bridgeProbeCallbackName && window[bridgeProbeCallbackName]) {
     try { delete window[bridgeProbeCallbackName]; } catch (e) { window[bridgeProbeCallbackName] = undefined; }
@@ -53,7 +50,47 @@ function cleanupBridgeProbe() {
   bridgeProbeCallbackName = '';
 }
 
-function checkAuthBridgeReady() {
+function jsonpRequest(url, params, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const callbackName = '__pemsJsonp_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    let settled = false;
+
+    const cleanup = () => {
+      if (script.parentNode) script.parentNode.removeChild(script);
+      try { delete window[callbackName]; } catch (e) { window[callbackName] = undefined; }
+    };
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('Timeout endpoint Bridge.'));
+    }, timeoutMs);
+
+    window[callbackName] = (data) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      resolve(data || {});
+    };
+
+    const qs = new URLSearchParams({ ...params, callback: callbackName, t: String(Date.now()) });
+    script.src = url + '?' + qs.toString();
+    script.async = true;
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      reject(new Error('Gagal memuat endpoint Bridge.'));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+async function checkAuthBridgeReady() {
   const url = normalizeBackendUrl(backendUrlInput.value || localStorage.getItem(BACKEND_KEY));
   authBridgeReady = false;
 
@@ -66,45 +103,21 @@ function checkAuthBridgeReady() {
   authBridgeStatus.textContent = 'MENGHUBUNGKAN…';
   authBridgeStatus.className = 'value warn';
 
-  cleanupBridgeProbe();
-  const callbackName = '__pemsBridgeReady_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-  bridgeProbeCallbackName = callbackName;
-
-  const timeout = setTimeout(() => {
-    if (bridgeProbeCallbackName !== callbackName) return;
-    cleanupBridgeProbe();
-    authBridgeReady = false;
-    authBridgeStatus.textContent = 'GAGAL';
-    authBridgeStatus.className = 'value bad';
-    authResult.innerHTML = '<div class="error-card">Auth Bridge tidak menjawab. Cek deployment / URL bridge.</div>';
-  }, 10000);
-
-  window[callbackName] = (data) => {
-    clearTimeout(timeout);
+  try {
+    const data = await jsonpRequest(url, { api: 'bridge' }, 10000);
     const ok = !!(data && data.success === true);
     authBridgeReady = ok;
     authBridgeStatus.textContent = ok ? 'READY' : 'GAGAL';
     authBridgeStatus.className = 'value ' + (ok ? 'ok' : 'bad');
-    if (ok) {
-      authResult.innerHTML = '<span class="ok">Auth Bridge READY • ' + escapeHtml(data.version || '-') + '</span>';
-    } else {
-      authResult.innerHTML = '<div class="error-card">Bridge merespons tetapi status tidak valid.</div>';
-    }
-    cleanupBridgeProbe();
-  };
-
-  bridgeProbeScript = document.createElement('script');
-  bridgeProbeScript.src = url + '?api=bridge&callback=' + encodeURIComponent(callbackName) + '&t=' + Date.now();
-  bridgeProbeScript.async = true;
-  bridgeProbeScript.onerror = () => {
-    clearTimeout(timeout);
-    cleanupBridgeProbe();
+    authResult.innerHTML = ok
+      ? '<span class="ok">Auth Bridge READY • ' + escapeHtml(data.version || '-') + '</span>'
+      : '<div class="error-card">Bridge merespons tetapi status tidak valid.</div>';
+  } catch (error) {
     authBridgeReady = false;
     authBridgeStatus.textContent = 'GAGAL';
     authBridgeStatus.className = 'value bad';
-    authResult.innerHTML = '<div class="error-card">Gagal memuat endpoint Auth Bridge.</div>';
-  };
-  document.head.appendChild(bridgeProbeScript);
+    authResult.innerHTML = '<div class="error-card">' + escapeHtml(error.message || error) + '</div>';
+  }
 }
 
 const savedBackend = localStorage.getItem(BACKEND_KEY) || '';
@@ -162,6 +175,16 @@ async function initGoogleLogin() {
   }
 }
 
+function makeRequestId() {
+  if (window.crypto && typeof crypto.randomUUID === 'function') {
+    return 'AUTH-' + crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(24);
+  if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return 'AUTH-' + Array.from(bytes).map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
 function submitCredentialToBridge(credential, requestId) {
   const url = normalizeBackendUrl(backendUrlInput.value || localStorage.getItem(BACKEND_KEY));
   if (!url) throw new Error('URL Auth Bridge belum tersedia.');
@@ -172,12 +195,7 @@ function submitCredentialToBridge(credential, requestId) {
   form.target = 'pemsAuthPostFrame';
   form.style.display = 'none';
 
-  const fields = {
-    action: 'verify_google',
-    requestId: requestId,
-    credential: credential
-  };
-
+  const fields = { action: 'verify_google', requestId, credential };
   Object.keys(fields).forEach((name) => {
     const input = document.createElement('input');
     input.type = 'hidden';
@@ -191,51 +209,34 @@ function submitCredentialToBridge(credential, requestId) {
   setTimeout(() => form.remove(), 1000);
 }
 
-function handleGoogleCredential(response) {
-  const credential = response && response.credential ? String(response.credential) : '';
-  if (!credential) {
-    authResult.innerHTML = '<div class="error-card">Google tidak mengirim ID token.</div>';
-    return;
-  }
-  if (!authBridgeReady) {
-    authResult.innerHTML = '<div class="error-card">Auth Bridge belum READY. Klik SIMPAN URL BRIDGE lalu tunggu status READY.</div>';
-    return;
+async function pollAuthResult(url, requestId, generation) {
+  const deadline = Date.now() + 25000;
+  let attempt = 0;
+
+  while (Date.now() < deadline && generation === authPollGeneration) {
+    attempt++;
+    try {
+      const data = await jsonpRequest(url, { api: 'auth_status', requestId }, 7000);
+      if (generation !== authPollGeneration) return;
+
+      if (data && data.success === true && data.pending === false && data.result) {
+        renderVerifyResult(data.result);
+        return;
+      }
+    } catch (e) {
+      // transient error: lanjut polling sampai deadline
+    }
+
+    authResult.innerHTML = '<span class="warn">Login Google berhasil. Memverifikasi token di server… (' + attempt + ')</span>';
+    await new Promise(resolve => setTimeout(resolve, 900));
   }
 
-  activeVerifyRequestId = 'AUTH-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-  authResult.innerHTML = '<span class="warn">Login Google berhasil. Memverifikasi token di server…</span>';
-
-  clearTimeout(verifyTimer);
-  verifyTimer = setTimeout(() => {
-    if (!activeVerifyRequestId) return;
-    activeVerifyRequestId = '';
+  if (generation === authPollGeneration) {
     authResult.innerHTML = '<div class="error-card">Timeout saat verifikasi server.</div>';
-  }, 20000);
-
-  try {
-    submitCredentialToBridge(credential, activeVerifyRequestId);
-  } catch (error) {
-    clearTimeout(verifyTimer);
-    activeVerifyRequestId = '';
-    authResult.innerHTML = '<div class="error-card">' + escapeHtml(error.message || error) + '</div>';
   }
 }
 
-function isAllowedBridgeMessageOrigin(origin) {
-  return origin === 'https://script.google.com' ||
-    /^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/i.test(String(origin || ''));
-}
-
-window.addEventListener('message', (event) => {
-  if (!isAllowedBridgeMessageOrigin(event.origin)) return;
-  const data = event.data || {};
-  if (data.type !== 'PEMS_AUTH_VERIFY_RESULT') return;
-  if (!activeVerifyRequestId || data.requestId !== activeVerifyRequestId) return;
-
-  clearTimeout(verifyTimer);
-  activeVerifyRequestId = '';
-
-  const result = data.result || {};
+function renderVerifyResult(result) {
   if (result.success === true && result.authorized === true && result.user) {
     const safeUser = {
       email: String(result.user.email || ''),
@@ -258,9 +259,40 @@ window.addEventListener('message', (event) => {
     authResult.innerHTML = '<div class="error-card"><b>✗ ACCESS DENIED</b><br>' + escapeHtml(result.message || 'Akun tidak diizinkan / token tidak valid.') + '</div>';
     logoutBtn.hidden = true;
   }
-});
+}
+
+function handleGoogleCredential(response) {
+  const credential = response && response.credential ? String(response.credential) : '';
+  if (!credential) {
+    authResult.innerHTML = '<div class="error-card">Google tidak mengirim ID token.</div>';
+    return;
+  }
+  if (!authBridgeReady) {
+    authResult.innerHTML = '<div class="error-card">Auth Bridge belum READY. Klik SIMPAN URL BRIDGE lalu tunggu status READY.</div>';
+    return;
+  }
+
+  const url = normalizeBackendUrl(backendUrlInput.value || localStorage.getItem(BACKEND_KEY));
+  const requestId = makeRequestId();
+  authPollGeneration++;
+  const generation = authPollGeneration;
+
+  authResult.innerHTML = '<span class="warn">Login Google berhasil. Mengirim token ke server…</span>';
+
+  try {
+    submitCredentialToBridge(credential, requestId);
+    setTimeout(() => {
+      if (generation !== authPollGeneration) return;
+      authResult.innerHTML = '<span class="warn">Login Google berhasil. Memverifikasi token di server…</span>';
+      pollAuthResult(url, requestId, generation);
+    }, 500);
+  } catch (error) {
+    authResult.innerHTML = '<div class="error-card">' + escapeHtml(error.message || error) + '</div>';
+  }
+}
 
 logoutBtn.addEventListener('click', () => {
+  authPollGeneration++;
   localStorage.removeItem(AUTH_USER_KEY);
   try { if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect(); } catch (e) {}
   authResult.textContent = 'Logout POC selesai. Token tidak disimpan di browser.';
@@ -278,7 +310,7 @@ if (lastUserRaw) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix1')
+  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix2')
     .then(async (registration) => {
       swStatus.textContent = 'REGISTERED';
       swStatus.className = 'value ok';
