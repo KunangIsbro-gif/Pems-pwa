@@ -76,8 +76,18 @@ function jsonpRequest(url, params, timeoutMs = 8000) {
       resolve(data || {});
     };
 
-    const qs = new URLSearchParams({ ...params, callback: callbackName, t: String(Date.now()) });
-    script.src = url + '?' + qs.toString();
+    // FIX2.1: bangun query secara eksplisit seperti mekanisme FIX1
+    // yang sudah terbukti READY di browser user. Hindari URLSearchParams
+    // pada JSONP Apps Script untuk mengeliminasi jalur encoding yang bermasalah.
+    const pairs = [];
+    Object.keys(params || {}).forEach((key) => {
+      if (params[key] === undefined || params[key] === null) return;
+      pairs.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(params[key])));
+    });
+    pairs.push('callback=' + encodeURIComponent(callbackName));
+    pairs.push('t=' + Date.now());
+
+    script.src = url + '?' + pairs.join('&');
     script.async = true;
     script.onerror = () => {
       if (settled) return;
@@ -310,7 +320,7 @@ if (lastUserRaw) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix2')
+  navigator.serviceWorker.register('./service-worker.js?v=v14c-b2a-fix21')
     .then(async (registration) => {
       swStatus.textContent = 'REGISTERED';
       swStatus.className = 'value ok';
