@@ -4,19 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 1</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step1">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step1">
+  <title>PEMS V14C-B2A Step 2B</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step2b">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step2b">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 1</div>
-      <h1>Google Login Only</h1>
+      <div class="badge">PEMS V14C-B2A STEP 2B</div>
+      <h1>Server Verification Test</h1>
       <p class="lead">
-        Target tahap ini cuma satu: tombol Google berhasil login di GitHub Pages.
-        Belum ada Apps Script Bridge dan belum ada akses data project.
+        Target tahap ini cuma satu: login Google yang sudah PASS dikirim ke Apps Script
+        lewat POST, lalu server menampilkan SERVER VERIFIED.
       </p>
 
       <div class="status-grid">
@@ -26,7 +26,7 @@
       </div>
 
       <section class="panel">
-        <h2>Login PEMS</h2>
+        <h2>1. Login Google</h2>
         <p>Gunakan akun Google yang sudah dimasukkan sebagai Test User.</p>
         <div id="g_id_onload"
           data-client_id="1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com"
@@ -41,15 +41,29 @@
           data-logo_alignment="left"></div>
       </section>
 
-      <section id="result" class="result muted">Belum login.</section>
+      <section id="loginResult" class="result muted">Belum login.</section>
+
+      <section class="panel">
+        <h2>2. Verifikasi di Server</h2>
+        <p>
+          Token dikirim ke Apps Script lewat <b>POST</b>. Token tidak masuk URL.
+          Hasil server akan dibuka di tab baru.
+        </p>
+        <button id="verifyBtn" class="primary-btn" type="button" disabled>
+          VERIFIKASI SERVER
+        </button>
+      </section>
 
       <div class="passbox">
-        <strong>PASS</strong> bila setelah klik Login dengan Google muncul
-        <strong>LOGIN OK</strong> dan email akun yang benar.
+        <strong>PASS</strong> bila tab baru menampilkan
+        <strong>✓ SERVER VERIFIED</strong>, email yang benar, dan Authorized: YES.
       </div>
     </section>
   </main>
 
-  <script src="./app.js?v=b2a-step1"></script>
+  <script>
+    window.PEMS_STEP2B_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
+  </script>
+  <script src="./app.js?v=b2a-step2b"></script>
 </body>
 </html>
