@@ -4,19 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 3B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step3b">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step3b">
+  <title>PEMS V14C-B2A Step 3C</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step3c">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step3c">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 3B</div>
-      <h1>Server Verified Handoff</h1>
+      <div class="badge">PEMS V14C-B2A STEP 3C</div>
+      <h1>Server Session Validation</h1>
       <p class="lead">
-        Target tahap ini cuma satu: setelah SERVER VERIFIED, tombol KEMBALI KE PEMS
-        membawa proof sesi kembali ke aplikasi.
+        Target tahap ini cuma satu: proof yang diterima PEMS divalidasi ulang di server.
+        Server memeriksa signature, expiry, versi, dan allowlist email.
       </p>
 
       <div class="status-grid">
@@ -29,13 +29,13 @@
           <strong id="loginStatus">BELUM LOGIN</strong>
         </div>
         <div class="status-card">
-          <span>SERVER HANDOFF</span>
-          <strong id="handoffStatus">BELUM ADA</strong>
+          <span>SERVER PROOF</span>
+          <strong id="proofStatus">BELUM ADA</strong>
         </div>
       </div>
 
-      <section id="handoffResult" class="result muted">
-        Belum ada proof dari server.
+      <section id="proofResult" class="result muted">
+        Belum ada proof Step 3C.
       </section>
 
       <section class="panel">
@@ -57,21 +57,30 @@
       <section id="loginResult" class="result muted">Belum login.</section>
 
       <section class="panel">
-        <h2>2. Verifikasi Server</h2>
+        <h2>2. Verifikasi Google di Server</h2>
         <p>
-          Token Google dikirim ke Apps Script lewat POST. Setelah SERVER VERIFIED,
-          klik <b>KEMBALI KE PEMS</b> di tab server.
+          Token Google dikirim ke Apps Script lewat POST.
+          Setelah <b>SERVER VERIFIED</b>, klik <b>KEMBALI KE PEMS</b>.
         </p>
         <button id="verifyBtn" class="primary-btn" type="button" disabled>
-          VERIFIKASI SERVER
+          VERIFIKASI GOOGLE DI SERVER
+        </button>
+      </section>
+
+      <section class="panel">
+        <h2>3. Validasi Proof di Server</h2>
+        <p>
+          Tombol ini aktif setelah proof Step 3C diterima.
+          Proof akan dicek ulang sepenuhnya oleh server.
+        </p>
+        <button id="validateBtn" class="primary-btn" type="button" disabled>
+          VALIDASI SESSION
         </button>
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 3B</strong> bila setelah klik
-        <strong>KEMBALI KE PEMS</strong>, status
-        <strong>SERVER HANDOFF</strong> menjadi <strong>RECEIVED</strong>
-        dan email yang benar tampil.
+        <strong>PASS STEP 3C</strong> bila tab server menampilkan
+        <strong>✓ SESSION VALID</strong>, email benar, dan <strong>Authorized: YES</strong>.
       </div>
     </section>
   </main>
@@ -79,6 +88,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step3b"></script>
+  <script src="./app.js?v=b2a-step3c"></script>
 </body>
 </html>

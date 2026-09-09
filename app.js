@@ -1,12 +1,15 @@
 
 const browserEl = document.getElementById('browserStatus');
 const loginEl = document.getElementById('loginStatus');
-const handoffEl = document.getElementById('handoffStatus');
-const handoffResultEl = document.getElementById('handoffResult');
+const proofEl = document.getElementById('proofStatus');
+const proofResultEl = document.getElementById('proofResult');
 const loginResultEl = document.getElementById('loginResult');
 const verifyBtn = document.getElementById('verifyBtn');
+const validateBtn = document.getElementById('validateBtn');
 
+const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
 let currentGoogleCredential = '';
+let currentServerProof = '';
 
 function setConnectivity(){
   const online = navigator.onLine;
@@ -28,63 +31,72 @@ function base64UrlDecodeUtf8(value){
   }
 }
 
-function processServerHandoff(){
-  const hash = String(location.hash || '');
-  const prefix = '#pems_auth=';
-  if (!hash.startsWith(prefix)) return;
-
-  const token = decodeURIComponent(hash.slice(prefix.length));
-  const parts = token.split('.');
-
-  // Proof disimpan opaque untuk Step 3C. Frontend hanya membaca payload untuk UI.
-  // Keputusan akses data tidak boleh bergantung pada parsing client ini.
-  if (parts.length !== 2) {
-    handoffEl.textContent = 'INVALID';
-    handoffEl.className = 'bad';
-    handoffResultEl.className = 'result errbox';
-    handoffResultEl.textContent = 'Format handoff tidak valid.';
-    history.replaceState(null, '', location.pathname + location.search);
-    return;
-  }
-
-  let payload;
+function readProofPayload(proof){
   try {
-    payload = JSON.parse(base64UrlDecodeUtf8(parts[0]) || '{}');
+    const parts = String(proof || '').split('.');
+    if (parts.length !== 2) return null;
+    return JSON.parse(base64UrlDecodeUtf8(parts[0]) || '{}');
   } catch (e) {
-    payload = null;
+    return null;
   }
+}
 
+function acceptProof(proof){
+  const payload = readProofPayload(proof);
   const nowSec = Math.floor(Date.now() / 1000);
+
   const validShape =
     payload &&
-    payload.v === 'V14C-B2A-STEP3B' &&
+    payload.v === 'V14C-B2A-STEP3C' &&
     typeof payload.email === 'string' &&
     Number(payload.exp || 0) > nowSec;
 
   if (!validShape) {
-    handoffEl.textContent = 'INVALID / EXPIRED';
-    handoffEl.className = 'bad';
-    handoffResultEl.className = 'result errbox';
-    handoffResultEl.textContent = 'Proof tidak valid atau sudah kedaluwarsa.';
+    sessionStorage.removeItem(PROOF_KEY);
+    currentServerProof = '';
+    proofEl.textContent = 'INVALID / EXPIRED';
+    proofEl.className = 'bad';
+    proofResultEl.className = 'result errbox';
+    proofResultEl.textContent = 'Proof Step 3C tidak valid atau sudah kedaluwarsa.';
+    validateBtn.disabled = true;
+    return false;
+  }
+
+  currentServerProof = proof;
+  sessionStorage.setItem(PROOF_KEY, proof);
+
+  proofEl.textContent = 'RECEIVED';
+  proofEl.className = 'ok';
+
+  proofResultEl.className = 'result okbox';
+  proofResultEl.innerHTML =
+    '<strong>✓ SERVER PROOF RECEIVED</strong><br>' +
+    'Email: ' + escapeHtml(payload.email || '-') + '<br>' +
+    'Nama: ' + escapeHtml(payload.name || '-') + '<br>' +
+    'Version: ' + escapeHtml(payload.v || '-') + '<br>' +
+    '<small>Status ini belum dianggap SESSION VALID sampai proof dicek ulang oleh server.</small>';
+
+  validateBtn.disabled = false;
+  return true;
+}
+
+function processServerHandoff(){
+  const hash = String(location.hash || '');
+  const prefix = '#pems_auth=';
+
+  if (hash.startsWith(prefix)) {
+    const proof = decodeURIComponent(hash.slice(prefix.length));
+    acceptProof(proof);
+
+    // Hapus proof dari address bar setelah dibaca.
     history.replaceState(null, '', location.pathname + location.search);
     return;
   }
 
-  sessionStorage.setItem('PEMS_SERVER_PROOF_STEP3B', token);
-
-  handoffEl.textContent = 'RECEIVED';
-  handoffEl.className = 'ok';
-
-  handoffResultEl.className = 'result okbox';
-  handoffResultEl.innerHTML =
-    '<strong>✓ SERVER HANDOFF RECEIVED</strong><br>' +
-    'Email: ' + escapeHtml(payload.email || '-') + '<br>' +
-    'Nama: ' + escapeHtml(payload.name || '-') + '<br>' +
-    'Version: ' + escapeHtml(payload.v || '-') + '<br>' +
-    '<small>Proof disimpan sementara di session browser. Step 3C akan meminta server memvalidasi proof ini sebelum akses dilanjutkan.</small>';
-
-  // Hapus proof dari address bar setelah dibaca.
-  history.replaceState(null, '', location.pathname + location.search);
+  const stored = sessionStorage.getItem(PROOF_KEY);
+  if (stored) {
+    acceptProof(stored);
+  }
 }
 
 processServerHandoff();
@@ -132,7 +144,31 @@ verifyBtn.addEventListener('click', function(){
     return;
   }
 
+  submitHiddenPost({
+    action: 'verify_google',
+    credential: currentGoogleCredential
+  });
+});
+
+validateBtn.addEventListener('click', function(){
+  if (!currentServerProof) {
+    alert('Proof Step 3C belum ada.');
+    return;
+  }
+
+  submitHiddenPost({
+    action: 'validate_proof',
+    proof: currentServerProof
+  });
+});
+
+function submitHiddenPost(fields){
   const bridgeUrl = String(window.PEMS_BRIDGE_URL || '').trim();
+
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(bridgeUrl)) {
+    alert('URL Apps Script Bridge tidak valid.');
+    return;
+  }
 
   const form = document.createElement('form');
   form.method = 'POST';
@@ -140,22 +176,18 @@ verifyBtn.addEventListener('click', function(){
   form.target = '_blank';
   form.style.display = 'none';
 
-  const actionInput = document.createElement('input');
-  actionInput.type = 'hidden';
-  actionInput.name = 'action';
-  actionInput.value = 'verify_google';
+  Object.keys(fields || {}).forEach(function(key){
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = key;
+    input.value = String(fields[key] || '');
+    form.appendChild(input);
+  });
 
-  const credentialInput = document.createElement('input');
-  credentialInput.type = 'hidden';
-  credentialInput.name = 'credential';
-  credentialInput.value = currentGoogleCredential;
-
-  form.appendChild(actionInput);
-  form.appendChild(credentialInput);
   document.body.appendChild(form);
   form.submit();
   form.remove();
-});
+}
 
 function escapeHtml(value){
   return String(value || '').replace(/[&<>"']/g, ch => ({
