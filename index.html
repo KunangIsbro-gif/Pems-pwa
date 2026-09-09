@@ -4,19 +4,42 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 4A</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step4a">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step4a">
+  <title>PEMS V14C-B2A Step 4B</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step4b">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step4b">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    .project-list { display:grid; gap:12px; margin-top:14px; }
+    .project-card {
+      border:1px solid #d6e2ee; border-radius:14px; padding:16px;
+      background:#fff;
+    }
+    .project-card.selected {
+      outline:2px solid #0f4c81;
+      background:#f5f9fd;
+    }
+    .project-id { font-weight:800; font-size:16px; color:#0f2740; }
+    .project-name { margin-top:6px; font-weight:700; }
+    .project-meta { margin-top:8px; font-size:13px; line-height:1.55; color:#475569; }
+    .project-actions { margin-top:12px; }
+    .select-btn {
+      border:0; border-radius:9px; padding:10px 14px; cursor:pointer;
+      font-weight:700; background:#0f4c81; color:white;
+    }
+    .selected-banner {
+      margin-top:12px; border:1px solid #0f4c81; border-radius:12px;
+      padding:12px; background:#eef6fd;
+    }
+  </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 4A</div>
-      <h1>Read Project Data</h1>
+      <div class="badge">PEMS V14C-B2A STEP 4B</div>
+      <h1>Project Data di PEMS</h1>
       <p class="lead">
-        Target tahap ini satu saja: session yang valid dipakai untuk membaca
-        <b>01_PROJECTS</b> secara <b>READ ONLY</b>.
+        Target tahap ini: project dari <b>01_PROJECTS</b> kembali dan tampil
+        langsung di halaman PEMS.
       </p>
 
       <div class="status-grid">
@@ -25,22 +48,21 @@
           <strong id="browserStatus">...</strong>
         </div>
         <div class="status-card">
-          <span>LOGIN GOOGLE</span>
-          <strong id="loginStatus">BELUM LOGIN</strong>
-        </div>
-        <div class="status-card">
           <span>SERVER PROOF</span>
           <strong id="proofStatus">BELUM ADA</strong>
         </div>
+        <div class="status-card">
+          <span>PROJECT DATA</span>
+          <strong id="projectStatus">BELUM ADA</strong>
+        </div>
       </div>
 
-      <section id="proofResult" class="result muted">
-        Belum ada proof session.
+      <section id="projectResult" class="result muted">
+        Belum ada project dari server.
       </section>
 
       <section class="panel">
         <h2>1. Login Google</h2>
-        <p>Gunakan akun Google Test User yang sudah PASS.</p>
         <div id="g_id_onload"
           data-client_id="1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com"
           data-callback="handleGoogleCredential"
@@ -57,30 +79,31 @@
       <section id="loginResult" class="result muted">Belum login.</section>
 
       <section class="panel">
-        <h2>2. Verifikasi Google di Server</h2>
-        <p>
-          Setelah <b>SERVER VERIFIED</b>, klik <b>KEMBALI KE PEMS</b>.
-        </p>
+        <h2>2. Verifikasi Server</h2>
         <button id="verifyBtn" class="primary-btn" type="button" disabled>
           VERIFIKASI GOOGLE DI SERVER
         </button>
       </section>
 
       <section class="panel">
-        <h2>3. Baca Project</h2>
+        <h2>3. Ambil Project ke PEMS</h2>
         <p>
-          Tombol aktif setelah proof diterima. Server akan validasi proof dulu,
-          baru membaca sheet <b>01_PROJECTS</b>.
+          Server memvalidasi session dan membaca <b>01_PROJECTS</b> secara read-only.
         </p>
-        <button id="readProjectsBtn" class="primary-btn" type="button" disabled>
-          READ PROJECT DATA
+        <button id="loadProjectsBtn" class="primary-btn" type="button" disabled>
+          AMBIL PROJECT KE PEMS
         </button>
       </section>
 
+      <section id="projectsPanel" class="panel" hidden>
+        <h2>Project Aktif</h2>
+        <div id="selectedProjectBanner"></div>
+        <div id="projectList" class="project-list"></div>
+      </section>
+
       <div class="passbox">
-        <strong>PASS STEP 4A</strong> bila tab server menampilkan
-        <strong>✓ PROJECT READ OK</strong> dan daftar project dari
-        <strong>01_PROJECTS</strong>.
+        <strong>PASS STEP 4B</strong> bila project tampil di halaman ini dan
+        tombol <strong>PILIH PROJECT</strong> bisa menandai project yang dipilih.
       </div>
     </section>
   </main>
@@ -88,6 +111,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step4a"></script>
+  <script src="./app.js?v=b2a-step4b"></script>
 </body>
 </html>

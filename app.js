@@ -1,15 +1,22 @@
 
 const browserEl = document.getElementById('browserStatus');
-const loginEl = document.getElementById('loginStatus');
 const proofEl = document.getElementById('proofStatus');
-const proofResultEl = document.getElementById('proofResult');
+const projectStatusEl = document.getElementById('projectStatus');
+const projectResultEl = document.getElementById('projectResult');
 const loginResultEl = document.getElementById('loginResult');
 const verifyBtn = document.getElementById('verifyBtn');
-const readProjectsBtn = document.getElementById('readProjectsBtn');
+const loadProjectsBtn = document.getElementById('loadProjectsBtn');
+const projectsPanel = document.getElementById('projectsPanel');
+const projectListEl = document.getElementById('projectList');
+const selectedProjectBanner = document.getElementById('selectedProjectBanner');
 
 const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
+const PROJECTS_KEY = 'PEMS_PROJECTS_STEP4B';
+const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP4B';
+
 let currentGoogleCredential = '';
 let currentServerProof = '';
+let currentProjects = [];
 
 function setConnectivity(){
   const online = navigator.onLine;
@@ -31,9 +38,9 @@ function base64UrlDecodeUtf8(value){
   }
 }
 
-function readProofPayload(proof){
+function readSignedPayload(token){
   try {
-    const parts = String(proof || '').split('.');
+    const parts = String(token || '').split('.');
     if (parts.length !== 2) return null;
     return JSON.parse(base64UrlDecodeUtf8(parts[0]) || '{}');
   } catch (e) {
@@ -42,7 +49,7 @@ function readProofPayload(proof){
 }
 
 function acceptProof(proof){
-  const payload = readProofPayload(proof);
+  const payload = readSignedPayload(proof);
   const nowSec = Math.floor(Date.now() / 1000);
 
   const validShape =
@@ -56,46 +63,97 @@ function acceptProof(proof){
     currentServerProof = '';
     proofEl.textContent = 'INVALID / EXPIRED';
     proofEl.className = 'bad';
-    proofResultEl.className = 'result errbox';
-    proofResultEl.textContent = 'Proof session tidak valid atau sudah kedaluwarsa.';
-    readProjectsBtn.disabled = true;
+    loadProjectsBtn.disabled = true;
     return false;
   }
 
   currentServerProof = proof;
   sessionStorage.setItem(PROOF_KEY, proof);
-
   proofEl.textContent = 'RECEIVED';
   proofEl.className = 'ok';
-
-  proofResultEl.className = 'result okbox';
-  proofResultEl.innerHTML =
-    '<strong>✓ SERVER PROOF RECEIVED</strong><br>' +
-    'Email: ' + escapeHtml(payload.email || '-') + '<br>' +
-    'Nama: ' + escapeHtml(payload.name || '-') + '<br>' +
-    '<small>Server akan memvalidasi proof lagi sebelum membaca project.</small>';
-
-  readProjectsBtn.disabled = false;
+  loadProjectsBtn.disabled = false;
   return true;
 }
 
-function processServerHandoff(){
-  const hash = String(location.hash || '');
-  const prefix = '#pems_auth=';
+function acceptProjectBundle(bundle){
+  const payload = readSignedPayload(bundle);
+  const nowSec = Math.floor(Date.now() / 1000);
 
-  if (hash.startsWith(prefix)) {
-    const proof = decodeURIComponent(hash.slice(prefix.length));
+  const validShape =
+    payload &&
+    payload.v === 'V14C-B2A-STEP4B' &&
+    payload.kind === 'PROJECT_LIST' &&
+    Array.isArray(payload.projects) &&
+    Number(payload.exp || 0) > nowSec;
+
+  if (!validShape) {
+    projectStatusEl.textContent = 'INVALID';
+    projectStatusEl.className = 'bad';
+    projectResultEl.className = 'result errbox';
+    projectResultEl.textContent = 'Project bundle tidak valid / expired.';
+    return false;
+  }
+
+  currentProjects = payload.projects;
+  sessionStorage.setItem(PROJECTS_KEY, JSON.stringify(currentProjects));
+
+  projectStatusEl.textContent = 'LOADED';
+  projectStatusEl.className = 'ok';
+
+  projectResultEl.className = 'result okbox';
+  projectResultEl.innerHTML =
+    '<strong>✓ PROJECT DATA LOADED</strong><br>' +
+    'Total project ACTIVE: ' + escapeHtml(String(currentProjects.length)) + '<br>' +
+    'Email session: ' + escapeHtml(payload.email || '-');
+
+  renderProjects();
+  return true;
+}
+
+function processHashHandoffs(){
+  const hash = String(location.hash || '');
+
+  if (hash.startsWith('#pems_auth=')) {
+    const proof = decodeURIComponent(hash.slice('#pems_auth='.length));
     acceptProof(proof);
     history.replaceState(null, '', location.pathname + location.search);
     return;
   }
 
-  const stored = sessionStorage.getItem(PROOF_KEY);
-  if (stored) {
-    acceptProof(stored);
+  if (hash.startsWith('#pems_projects=')) {
+    const bundle = decodeURIComponent(hash.slice('#pems_projects='.length));
+    acceptProjectBundle(bundle);
+
+    const storedProof = sessionStorage.getItem(PROOF_KEY);
+    if (storedProof) {
+      acceptProof(storedProof);
+    }
+
+    history.replaceState(null, '', location.pathname + location.search);
   }
 }
-processServerHandoff();
+processHashHandoffs();
+
+if (!currentServerProof) {
+  const storedProof = sessionStorage.getItem(PROOF_KEY);
+  if (storedProof) acceptProof(storedProof);
+}
+
+if (currentProjects.length === 0) {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(PROJECTS_KEY) || '[]');
+    if (Array.isArray(cached) && cached.length) {
+      currentProjects = cached;
+      projectStatusEl.textContent = 'LOADED';
+      projectStatusEl.className = 'ok';
+      projectResultEl.className = 'result okbox';
+      projectResultEl.innerHTML =
+        '<strong>✓ PROJECT DATA LOADED</strong><br>' +
+        'Total project ACTIVE: ' + escapeHtml(String(currentProjects.length));
+      renderProjects();
+    }
+  } catch (e) {}
+}
 
 function decodeJwtPayload(token) {
   try {
@@ -114,18 +172,13 @@ window.handleGoogleCredential = function(response) {
   if (!credential || !claims) {
     currentGoogleCredential = '';
     verifyBtn.disabled = true;
-    loginEl.textContent = 'GAGAL';
-    loginEl.className = 'bad';
     loginResultEl.className = 'result errbox';
-    loginResultEl.textContent = 'Login Google tidak menghasilkan credential yang dapat dibaca.';
+    loginResultEl.textContent = 'Login Google gagal.';
     return;
   }
 
   currentGoogleCredential = credential;
   verifyBtn.disabled = false;
-
-  loginEl.textContent = 'LOGIN OK';
-  loginEl.className = 'ok';
 
   loginResultEl.className = 'result okbox';
   loginResultEl.innerHTML =
@@ -140,31 +193,85 @@ verifyBtn.addEventListener('click', function(){
     return;
   }
 
-  submitHiddenPost({
-    action: 'verify_google',
-    credential: currentGoogleCredential
-  });
+  submitHiddenPost(
+    {
+      action: 'verify_google',
+      credential: currentGoogleCredential
+    },
+    '_self'
+  );
 });
 
-readProjectsBtn.addEventListener('click', function(){
+loadProjectsBtn.addEventListener('click', function(){
   if (!currentServerProof) {
-    alert('Proof session belum ada / sudah expired. Login ulang dulu.');
+    alert('Session proof belum ada / sudah expired. Login ulang dulu.');
     return;
   }
 
-  submitHiddenPost({
-    action: 'read_projects',
-    proof: currentServerProof
-  });
+  submitHiddenPost(
+    {
+      action: 'read_projects_handoff',
+      proof: currentServerProof
+    },
+    '_self'
+  );
 });
 
-function submitHiddenPost(fields){
+function renderProjects(){
+  projectsPanel.hidden = false;
+  projectListEl.innerHTML = '';
+
+  const selectedId = sessionStorage.getItem(SELECTED_PROJECT_KEY) || '';
+
+  currentProjects.forEach(function(project){
+    const card = document.createElement('div');
+    card.className =
+      'project-card' +
+      (selectedId === project.projectId ? ' selected' : '');
+
+    card.innerHTML =
+      '<div class="project-id">' + escapeHtml(project.projectId || '-') + '</div>' +
+      '<div class="project-name">' + escapeHtml(project.projectName || '-') + '</div>' +
+      '<div class="project-meta">' +
+        '<b>Stakeholder:</b> ' + escapeHtml(project.stakeholder || '-') + '<br>' +
+        '<b>LOP / Ring:</b> ' + escapeHtml(project.lopRing || '-') + '<br>' +
+        '<b>Status:</b> ' + escapeHtml(project.statusProject || '-') +
+      '</div>' +
+      '<div class="project-actions">' +
+        '<button class="select-btn" type="button">PILIH PROJECT</button>' +
+      '</div>';
+
+    card.querySelector('.select-btn').addEventListener('click', function(){
+      sessionStorage.setItem(SELECTED_PROJECT_KEY, project.projectId || '');
+      renderProjects();
+      renderSelectedProject(project);
+    });
+
+    projectListEl.appendChild(card);
+  });
+
+  if (selectedId) {
+    const selected = currentProjects.find(p => p.projectId === selectedId);
+    if (selected) renderSelectedProject(selected);
+  }
+}
+
+function renderSelectedProject(project){
+  selectedProjectBanner.innerHTML =
+    '<div class="selected-banner">' +
+      '<strong>✓ PROJECT TERPILIH</strong><br>' +
+      escapeHtml(project.projectId || '-') + ' — ' +
+      escapeHtml(project.projectName || '-') +
+    '</div>';
+}
+
+function submitHiddenPost(fields, target){
   const bridgeUrl = String(window.PEMS_BRIDGE_URL || '').trim();
 
   const form = document.createElement('form');
   form.method = 'POST';
   form.action = bridgeUrl;
-  form.target = '_blank';
+  form.target = target || '_self';
   form.style.display = 'none';
 
   Object.keys(fields || {}).forEach(function(key){
