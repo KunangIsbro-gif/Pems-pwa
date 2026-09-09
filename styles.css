@@ -1,0 +1,71 @@
+:root {
+  font-family: Arial, Helvetica, sans-serif;
+  color: #0b2340;
+  background: #eef2f6;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: #eef2f6; }
+.shell { max-width: 760px; margin: 0 auto; padding: 32px 18px; }
+.card {
+  background: #fff;
+  border-radius: 18px;
+  padding: 26px;
+  box-shadow: 0 10px 30px rgba(15,59,102,.10);
+}
+.badge {
+  display: inline-block;
+  background: #eaf3fb;
+  color: #0f3b66;
+  border: 1px solid #c9dced;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+h1 { margin: 14px 0 8px; font-size: 28px; }
+.lead { color: #475569; line-height: 1.55; }
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 22px 0;
+}
+.status-box {
+  border: 1px solid #dbe3ec;
+  border-radius: 12px;
+  padding: 14px;
+  background: #f8fafc;
+}
+.label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
+.value { margin-top: 7px; font-weight: 800; }
+.ok { color: #166534; }
+.bad { color: #b91c1c; }
+.warn { color: #a16207; }
+.testbox {
+  margin: 16px 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+}
+#bootStamp { margin-top: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+button {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 13px;
+  background: #0f3b66;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+.saved { margin-top: 10px; font-size: 13px; color: #166534; }
+.note {
+  margin-top: 18px;
+  padding: 12px;
+  border-left: 4px solid #0f3b66;
+  background: #f8fafc;
+  color: #475569;
+  line-height: 1.5;
+}

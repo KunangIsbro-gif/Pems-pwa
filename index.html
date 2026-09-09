@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f3b66">
+  <title>PEMS V14C-A Offline Boot POC</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="card">
+      <div class="badge">PEMS V14C-A</div>
+      <h1>Offline Boot POC</h1>
+      <p class="lead">Target test: PEMS pernah dibuka online → tab ditutup → WiFi dimatikan → buka lagi → halaman tetap tampil dari cache.</p>
+
+      <div class="status-grid">
+        <div class="status-box">
+          <div class="label">Browser</div>
+          <div id="networkStatus" class="value">Memeriksa…</div>
+        </div>
+        <div class="status-box">
+          <div class="label">Service Worker</div>
+          <div id="swStatus" class="value">Memeriksa…</div>
+        </div>
+        <div class="status-box">
+          <div class="label">App Shell</div>
+          <div id="shellStatus" class="value">Belum siap</div>
+        </div>
+      </div>
+
+      <div class="testbox">
+        <strong>Penanda Boot</strong>
+        <div id="bootStamp">-</div>
+      </div>
+
+      <button id="saveBtn" type="button">SIMPAN TEST LOKAL</button>
+      <div id="savedResult" class="saved"></div>
+
+      <div class="note">
+        <b>PASS</b> bila halaman ini tetap terbuka saat WiFi mati total setelah sebelumnya pernah dibuka online.
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
