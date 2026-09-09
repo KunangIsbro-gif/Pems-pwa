@@ -4,19 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 2B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step2b">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step2b">
+  <title>PEMS V14C-B2A Step 3A</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step3a">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step3a">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 2B</div>
-      <h1>Server Verification Test</h1>
+      <div class="badge">PEMS V14C-B2A STEP 3A</div>
+      <h1>PWA ↔ Server Heartbeat</h1>
       <p class="lead">
-        Target tahap ini cuma satu: login Google yang sudah PASS dikirim ke Apps Script
-        lewat POST, lalu server menampilkan SERVER VERIFIED.
+        Target tahap ini cuma satu: GitHub PWA berhasil memanggil heartbeat Apps Script
+        dan menampilkan PWA SERVER CONNECTED. Login + verifikasi server Step 2 tetap dipertahankan.
       </p>
 
       <div class="status-grid">
@@ -24,6 +24,14 @@
         <div class="status-card"><span>SERVICE WORKER</span><strong id="swStatus">...</strong></div>
         <div class="status-card"><span>LOGIN</span><strong id="loginStatus">BELUM LOGIN</strong></div>
       </div>
+
+      <section class="panel">
+        <h2>0. Test Koneksi PWA ↔ Server</h2>
+        <p>Hanya heartbeat read-only. Belum membaca Project, Sheet, atau Drive.</p>
+        <button id="heartbeatBtn" class="primary-btn" type="button">TEST KONEKSI SERVER</button>
+      </section>
+
+      <section id="heartbeatResult" class="result muted">Belum dites.</section>
 
       <section class="panel">
         <h2>1. Login Google</h2>
@@ -45,25 +53,21 @@
 
       <section class="panel">
         <h2>2. Verifikasi di Server</h2>
-        <p>
-          Token dikirim ke Apps Script lewat <b>POST</b>. Token tidak masuk URL.
-          Hasil server akan dibuka di tab baru.
-        </p>
-        <button id="verifyBtn" class="primary-btn" type="button" disabled>
-          VERIFIKASI SERVER
-        </button>
+        <p>Step 2 tetap tersedia. Token dikirim lewat POST dan hasil dibuka di tab baru.</p>
+        <button id="verifyBtn" class="primary-btn" type="button" disabled>VERIFIKASI SERVER</button>
       </section>
 
       <div class="passbox">
-        <strong>PASS</strong> bila tab baru menampilkan
-        <strong>✓ SERVER VERIFIED</strong>, email yang benar, dan Authorized: YES.
+        <strong>PASS STEP 3A</strong> bila setelah klik
+        <strong>TEST KONEKSI SERVER</strong> muncul
+        <strong>✓ PWA SERVER CONNECTED</strong>.
       </div>
     </section>
   </main>
 
   <script>
-    window.PEMS_STEP2B_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
+    window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step2b"></script>
+  <script src="./app.js?v=b2a-step3a"></script>
 </body>
 </html>

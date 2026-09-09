@@ -4,6 +4,8 @@ const swEl = document.getElementById('swStatus');
 const loginEl = document.getElementById('loginStatus');
 const loginResultEl = document.getElementById('loginResult');
 const verifyBtn = document.getElementById('verifyBtn');
+const heartbeatBtn = document.getElementById('heartbeatBtn');
+const heartbeatResultEl = document.getElementById('heartbeatResult');
 
 let currentGoogleCredential = '';
 
@@ -23,7 +25,7 @@ setConnectivity();
     return;
   }
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=b2a-step2b', {scope:'./'});
+    await navigator.serviceWorker.register('./service-worker.js?v=b2a-step3a', {scope:'./'});
     swEl.textContent = 'REGISTERED';
     swEl.className = 'ok';
   } catch (err) {
@@ -31,6 +33,79 @@ setConnectivity();
     swEl.className = 'bad';
   }
 })();
+
+heartbeatBtn.addEventListener('click', function(){
+  testPemsHeartbeat();
+});
+
+function testPemsHeartbeat(){
+  const bridgeUrl = String(window.PEMS_BRIDGE_URL || '').trim();
+
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(bridgeUrl)) {
+    heartbeatResultEl.className = 'result errbox';
+    heartbeatResultEl.textContent = 'URL Apps Script Bridge tidak valid.';
+    return;
+  }
+
+  heartbeatBtn.disabled = true;
+  heartbeatResultEl.className = 'result muted';
+  heartbeatResultEl.textContent = 'Mengecek koneksi server...';
+
+  const cbName = '__pemsHeartbeat_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  let script = document.createElement('script');
+  let finished = false;
+
+  const cleanup = function(){
+    if (script && script.parentNode) script.parentNode.removeChild(script);
+    try { delete window[cbName]; } catch(e) { window[cbName] = undefined; }
+    heartbeatBtn.disabled = false;
+  };
+
+  const timer = setTimeout(function(){
+    if (finished) return;
+    finished = true;
+    cleanup();
+    heartbeatResultEl.className = 'result errbox';
+    heartbeatResultEl.textContent = 'Heartbeat timeout.';
+  }, 10000);
+
+  window[cbName] = function(payload){
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    cleanup();
+
+    if (payload && payload.success === true && payload.version === 'V14C-B2A-STEP3A') {
+      heartbeatResultEl.className = 'result okbox';
+      heartbeatResultEl.innerHTML =
+        '<strong>✓ PWA SERVER CONNECTED</strong><br>' +
+        'Version: ' + escapeHtml(payload.version || '-') + '<br>' +
+        'Bridge: ' + escapeHtml(payload.bridge || '-') + '<br>' +
+        'Server Time: ' + escapeHtml(payload.serverTime || '-');
+    } else {
+      heartbeatResultEl.className = 'result errbox';
+      heartbeatResultEl.textContent = 'Response heartbeat tidak sesuai.';
+    }
+  };
+
+  script.async = true;
+  script.onerror = function(){
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    cleanup();
+    heartbeatResultEl.className = 'result errbox';
+    heartbeatResultEl.textContent = 'Gagal memuat heartbeat server.';
+  };
+
+  script.src =
+    bridgeUrl +
+    '?api=heartbeat&callback=' +
+    encodeURIComponent(cbName) +
+    '&_=' + Date.now();
+
+  document.head.appendChild(script);
+}
 
 function decodeJwtPayload(token) {
   try {
@@ -73,7 +148,7 @@ window.handleGoogleCredential = function(response) {
     '<strong>✓ LOGIN OK</strong><br>' +
     'Nama: ' + escapeHtml(name || '-') + '<br>' +
     'Email: ' + escapeHtml(email || '-') + '<br>' +
-    '<small>Token disimpan sementara di memori halaman untuk Step 2B dan tidak ditampilkan.</small>';
+    '<small>Login Step 1 tetap PASS.</small>';
 };
 
 verifyBtn.addEventListener('click', function(){
@@ -82,11 +157,7 @@ verifyBtn.addEventListener('click', function(){
     return;
   }
 
-  const bridgeUrl = String(window.PEMS_STEP2B_BRIDGE_URL || '').trim();
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(bridgeUrl)) {
-    alert('URL Apps Script Bridge tidak valid.');
-    return;
-  }
+  const bridgeUrl = String(window.PEMS_BRIDGE_URL || '').trim();
 
   const form = document.createElement('form');
   form.method = 'POST';
