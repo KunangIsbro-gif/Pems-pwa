@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f3b66">
-  <title>PEMS V14C-A Offline Boot POC</title>
+  <title>PEMS V14C-B1 Backend Bridge</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <main class="shell">
     <section class="card">
-      <div class="badge">PEMS V14C-A</div>
-      <h1>Offline Boot POC</h1>
-      <p class="lead">Target test: PEMS pernah dibuka online → tab ditutup → WiFi dimatikan → buka lagi → halaman tetap tampil dari cache.</p>
+      <div class="badge">PEMS V14C-B1</div>
+      <h1>Backend Bridge POC</h1>
+      <p class="lead">Target test: PWA GitHub Pages dapat menghubungi backend Google Apps Script tanpa membuka data project dulu.</p>
 
       <div class="status-grid">
         <div class="status-box">
@@ -30,16 +30,18 @@
         </div>
       </div>
 
-      <div class="testbox">
-        <strong>Penanda Boot</strong>
-        <div id="bootStamp">-</div>
+      <div class="testbox backend-box">
+        <strong>Backend GAS Web App URL</strong>
+        <div class="helper">Paste URL deployment PEMS yang berakhiran <code>/exec</code>. URL disimpan hanya di browser ini, tidak ditulis ke repo GitHub.</div>
+        <input id="backendUrl" type="url" placeholder="https://script.google.com/macros/s/...../exec" autocomplete="off">
+        <button id="saveBackendBtn" type="button" class="secondary-btn">SIMPAN URL BACKEND</button>
       </div>
 
-      <button id="saveBtn" type="button">SIMPAN TEST LOKAL</button>
-      <div id="savedResult" class="saved"></div>
+      <button id="testBridgeBtn" type="button">TEST KONEKSI BACKEND</button>
+      <div id="bridgeResult" class="bridge-result">Belum dites.</div>
 
       <div class="note">
-        <b>PASS</b> bila halaman ini tetap terbuka saat WiFi mati total setelah sebelumnya pernah dibuka online.
+        <b>PASS</b> bila hasil test menampilkan <b>BACKEND CONNECTED</b> dan versi <b>V14C-B1</b>.
       </div>
     </section>
   </main>

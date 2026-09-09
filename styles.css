@@ -69,3 +69,20 @@ button {
   color: #475569;
   line-height: 1.5;
 }
+
+.backend-box { color: #0b2340; background: #f8fafc; border-color: #dbe3ec; }
+.helper { margin: 7px 0 10px; color: #64748b; font-size: 12px; line-height: 1.45; }
+.backend-box input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  background: #fff;
+}
+.secondary-btn { background: #475569; margin-bottom: 0; }
+.bridge-result { margin-top: 12px; font-size: 13px; line-height: 1.55; color: #475569; }
+.success-card { padding: 13px; border-radius: 10px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #166534; }
+.small { font-size: 11px; color: #475569; }
+button:disabled { opacity: .65; cursor: wait; }

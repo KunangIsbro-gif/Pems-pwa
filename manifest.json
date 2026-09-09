@@ -1,10 +1,10 @@
 {
-  "name": "PEMS V14C-A Offline Boot POC",
+  "name": "PEMS V14C-B1 Backend Bridge POC",
   "short_name": "PEMS",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#eef2f6",
   "theme_color": "#0f3b66",
-  "description": "Proof of concept untuk memastikan PEMS dapat dibuka kembali saat offline setelah app shell dicache."
+  "description": "POC bridge aman antara PEMS PWA GitHub Pages dan backend Google Apps Script."
 }

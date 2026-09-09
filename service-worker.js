@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v14c-a-shell-v1';
+const CACHE_NAME = 'pems-v14c-b1-shell-v1';
 const APP_SHELL = [
   './',
   './index.html',
