@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 8C</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step8c">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step8c">
+  <title>PEMS V14C-B2A Step 9A</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step9a">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step9a">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -74,15 +74,51 @@
       background:#0f4c81;
       color:white;
     }
+    .requirement-card {
+      border:1px solid #d6e2ee;
+      border-radius:12px;
+      padding:14px;
+      background:#fff;
+    }
+    .requirement-card.required {
+      border-left:5px solid #0f4c81;
+    }
+    .requirement-card.optional {
+      border-left:5px solid #94a3b8;
+    }
+    .requirement-card.selected {
+      outline:2px solid #0f4c81;
+      background:#f5f9fd;
+    }
+    .requirement-title {
+      font-weight:800;
+      color:#0f2740;
+    }
+    .requirement-meta {
+      margin-top:7px;
+      font-size:13px;
+      line-height:1.55;
+      color:#475569;
+    }
+    .requirement-tag {
+      display:inline-block;
+      margin-top:8px;
+      padding:4px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:800;
+      background:#eef6fd;
+      color:#0f4c81;
+    }
 </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 8C</div>
-      <h1>Sync Result di PEMS</h1>
+      <div class="badge">PEMS V14C-B2A STEP 9A</div>
+      <h1>Point Requirement Validation</h1>
       <p class="lead">
-        Target tahap ini: setelah sync sukses, hasil server kembali ke PEMS dan status lokal berubah menjadi <b>SYNCED</b>.
+        Target tahap ini: setelah <b>Point Session</b> dipilih, PEMS hanya mengizinkan material evidence yang memang termasuk requirement titik tersebut.
       </p>
 
       <div class="status-grid">
@@ -117,6 +153,10 @@
         <div class="status-card">
           <span>POINT SESSION</span>
           <strong id="pointSessionStatus">BELUM ADA</strong>
+        </div>
+        <div class="status-card">
+          <span>POINT REQUIREMENT</span>
+          <strong id="pointRequirementStatus">BELUM ADA</strong>
         </div>
         <div class="status-card">
           <span>SYNC SERVER</span>
@@ -181,7 +221,7 @@
       </section>
 
       <section id="materialsPanel" class="panel" hidden>
-        <h2>Material Project</h2>
+        <h2>Material Project (Cache Referensi)</h2>
         <div id="materialSummary" class="result okbox"></div>
         <div id="materialList" class="project-list"></div>
       </section>
@@ -248,6 +288,23 @@
       </section>
 
       <section class="panel">
+        <h2>Requirement Material Titik</h2>
+        <p>
+          Gunakan Point Session terpilih. Server membaca <b>06B_POINT_REQUIREMENTS</b>
+          secara read-only lalu hanya mengembalikan material yang valid untuk titik tersebut.
+        </p>
+        <button id="loadRequirementsBtn" class="primary-btn" type="button" disabled>
+          AMBIL REQUIREMENT TITIK
+        </button>
+      </section>
+
+      <section id="requirementsPanel" class="panel" hidden>
+        <h2>Material Valid untuk Evidence</h2>
+        <div id="requirementSummary" class="result okbox"></div>
+        <div id="requirementList" class="project-list"></div>
+      </section>
+
+      <section class="panel">
         <h2>Sync Evidence + Foto</h2>
         <p>
           <b>DEVICE MODE: DEVELOPMENT / LAPTOP</b><br>
@@ -269,9 +326,10 @@
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 8C</strong> bila setelah klik <strong>KEMBALI KE PEMS</strong>:
-        Evidence Draft berubah menjadi <strong>SYNCED</strong>, Photo Local berubah menjadi
-        <strong>SYNCED</strong>, dan Evidence Item ID + Photo ID server tampil di halaman PEMS.
+        <strong>PASS STEP 9A</strong> bila setelah Point Session dipilih dan requirement diambil:
+        <strong>POINT REQUIREMENT = LOADED</strong>, daftar material valid tampil,
+        lalu tombol <strong>PILIH MATERIAL EVIDENCE</strong> membuat Draft Evidence baru
+        dengan Project Material ID + Point Session ID yang sesuai.
       </div>
     </section>
   </main>
@@ -279,6 +337,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step8c"></script>
+  <script src="./app.js?v=b2a-step9a"></script>
 </body>
 </html>

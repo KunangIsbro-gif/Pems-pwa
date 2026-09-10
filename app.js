@@ -29,6 +29,11 @@ const pointSessionSummaryEl = document.getElementById('pointSessionSummary');
 const pointSessionListEl = document.getElementById('pointSessionList');
 const pointSessionSearchEl = document.getElementById('pointSessionSearch');
 const pointSessionRenderInfoEl = document.getElementById('pointSessionRenderInfo');
+const pointRequirementStatusEl = document.getElementById('pointRequirementStatus');
+const loadRequirementsBtn = document.getElementById('loadRequirementsBtn');
+const requirementsPanel = document.getElementById('requirementsPanel');
+const requirementSummaryEl = document.getElementById('requirementSummary');
+const requirementListEl = document.getElementById('requirementList');
 const syncServerStatusEl = document.getElementById('syncServerStatus');
 const syncEvidenceBtn = document.getElementById('syncEvidenceBtn');
 const syncGateResultEl = document.getElementById('syncGateResult');
@@ -44,6 +49,7 @@ const MATERIALS_KEY = 'PEMS_MATERIALS_STEP7D';
 const EVIDENCE_DRAFTS_KEY = 'PEMS_EVIDENCE_DRAFTS_STEP7D';
 const POINT_SESSIONS_KEY = 'PEMS_POINT_SESSIONS_STEP8B';
 const SELECTED_POINT_SESSION_KEY = 'PEMS_SELECTED_POINT_SESSION_STEP8B';
+const POINT_REQUIREMENTS_KEY = 'PEMS_POINT_REQUIREMENTS_STEP9A';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -52,6 +58,7 @@ let currentMaterials = [];
 let currentEvidenceDraft = null;
 let currentLocalPhoto = null;
 let currentPointSessions = [];
+let currentRequirements = [];
 
 const POINT_RENDER_LIMIT = 30;
 let pointSessionSearchTerm = '';
@@ -64,6 +71,18 @@ function getSelectedProjectId(){
   return localStorage.getItem(SELECTED_PROJECT_KEY) || '';
 }
 
+function getSelectedPointSessionId(){
+  return localStorage.getItem(SELECTED_POINT_SESSION_KEY) || '';
+}
+
+function getSelectedPointSession(){
+  const sessionId = getSelectedPointSessionId();
+
+  return currentPointSessions.find(function(item){
+    return String(item.sessionId || '') === sessionId;
+  }) || null;
+}
+
 function refreshMaterialButton(){
   const ready =
     !!currentServerProof &&
@@ -71,6 +90,12 @@ function refreshMaterialButton(){
 
   readMaterialsBtn.disabled = !ready;
   loadPointSessionsBtn.disabled = !ready;
+
+  const requirementReady =
+    ready &&
+    !!getSelectedPointSessionId();
+
+  loadRequirementsBtn.disabled = !requirementReady;
 }
 
 function setConnectivity(){
@@ -87,6 +112,14 @@ function setConnectivity(){
       renderMaterials(projectId);
     }
   }
+
+  if (currentRequirements.length > 0) {
+    pointRequirementStatusEl.textContent =
+      online ? 'CACHED' : 'CACHED OFFLINE';
+    pointRequirementStatusEl.className = 'ok';
+  }
+
+  refreshMaterialButton();
 
   if (typeof refreshSyncGate === 'function') {
     refreshSyncGate();
@@ -729,23 +762,13 @@ function renderMaterials(projectId){
       (navigator.onLine ? 'MATERIAL DATA READY' : 'MATERIAL CACHE READY') +
     '</strong><br>' +
     'Project: ' + escapeHtml(projectId || '-') + '<br>' +
-    'Total material: ' + escapeHtml(String(currentMaterials.length)) + '<br>' +
-    '<small>' +
-      (navigator.onLine
-        ? 'Material tersedia di cache lokal perangkat.'
-        : 'Material dibaca dari cache lokal perangkat.')
-    + '</small>';
+    'Total material project: ' + escapeHtml(String(currentMaterials.length)) + '<br>' +
+    '<small>Cache ini hanya referensi. Mulai STEP 9A, pemilihan material evidence dilakukan dari Requirement Material Titik.</small>';
 
   currentMaterials.forEach(function(item, index){
     const card = document.createElement('div');
 
-    const isDraftSelected =
-      currentEvidenceDraft &&
-      currentEvidenceDraft.projectMaterialId === item.projectMaterialId;
-
-    card.className =
-      'material-card' +
-      (isDraftSelected ? ' draft-selected' : '');
+    card.className = 'material-card';
 
     card.innerHTML =
       '<div class="material-title">' +
@@ -766,23 +789,11 @@ function renderMaterials(projectId){
           ' ' + escapeHtml(item.unit || '') + '<br>' +
         '<b>Project Material ID:</b> ' +
           escapeHtml(item.projectMaterialId || '-') +
-      '</div>' +
-      '<div class="material-actions">' +
-        '<button class="evidence-btn" type="button">' +
-          (isDraftSelected ? 'DRAFT TERPILIH' : 'BUAT DRAFT EVIDENCE') +
-        '</button>' +
       '</div>';
-
-    card
-      .querySelector('.evidence-btn')
-      .addEventListener('click', function(){
-        createOrReuseEvidenceDraft(item);
-      });
 
     materialListEl.appendChild(card);
   });
 }
-
 function restoreMaterialCache(){
   try {
     const stored = JSON.parse(
@@ -805,7 +816,13 @@ function restoreMaterialCache(){
 
 
 function updateEvidenceDraftPointSession(pointSession){
-  if (!currentEvidenceDraft || !pointSession) return;
+  if (
+    !currentEvidenceDraft ||
+    !pointSession ||
+    currentEvidenceDraft.status !== 'DRAFT_LOCAL'
+  ) {
+    return;
+  }
 
   const drafts = loadEvidenceDrafts();
   const index = drafts.findIndex(function(item){
@@ -836,6 +853,278 @@ function updateEvidenceDraftPointSession(pointSession){
   }
 
   renderEvidenceDraft();
+}
+
+
+function clearRequirementView(){
+  currentRequirements = [];
+  pointRequirementStatusEl.textContent = 'BELUM ADA';
+  pointRequirementStatusEl.className = '';
+  requirementsPanel.hidden = true;
+  requirementListEl.innerHTML = '';
+}
+
+function createDraftFromRequirement(requirement){
+  const projectId = getSelectedProjectId();
+  const sessionId = getSelectedPointSessionId();
+  const pointSession = getSelectedPointSession();
+
+  if (
+    !projectId ||
+    !sessionId ||
+    !pointSession ||
+    !requirement ||
+    !requirement.projectMaterialId ||
+    requirement.canSelect === false
+  ) {
+    alert('Requirement / Point Session belum valid.');
+    return;
+  }
+
+  const drafts = loadEvidenceDrafts();
+
+  let draft = drafts.find(function(item){
+    return (
+      item &&
+      item.projectId === projectId &&
+      item.projectMaterialId === requirement.projectMaterialId &&
+      item.sessionId === sessionId &&
+      item.status === 'DRAFT_LOCAL'
+    );
+  });
+
+  if (!draft) {
+    draft = {
+      evidenceDraftId: makeLocalEvidenceDraftId(),
+      projectId: projectId,
+      projectMaterialId: requirement.projectMaterialId,
+      materialId: requirement.materialId || '',
+      designator: requirement.designator || '',
+      materialName: requirement.materialName || '',
+      category: requirement.category || '',
+      qtyPlan:
+        requirement.qtyPlan === null ||
+        requirement.qtyPlan === undefined
+          ? ''
+          : requirement.qtyPlan,
+      unit: requirement.unit || '',
+      requirementId: requirement.requirementId || '',
+      requirementCode: requirement.requirementCode || 'MATERIAL',
+      evidenceRequired: Number(requirement.evidenceRequired || 0),
+      required: requirement.required === true,
+      sessionId: sessionId,
+      anchorPointId: pointSession.anchorPointId || '',
+      anchorLabel: pointSession.anchorLabel || '',
+      anchorRole: pointSession.anchorRole || '',
+      latPlan: pointSession.latPlan ?? '',
+      longPlan: pointSession.longPlan ?? '',
+      pointVerifyStatus: pointSession.verifyStatus || 'DRAFT',
+      pointSessionSelectedAt: new Date().toISOString(),
+      status: 'DRAFT_LOCAL',
+      createdAt: new Date().toISOString()
+    };
+
+    drafts.push(draft);
+    saveEvidenceDrafts(drafts);
+  }
+
+  currentEvidenceDraft = draft;
+  currentLocalPhoto = null;
+
+  renderEvidenceDraft();
+  renderRequirements();
+  refreshSyncGate();
+}
+
+function acceptRequirementBundle(bundle){
+  const payload = readSignedPayload(bundle);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const projectId = getSelectedProjectId();
+  const sessionId = getSelectedPointSessionId();
+
+  const validShape =
+    payload &&
+    payload.v === 'V14C-B2A-STEP9A' &&
+    payload.kind === 'POINT_REQUIREMENT_LIST' &&
+    payload.projectId === projectId &&
+    payload.sessionId === sessionId &&
+    Array.isArray(payload.requirements) &&
+    Number(payload.exp || 0) > nowSec;
+
+  if (!validShape) {
+    pointRequirementStatusEl.textContent = 'INVALID';
+    pointRequirementStatusEl.className = 'bad';
+    requirementsPanel.hidden = true;
+    return false;
+  }
+
+  currentRequirements = payload.requirements;
+
+  localStorage.setItem(
+    POINT_REQUIREMENTS_KEY,
+    JSON.stringify({
+      projectId: payload.projectId,
+      sessionId: payload.sessionId,
+      anchorPointId: payload.anchorPointId || '',
+      anchorLabel: payload.anchorLabel || '',
+      anchorRole: payload.anchorRole || '',
+      totalRequirements: Number(payload.totalRequirements || 0),
+      requiredCount: Number(payload.requiredCount || 0),
+      optionalCount: Number(payload.optionalCount || 0),
+      requirements: currentRequirements,
+      cachedAt: Date.now()
+    })
+  );
+
+  pointRequirementStatusEl.textContent = 'LOADED';
+  pointRequirementStatusEl.className = 'ok';
+
+  renderRequirements({
+    projectId: payload.projectId,
+    sessionId: payload.sessionId,
+    anchorLabel: payload.anchorLabel || '',
+    totalRequirements: Number(payload.totalRequirements || 0),
+    requiredCount: Number(payload.requiredCount || 0),
+    optionalCount: Number(payload.optionalCount || 0)
+  });
+
+  return true;
+}
+
+function renderRequirements(meta){
+  const projectId = getSelectedProjectId();
+  const sessionId = getSelectedPointSessionId();
+
+  if (!projectId || !sessionId) {
+    requirementsPanel.hidden = true;
+    return;
+  }
+
+  let stored = null;
+
+  if (!meta) {
+    try {
+      const raw = JSON.parse(
+        localStorage.getItem(POINT_REQUIREMENTS_KEY) || 'null'
+      );
+
+      if (
+        raw &&
+        raw.projectId === projectId &&
+        raw.sessionId === sessionId
+      ) {
+        stored = raw;
+      }
+    } catch (e) {}
+  }
+
+  const info = meta || stored || {
+    projectId: projectId,
+    sessionId: sessionId,
+    totalRequirements: currentRequirements.length,
+    requiredCount: currentRequirements.filter(function(item){
+      return item.required === true;
+    }).length,
+    optionalCount: currentRequirements.filter(function(item){
+      return item.required !== true;
+    }).length
+  };
+
+  requirementsPanel.hidden = false;
+  requirementListEl.innerHTML = '';
+
+  requirementSummaryEl.innerHTML =
+    '<strong>✓ POINT REQUIREMENT DATA LOADED</strong><br>' +
+    '<b>Project:</b> ' + escapeHtml(projectId) + '<br>' +
+    '<b>Point Session:</b> ' + escapeHtml(sessionId) + '<br>' +
+    '<b>Anchor:</b> ' + escapeHtml(info.anchorLabel || '-') + '<br>' +
+    '<b>Total:</b> ' + escapeHtml(String(currentRequirements.length)) + '<br>' +
+    '<b>Required:</b> ' + escapeHtml(String(info.requiredCount || 0)) + '<br>' +
+    '<b>Optional:</b> ' + escapeHtml(String(info.optionalCount || 0));
+
+  if (!currentRequirements.length) {
+    requirementListEl.innerHTML =
+      '<div class="result errbox">Tidak ada material requirement aktif untuk Point Session ini.</div>';
+    return;
+  }
+
+  currentRequirements.forEach(function(item, index){
+    const card = document.createElement('div');
+
+    const selected =
+      currentEvidenceDraft &&
+      currentEvidenceDraft.status === 'DRAFT_LOCAL' &&
+      currentEvidenceDraft.sessionId === sessionId &&
+      currentEvidenceDraft.projectMaterialId === item.projectMaterialId;
+
+    card.className =
+      'requirement-card ' +
+      (item.required === true ? 'required' : 'optional') +
+      (selected ? ' selected' : '');
+
+    const requiredText =
+      item.required === true ? 'WAJIB' : 'OPTIONAL';
+
+    const buttonDisabled =
+      item.canSelect === false ||
+      !item.projectMaterialId;
+
+    card.innerHTML =
+      '<div class="requirement-title">' +
+        escapeHtml(String(index + 1)) + '. ' +
+        escapeHtml(item.designator || item.projectMaterialId || '-') +
+      '</div>' +
+      '<div class="requirement-meta">' +
+        '<b>Material:</b> ' + escapeHtml(item.materialName || '-') + '<br>' +
+        '<b>Project Material ID:</b> ' + escapeHtml(item.projectMaterialId || '-') + '<br>' +
+        '<b>Requirement:</b> ' + escapeHtml(item.requirementCode || '-') + '<br>' +
+        '<b>Evidence Required:</b> ' + escapeHtml(String(item.evidenceRequired ?? 0)) + '<br>' +
+        '<b>Verify Status:</b> ' + escapeHtml(item.verifyStatus || 'DRAFT') + '<br>' +
+        '<b>Point ID:</b> ' + escapeHtml(item.pointId || '-') +
+      '</div>' +
+      '<span class="requirement-tag">' + requiredText + '</span><br>' +
+      '<button class="point-btn requirement-select-btn" type="button"' +
+        (buttonDisabled ? ' disabled' : '') +
+      '>' +
+        (selected ? 'MATERIAL EVIDENCE TERPILIH' : 'PILIH MATERIAL EVIDENCE') +
+      '</button>';
+
+    const btn = card.querySelector('.requirement-select-btn');
+
+    if (!buttonDisabled) {
+      btn.addEventListener('click', function(){
+        createDraftFromRequirement(item);
+      });
+    }
+
+    requirementListEl.appendChild(card);
+  });
+}
+
+function restoreRequirementCache(){
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(POINT_REQUIREMENTS_KEY) || 'null'
+    );
+
+    if (
+      stored &&
+      stored.projectId === getSelectedProjectId() &&
+      stored.sessionId === getSelectedPointSessionId() &&
+      Array.isArray(stored.requirements)
+    ) {
+      currentRequirements = stored.requirements;
+
+      pointRequirementStatusEl.textContent =
+        navigator.onLine ? 'CACHED' : 'CACHED OFFLINE';
+      pointRequirementStatusEl.className = 'ok';
+
+      renderRequirements(stored);
+      return true;
+    }
+  } catch (e) {}
+
+  return false;
 }
 
 function acceptPointSessionBundle(bundle){
@@ -872,6 +1161,8 @@ function acceptPointSessionBundle(bundle){
   pointSessionStatusEl.textContent = 'LOADED';
   pointSessionStatusEl.className = 'ok';
   renderPointSessions(payload.projectId);
+  restoreRequirementCache();
+  refreshMaterialButton();
 
   return true;
 }
@@ -985,13 +1276,20 @@ function renderPointSessions(projectId){
     card.querySelector('.point-btn').addEventListener(
       'click',
       function(){
+        const oldSessionId = getSelectedPointSessionId();
+
         localStorage.setItem(
           SELECTED_POINT_SESSION_KEY,
           item.sessionId || ''
         );
 
-        updateEvidenceDraftPointSession(item);
+        if (oldSessionId !== String(item.sessionId || '')) {
+          clearRequirementView();
+        }
+
         renderPointSessions(projectId);
+        restoreRequirementCache();
+        refreshMaterialButton();
         refreshSyncGate();
       }
     );
@@ -1428,6 +1726,22 @@ function processHashHandoffs(){
     return;
   }
 
+  if (hash.startsWith('#pems_requirements=')) {
+    const bundle = decodeURIComponent(
+      hash.slice('#pems_requirements='.length)
+    );
+
+    acceptRequirementBundle(bundle);
+
+    const storedProof = sessionStorage.getItem(PROOF_KEY);
+    if (storedProof) {
+      acceptProof(storedProof);
+    }
+
+    history.replaceState(null, '', location.pathname + location.search);
+    return;
+  }
+
   if (hash.startsWith('#pems_sync_result=')) {
     const bundle = decodeURIComponent(
       hash.slice('#pems_sync_result='.length)
@@ -1470,6 +1784,7 @@ if (currentProjects.length === 0) {
 restoreMaterialCache();
 restoreEvidenceDraft();
 restorePointSessions();
+restoreRequirementCache();
 restoreSyncedResult();
 
 function decodeJwtPayload(token) {
@@ -1726,6 +2041,37 @@ loadPointSessionsBtn.addEventListener('click', function(){
   );
 });
 
+
+
+loadRequirementsBtn.addEventListener('click', function(){
+  const projectId = getSelectedProjectId();
+  const sessionId = getSelectedPointSessionId();
+
+  if (!currentServerProof) {
+    alert('Session proof belum ada / sudah expired. Login ulang dulu.');
+    return;
+  }
+
+  if (!projectId) {
+    alert('Pilih project dulu.');
+    return;
+  }
+
+  if (!sessionId) {
+    alert('Pilih Point Session dulu.');
+    return;
+  }
+
+  submitHiddenPost(
+    {
+      action: 'read_point_requirements_handoff',
+      proof: currentServerProof,
+      project_id: projectId,
+      session_id: sessionId
+    },
+    '_self'
+  );
+});
 
 pointSessionSearchEl.addEventListener('input', function(){
   pointSessionSearchTerm = String(pointSessionSearchEl.value || '');
