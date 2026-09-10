@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 7B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step7b">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step7b">
+  <title>PEMS V14C-B2A Step 7D</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step7d">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step7d">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -57,10 +57,10 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 7B</div>
-      <h1>Local Photo + GPS</h1>
+      <div class="badge">PEMS V14C-B2A STEP 7D</div>
+      <h1>GPS Quality Guard</h1>
       <p class="lead">
-        Target tahap ini: tambahkan <b>1 foto + GPS</b> ke draft evidence lokal. Foto disimpan di <b>IndexedDB</b>, belum dikirim ke server.
+        Target tahap ini: nilai kualitas GPS sebelum evidence boleh dianggap siap sync. Foto tetap disimpan lokal, tetapi GPS buruk diberi status <b>RETRY GPS</b>.
       </p>
 
       <div class="status-grid">
@@ -87,6 +87,10 @@
         <div class="status-card">
           <span>PHOTO LOCAL</span>
           <strong id="photoLocalStatus">BELUM ADA</strong>
+        </div>
+        <div class="status-card">
+          <span>GPS QUALITY</span>
+          <strong id="gpsQualityStatus">BELUM ADA</strong>
         </div>
       </div>
 
@@ -170,6 +174,10 @@
           PILIH FOTO + AMBIL GPS
         </button>
 
+        <button id="retryGpsBtn" class="primary-btn" type="button" hidden style="margin-left:8px;">
+          RETRY GPS
+        </button>
+
         <div id="photoResult" class="result muted" style="margin-top:12px;">
           Belum ada foto lokal.
         </div>
@@ -181,9 +189,10 @@
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 7B</strong> bila setelah pilih foto:
-        <strong>PHOTO LOCAL = READY</strong>, preview tampil, latitude/longitude
-        tersimpan, dan foto tetap terkait ke Evidence Draft ID yang aktif.
+        <strong>PASS STEP 7D</strong> bila GPS diberi klasifikasi:
+        <strong>GOOD ≤ 20 m</strong>, <strong>WARNING 21–50 m</strong>,
+        atau <strong>RETRY GPS &gt; 50 m</strong>. Foto tetap tersimpan lokal,
+        tetapi status GPS ikut tercatat untuk gate sync berikutnya.
       </div>
     </section>
   </main>
@@ -191,6 +200,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step7b"></script>
+  <script src="./app.js?v=b2a-step7d"></script>
 </body>
 </html>

@@ -20,6 +20,8 @@ const choosePhotoBtn = document.getElementById('choosePhotoBtn');
 const photoResultEl = document.getElementById('photoResult');
 const photoPreviewWrap = document.getElementById('photoPreviewWrap');
 const photoPreview = document.getElementById('photoPreview');
+const gpsQualityStatusEl = document.getElementById('gpsQualityStatus');
+const retryGpsBtn = document.getElementById('retryGpsBtn');
 const projectsPanel = document.getElementById('projectsPanel');
 const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
@@ -27,8 +29,8 @@ const selectedProjectBanner = document.getElementById('selectedProjectBanner');
 const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
 const PROJECTS_KEY = 'PEMS_PROJECTS_STEP5A';
 const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
-const MATERIALS_KEY = 'PEMS_MATERIALS_STEP7B';
-const EVIDENCE_DRAFTS_KEY = 'PEMS_EVIDENCE_DRAFTS_STEP7B';
+const MATERIALS_KEY = 'PEMS_MATERIALS_STEP7D';
+const EVIDENCE_DRAFTS_KEY = 'PEMS_EVIDENCE_DRAFTS_STEP7D';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -286,6 +288,94 @@ function getGpsPosition(){
   });
 }
 
+
+function classifyGpsAccuracy(accuracy){
+  const value = Number(accuracy);
+
+  if (!Number.isFinite(value)) {
+    return {
+      code: 'UNKNOWN',
+      label: 'UNKNOWN',
+      syncAllowed: false
+    };
+  }
+
+  if (value <= 20) {
+    return {
+      code: 'GOOD',
+      label: 'GOOD',
+      syncAllowed: true
+    };
+  }
+
+  if (value <= 50) {
+    return {
+      code: 'WARNING',
+      label: 'WARNING',
+      syncAllowed: true
+    };
+  }
+
+  return {
+    code: 'RETRY',
+    label: 'RETRY GPS',
+    syncAllowed: false
+  };
+}
+
+function renderGpsQuality(record){
+  if (!record) {
+    gpsQualityStatusEl.textContent = 'BELUM ADA';
+    gpsQualityStatusEl.className = '';
+    retryGpsBtn.hidden = true;
+    return;
+  }
+
+  const quality = classifyGpsAccuracy(record.accuracy);
+
+  gpsQualityStatusEl.textContent = quality.label;
+  gpsQualityStatusEl.className =
+    quality.code === 'RETRY' ? 'bad' : 'ok';
+
+  retryGpsBtn.hidden = quality.code !== 'RETRY';
+}
+
+async function retryGpsForCurrentPhoto(){
+  if (!currentLocalPhoto) {
+    alert('Belum ada foto lokal.');
+    return;
+  }
+
+  gpsQualityStatusEl.textContent = 'CHECKING';
+  gpsQualityStatusEl.className = '';
+  retryGpsBtn.disabled = true;
+
+  try {
+    const gps = await getGpsPosition();
+
+    const updated = Object.assign({}, currentLocalPhoto, {
+      latitude: gps.latitude,
+      longitude: gps.longitude,
+      accuracy: gps.accuracy,
+      capturedAt: gps.capturedAt,
+      gpsRetriedAt: new Date().toISOString()
+    });
+
+    await putLocalPhoto(updated);
+    renderLocalPhoto(updated);
+  } catch (error) {
+    gpsQualityStatusEl.textContent = 'RETRY FAILED';
+    gpsQualityStatusEl.className = 'bad';
+    photoResultEl.className = 'result errbox';
+    photoResultEl.textContent =
+      error && error.message
+        ? error.message
+        : 'Retry GPS gagal.';
+  } finally {
+    retryGpsBtn.disabled = false;
+  }
+}
+
 function formatBytes(bytes){
   const n = Number(bytes || 0);
 
@@ -304,13 +394,18 @@ function renderLocalPhoto(record){
     photoResultEl.textContent = 'Belum ada foto lokal.';
     photoPreviewWrap.hidden = true;
     photoPreview.removeAttribute('src');
+    renderGpsQuality(null);
     return;
   }
 
   photoLocalStatusEl.textContent = 'READY';
   photoLocalStatusEl.className = 'ok';
 
-  photoResultEl.className = 'result okbox';
+  const gpsQuality = classifyGpsAccuracy(record.accuracy);
+  renderGpsQuality(record);
+
+  photoResultEl.className =
+    gpsQuality.code === 'RETRY' ? 'result errbox' : 'result okbox';
   photoResultEl.innerHTML =
     '<strong>✓ PHOTO LOCAL READY</strong><br>' +
     '<b>Photo Local ID:</b> ' +
@@ -327,6 +422,10 @@ function renderLocalPhoto(record){
       escapeHtml(String(record.longitude ?? '-')) + '<br>' +
     '<b>GPS Accuracy:</b> ' +
       escapeHtml(String(record.accuracy ?? '-')) + ' m<br>' +
+    '<b>GPS Quality:</b> ' +
+      escapeHtml(gpsQuality.label) + '<br>' +
+    '<b>Sync Gate:</b> ' +
+      (gpsQuality.syncAllowed ? 'ALLOWED' : 'BLOCKED - RETRY GPS') + '<br>' +
     '<b>Status:</b> PHOTO_LOCAL_READY<br>' +
     '<small>Foto + GPS tersimpan lokal. Belum sync ke server.</small>';
 
@@ -896,6 +995,11 @@ photoInput.addEventListener('change', async function(){
         ? error.message
         : 'Foto lokal gagal diproses.';
   }
+});
+
+
+retryGpsBtn.addEventListener('click', function(){
+  retryGpsForCurrentPhoto();
 });
 
 refreshMaterialButton();
