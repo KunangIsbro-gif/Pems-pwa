@@ -3026,7 +3026,8 @@ async function acceptSyncResultBundle(bundle){
     payload.evidenceDraftId &&
     payload.photoLocalId &&
     payload.evidenceItemId &&
-    payload.photoId;
+    payload.photoId &&
+    payload.refreshedProof;
 
   if (!validShape) {
     syncServerStatusEl.textContent = 'RESULT INVALID';
@@ -3036,6 +3037,10 @@ async function acceptSyncResultBundle(bundle){
       'Sync result tidak valid / expired.';
     return false;
   }
+
+  // Fresh proof from the sync response replaces the previous
+  // proof before any async work or next queue iteration.
+  acceptProof(payload.refreshedProof);
 
   const required =
     Math.max(1, Number(payload.requiredPhotoCount || 1));
@@ -3287,11 +3292,7 @@ function processHashHandoffs(){
 
     acceptSyncResultBundle(bundle);
 
-    const storedProof = sessionStorage.getItem(PROOF_KEY);
-    if (storedProof) {
-      acceptProof(storedProof);
-    }
-
+    // acceptSyncResultBundle already stores the refreshed proof.
     history.replaceState(null, '', location.pathname + location.search);
   }
 }

@@ -1,12 +1,12 @@
 
-const CACHE_NAME = 'pems-v14c-b2a-step9c-verifysametab-v2';
+const CACHE_NAME = 'pems-v14c-b2a-step9c-sessionrefresh-v2';
 
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=b2a-step9c-verifysametab',
-  './app.js?v=b2a-step9c-verifysametab',
-  './manifest.json?v=b2a-step9c-verifysametab'
+  './styles.css?v=b2a-step9c-sessionrefresh',
+  './app.js?v=b2a-step9c-sessionrefresh',
+  './manifest.json?v=b2a-step9c-sessionrefresh'
 ];
 
 self.addEventListener('install', event => {
