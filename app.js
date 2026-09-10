@@ -7,6 +7,10 @@ const loginResultEl = document.getElementById('loginResult');
 const verifyBtn = document.getElementById('verifyBtn');
 const loadProjectsBtn = document.getElementById('loadProjectsBtn');
 const readMaterialsBtn = document.getElementById('readMaterialsBtn');
+const materialStatusEl = document.getElementById('materialStatus');
+const materialsPanel = document.getElementById('materialsPanel');
+const materialSummaryEl = document.getElementById('materialSummary');
+const materialListEl = document.getElementById('materialList');
 const projectsPanel = document.getElementById('projectsPanel');
 const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
@@ -14,10 +18,12 @@ const selectedProjectBanner = document.getElementById('selectedProjectBanner');
 const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
 const PROJECTS_KEY = 'PEMS_PROJECTS_STEP5A';
 const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
+const MATERIALS_KEY = 'PEMS_MATERIALS_STEP6B';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
 let currentProjects = [];
+let currentMaterials = [];
 
 function getSelectedProjectId(){
   return localStorage.getItem(SELECTED_PROJECT_KEY) || '';
@@ -125,6 +131,104 @@ function acceptProjectBundle(bundle){
   return true;
 }
 
+
+function acceptMaterialBundle(bundle){
+  const payload = readSignedPayload(bundle);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const selectedProjectId = getSelectedProjectId();
+
+  const validShape =
+    payload &&
+    payload.v === 'V14C-B2A-STEP6B' &&
+    payload.kind === 'PROJECT_MATERIAL_LIST' &&
+    typeof payload.projectId === 'string' &&
+    payload.projectId === selectedProjectId &&
+    Array.isArray(payload.materials) &&
+    Number(payload.exp || 0) > nowSec;
+
+  if (!validShape) {
+    materialStatusEl.textContent = 'INVALID';
+    materialStatusEl.className = 'bad';
+    materialsPanel.hidden = true;
+    return false;
+  }
+
+  currentMaterials = payload.materials;
+
+  // Step 6B sengaja session-only. Offline persistent cache material
+  // baru diuji pada step berikutnya.
+  sessionStorage.setItem(
+    MATERIALS_KEY,
+    JSON.stringify({
+      projectId: payload.projectId,
+      materials: currentMaterials
+    })
+  );
+
+  materialStatusEl.textContent = 'LOADED';
+  materialStatusEl.className = 'ok';
+
+  renderMaterials(payload.projectId);
+  return true;
+}
+
+function renderMaterials(projectId){
+  materialsPanel.hidden = false;
+  materialListEl.innerHTML = '';
+
+  materialSummaryEl.innerHTML =
+    '<strong>✓ MATERIAL DATA LOADED</strong><br>' +
+    'Project: ' + escapeHtml(projectId || '-') + '<br>' +
+    'Total material: ' + escapeHtml(String(currentMaterials.length));
+
+  currentMaterials.forEach(function(item, index){
+    const card = document.createElement('div');
+    card.className = 'material-card';
+
+    card.innerHTML =
+      '<div class="material-title">' +
+        escapeHtml(String(index + 1)) + '. ' +
+        escapeHtml(item.designator || '-') +
+      '</div>' +
+      '<div class="material-meta">' +
+        '<b>Material:</b> ' + escapeHtml(item.materialName || '-') + '<br>' +
+        '<b>Category:</b> ' + escapeHtml(item.category || '-') + '<br>' +
+        '<b>Qty Plan:</b> ' +
+          escapeHtml(
+            String(
+              item.qtyPlan === null || item.qtyPlan === undefined
+                ? ''
+                : item.qtyPlan
+            )
+          ) +
+          ' ' + escapeHtml(item.unit || '') + '<br>' +
+        '<b>Project Material ID:</b> ' +
+          escapeHtml(item.projectMaterialId || '-') +
+      '</div>';
+
+    materialListEl.appendChild(card);
+  });
+}
+
+function restoreMaterialSession(){
+  try {
+    const stored = JSON.parse(
+      sessionStorage.getItem(MATERIALS_KEY) || 'null'
+    );
+
+    if (
+      stored &&
+      stored.projectId === getSelectedProjectId() &&
+      Array.isArray(stored.materials)
+    ) {
+      currentMaterials = stored.materials;
+      materialStatusEl.textContent = 'LOADED';
+      materialStatusEl.className = 'ok';
+      renderMaterials(stored.projectId);
+    }
+  } catch (e) {}
+}
+
 function processHashHandoffs(){
   const hash = String(location.hash || '');
 
@@ -138,6 +242,19 @@ function processHashHandoffs(){
   if (hash.startsWith('#pems_projects=')) {
     const bundle = decodeURIComponent(hash.slice('#pems_projects='.length));
     acceptProjectBundle(bundle);
+
+    const storedProof = sessionStorage.getItem(PROOF_KEY);
+    if (storedProof) {
+      acceptProof(storedProof);
+    }
+
+    history.replaceState(null, '', location.pathname + location.search);
+    return;
+  }
+
+  if (hash.startsWith('#pems_materials=')) {
+    const bundle = decodeURIComponent(hash.slice('#pems_materials='.length));
+    acceptMaterialBundle(bundle);
 
     const storedProof = sessionStorage.getItem(PROOF_KEY);
     if (storedProof) {
@@ -170,6 +287,8 @@ if (currentProjects.length === 0) {
     }
   } catch (e) {}
 }
+
+restoreMaterialSession();
 
 function decodeJwtPayload(token) {
   try {
@@ -248,11 +367,11 @@ readMaterialsBtn.addEventListener('click', function(){
 
   submitHiddenPost(
     {
-      action: 'read_project_materials',
+      action: 'read_project_materials_handoff',
       proof: currentServerProof,
       project_id: projectId
     },
-    '_blank'
+    '_self'
   );
 });
 

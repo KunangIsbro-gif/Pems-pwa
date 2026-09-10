@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 6A</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step6a">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step6a">
+  <title>PEMS V14C-B2A Step 6B</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step6b">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step6b">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -30,15 +30,23 @@
       margin-top:12px; border:1px solid #0f4c81; border-radius:12px;
       padding:12px; background:#eef6fd;
     }
-  </style>
+      .material-card {
+      border:1px solid #d6e2ee;
+      border-radius:12px;
+      padding:14px;
+      background:#fff;
+    }
+    .material-title { font-weight:800; color:#0f2740; }
+    .material-meta { margin-top:7px; font-size:13px; line-height:1.55; color:#475569; }
+</style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 6A</div>
-      <h1>Read Project Material</h1>
+      <div class="badge">PEMS V14C-B2A STEP 6B</div>
+      <h1>Material Data di PEMS</h1>
       <p class="lead">
-        Target tahap ini: project yang sudah dipilih dipakai untuk membaca material dari <b>04_PROJECT_MATERIAL</b> secara <b>READ ONLY</b>.
+        Target tahap ini: material project yang sudah dibaca server kembali dan tampil langsung di halaman PEMS.
       </p>
 
       <div class="status-grid">
@@ -53,6 +61,10 @@
         <div class="status-card">
           <span>PROJECT CACHE</span>
           <strong id="projectStatus">BELUM ADA</strong>
+        </div>
+        <div class="status-card">
+          <span>MATERIAL DATA</span>
+          <strong id="materialStatus">BELUM ADA</strong>
         </div>
       </div>
 
@@ -102,19 +114,25 @@
       </section>
 
       <section class="panel">
-        <h2>4. Read Material Project</h2>
+        <h2>4. Ambil Material ke PEMS</h2>
         <p>
-          Gunakan project yang sudah dipilih. Server akan memvalidasi session,
-          lalu membaca <b>04_PROJECT_MATERIAL</b> secara read-only.
+          Gunakan project yang sudah dipilih. Server memvalidasi session,
+          membaca material secara read-only, lalu mengembalikan datanya ke PEMS.
         </p>
         <button id="readMaterialsBtn" class="primary-btn" type="button" disabled>
-          READ MATERIAL DATA
+          AMBIL MATERIAL KE PEMS
         </button>
       </section>
 
+      <section id="materialsPanel" class="panel" hidden>
+        <h2>Material Project</h2>
+        <div id="materialSummary" class="result okbox"></div>
+        <div id="materialList" class="project-list"></div>
+      </section>
+
       <div class="passbox">
-        <strong>PASS STEP 6A</strong> bila tab server menampilkan
-        <strong>✓ MATERIAL READ OK</strong> dan daftar material milik project terpilih.
+        <strong>PASS STEP 6B</strong> bila <strong>MATERIAL DATA = LOADED</strong>
+        dan 13 material project tampil langsung di halaman PEMS.
       </div>
     </section>
   </main>
@@ -122,6 +140,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step6a"></script>
+  <script src="./app.js?v=b2a-step6b"></script>
 </body>
 </html>
