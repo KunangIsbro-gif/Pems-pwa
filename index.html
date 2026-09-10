@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 7D</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step7d">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step7d">
+  <title>PEMS V14C-B2A Step 8A</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step8a">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step8a">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -52,15 +52,37 @@
       outline:2px solid #0f4c81;
       background:#f5f9fd;
     }
+    .point-card {
+      border:1px solid #d6e2ee;
+      border-radius:12px;
+      padding:14px;
+      background:#fff;
+    }
+    .point-card.selected {
+      outline:2px solid #0f4c81;
+      background:#f5f9fd;
+    }
+    .point-title { font-weight:800; color:#0f2740; }
+    .point-meta { margin-top:7px; font-size:13px; line-height:1.55; color:#475569; }
+    .point-btn {
+      margin-top:10px;
+      border:0;
+      border-radius:9px;
+      padding:10px 14px;
+      cursor:pointer;
+      font-weight:700;
+      background:#0f4c81;
+      color:white;
+    }
 </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 7D</div>
-      <h1>GPS Quality Guard</h1>
+      <div class="badge">PEMS V14C-B2A STEP 8A</div>
+      <h1>Point Session Data</h1>
       <p class="lead">
-        Target tahap ini: nilai kualitas GPS sebelum evidence boleh dianggap siap sync. Foto tetap disimpan lokal, tetapi GPS buruk diberi status <b>RETRY GPS</b>.
+        Target tahap ini: ambil dan pilih <b>Point Session</b> untuk project aktif agar draft evidence terhubung ke titik pekerjaan yang benar.
       </p>
 
       <div class="status-grid">
@@ -91,6 +113,10 @@
         <div class="status-card">
           <span>GPS QUALITY</span>
           <strong id="gpsQualityStatus">BELUM ADA</strong>
+        </div>
+        <div class="status-card">
+          <span>POINT SESSION</span>
+          <strong id="pointSessionStatus">BELUM ADA</strong>
         </div>
       </div>
 
@@ -188,11 +214,27 @@
         </div>
       </section>
 
+      <section class="panel">
+        <h2>Point Session</h2>
+        <p>
+          Server akan membaca <b>06D_POINT_SESSIONS</b> untuk project terpilih.
+          Pilih satu titik agar draft evidence aktif memiliki Session ID.
+        </p>
+        <button id="loadPointSessionsBtn" class="primary-btn" type="button" disabled>
+          AMBIL POINT SESSION KE PEMS
+        </button>
+      </section>
+
+      <section id="pointSessionsPanel" class="panel" hidden>
+        <h2>Titik Pekerjaan</h2>
+        <div id="pointSessionSummary" class="result okbox"></div>
+        <div id="pointSessionList" class="project-list"></div>
+      </section>
+
       <div class="passbox">
-        <strong>PASS STEP 7D</strong> bila GPS diberi klasifikasi:
-        <strong>GOOD ≤ 20 m</strong>, <strong>WARNING 21–50 m</strong>,
-        atau <strong>RETRY GPS &gt; 50 m</strong>. Foto tetap tersimpan lokal,
-        tetapi status GPS ikut tercatat untuk gate sync berikutnya.
+        <strong>PASS STEP 8A</strong> bila <strong>POINT SESSION = LOADED</strong>,
+        daftar titik tampil, lalu satu titik berhasil menjadi
+        <strong>POINT SESSION TERPILIH</strong> dan Session ID masuk ke draft evidence.
       </div>
     </section>
   </main>
@@ -200,6 +242,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step7d"></script>
+  <script src="./app.js?v=b2a-step8a"></script>
 </body>
 </html>

@@ -22,6 +22,11 @@ const photoPreviewWrap = document.getElementById('photoPreviewWrap');
 const photoPreview = document.getElementById('photoPreview');
 const gpsQualityStatusEl = document.getElementById('gpsQualityStatus');
 const retryGpsBtn = document.getElementById('retryGpsBtn');
+const pointSessionStatusEl = document.getElementById('pointSessionStatus');
+const loadPointSessionsBtn = document.getElementById('loadPointSessionsBtn');
+const pointSessionsPanel = document.getElementById('pointSessionsPanel');
+const pointSessionSummaryEl = document.getElementById('pointSessionSummary');
+const pointSessionListEl = document.getElementById('pointSessionList');
 const projectsPanel = document.getElementById('projectsPanel');
 const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
@@ -31,6 +36,8 @@ const PROJECTS_KEY = 'PEMS_PROJECTS_STEP5A';
 const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
 const MATERIALS_KEY = 'PEMS_MATERIALS_STEP7D';
 const EVIDENCE_DRAFTS_KEY = 'PEMS_EVIDENCE_DRAFTS_STEP7D';
+const POINT_SESSIONS_KEY = 'PEMS_POINT_SESSIONS_STEP8A';
+const SELECTED_POINT_SESSION_KEY = 'PEMS_SELECTED_POINT_SESSION_STEP8A';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -38,6 +45,7 @@ let currentProjects = [];
 let currentMaterials = [];
 let currentEvidenceDraft = null;
 let currentLocalPhoto = null;
+let currentPointSessions = [];
 
 const PHOTO_DB_NAME = 'PEMS_LOCAL_EVIDENCE_DB';
 const PHOTO_DB_VERSION = 1;
@@ -48,10 +56,12 @@ function getSelectedProjectId(){
 }
 
 function refreshMaterialButton(){
-  readMaterialsBtn.disabled = !(
-    currentServerProof &&
-    getSelectedProjectId()
-  );
+  const ready =
+    !!currentServerProof &&
+    !!getSelectedProjectId();
+
+  readMaterialsBtn.disabled = !ready;
+  loadPointSessionsBtn.disabled = !ready;
 }
 
 function setConnectivity(){
@@ -553,6 +563,8 @@ function renderEvidenceDraft(){
       escapeHtml(currentEvidenceDraft.materialName || '-') + '<br>' +
     '<b>Status:</b> ' +
       escapeHtml(currentEvidenceDraft.status || '-') + '<br>' +
+    '<b>Point Session ID:</b> ' +
+      escapeHtml(currentEvidenceDraft.sessionId || 'BELUM DIPILIH') + '<br>' +
     '<small>Draft tersimpan lokal. Belum dikirim ke server.</small>';
 
   choosePhotoBtn.disabled = false;
@@ -706,6 +718,169 @@ function restoreMaterialCache(){
   } catch (e) {}
 }
 
+
+function updateEvidenceDraftPointSession(pointSession){
+  if (!currentEvidenceDraft || !pointSession) return;
+
+  const drafts = loadEvidenceDrafts();
+  const index = drafts.findIndex(function(item){
+    return (
+      item &&
+      item.evidenceDraftId === currentEvidenceDraft.evidenceDraftId
+    );
+  });
+
+  currentEvidenceDraft = Object.assign(
+    {},
+    currentEvidenceDraft,
+    {
+      sessionId: pointSession.sessionId || '',
+      anchorPointId: pointSession.anchorPointId || '',
+      anchorLabel: pointSession.anchorLabel || '',
+      anchorRole: pointSession.anchorRole || '',
+      latPlan: pointSession.latPlan ?? '',
+      longPlan: pointSession.longPlan ?? '',
+      pointVerifyStatus: pointSession.verifyStatus || 'DRAFT',
+      pointSessionSelectedAt: new Date().toISOString()
+    }
+  );
+
+  if (index >= 0) {
+    drafts[index] = currentEvidenceDraft;
+    saveEvidenceDrafts(drafts);
+  }
+
+  renderEvidenceDraft();
+}
+
+function acceptPointSessionBundle(bundle){
+  const payload = readSignedPayload(bundle);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const selectedProjectId = getSelectedProjectId();
+
+  const validShape =
+    payload &&
+    payload.v === 'V14C-B2A-STEP8A' &&
+    payload.kind === 'POINT_SESSION_LIST' &&
+    payload.projectId === selectedProjectId &&
+    Array.isArray(payload.pointSessions) &&
+    Number(payload.exp || 0) > nowSec;
+
+  if (!validShape) {
+    pointSessionStatusEl.textContent = 'INVALID';
+    pointSessionStatusEl.className = 'bad';
+    pointSessionsPanel.hidden = true;
+    return false;
+  }
+
+  currentPointSessions = payload.pointSessions;
+
+  localStorage.setItem(
+    POINT_SESSIONS_KEY,
+    JSON.stringify({
+      projectId: payload.projectId,
+      pointSessions: currentPointSessions,
+      cachedAt: Date.now()
+    })
+  );
+
+  pointSessionStatusEl.textContent = 'LOADED';
+  pointSessionStatusEl.className = 'ok';
+  renderPointSessions(payload.projectId);
+
+  return true;
+}
+
+function renderPointSessions(projectId){
+  pointSessionsPanel.hidden = false;
+  pointSessionListEl.innerHTML = '';
+
+  const selectedSessionId =
+    localStorage.getItem(SELECTED_POINT_SESSION_KEY) || '';
+
+  pointSessionSummaryEl.innerHTML =
+    '<strong>✓ POINT SESSION DATA LOADED</strong><br>' +
+    'Project: ' + escapeHtml(projectId || '-') + '<br>' +
+    'Total point session: ' +
+      escapeHtml(String(currentPointSessions.length));
+
+  currentPointSessions.forEach(function(item, index){
+    const card = document.createElement('div');
+    const selected =
+      selectedSessionId === String(item.sessionId || '');
+
+    card.className =
+      'point-card' + (selected ? ' selected' : '');
+
+    const memberCount =
+      Array.isArray(item.members) ? item.members.length : 0;
+
+    card.innerHTML =
+      '<div class="point-title">' +
+        escapeHtml(String(index + 1)) + '. ' +
+        escapeHtml(item.anchorLabel || item.sessionId || '-') +
+      '</div>' +
+      '<div class="point-meta">' +
+        '<b>Session ID:</b> ' +
+          escapeHtml(item.sessionId || '-') + '<br>' +
+        '<b>Anchor Point:</b> ' +
+          escapeHtml(item.anchorPointId || '-') + '<br>' +
+        '<b>Role:</b> ' +
+          escapeHtml(item.anchorRole || '-') + '<br>' +
+        '<b>Lat Plan:</b> ' +
+          escapeHtml(String(item.latPlan ?? '-')) + '<br>' +
+        '<b>Long Plan:</b> ' +
+          escapeHtml(String(item.longPlan ?? '-')) + '<br>' +
+        '<b>Verify Status:</b> ' +
+          escapeHtml(item.verifyStatus || 'DRAFT') + '<br>' +
+        '<b>Members:</b> ' +
+          escapeHtml(String(memberCount)) +
+      '</div>' +
+      '<button class="point-btn" type="button">' +
+        (selected
+          ? 'POINT SESSION TERPILIH'
+          : 'PILIH POINT SESSION') +
+      '</button>';
+
+    card.querySelector('.point-btn').addEventListener(
+      'click',
+      function(){
+        localStorage.setItem(
+          SELECTED_POINT_SESSION_KEY,
+          item.sessionId || ''
+        );
+
+        updateEvidenceDraftPointSession(item);
+        renderPointSessions(projectId);
+      }
+    );
+
+    pointSessionListEl.appendChild(card);
+  });
+}
+
+function restorePointSessions(){
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(POINT_SESSIONS_KEY) || 'null'
+    );
+
+    if (
+      stored &&
+      stored.projectId === getSelectedProjectId() &&
+      Array.isArray(stored.pointSessions)
+    ) {
+      currentPointSessions = stored.pointSessions;
+
+      pointSessionStatusEl.textContent =
+        navigator.onLine ? 'CACHED' : 'CACHED OFFLINE';
+      pointSessionStatusEl.className = 'ok';
+
+      renderPointSessions(stored.projectId);
+    }
+  } catch (e) {}
+}
+
 function processHashHandoffs(){
   const hash = String(location.hash || '');
 
@@ -732,6 +907,19 @@ function processHashHandoffs(){
   if (hash.startsWith('#pems_materials=')) {
     const bundle = decodeURIComponent(hash.slice('#pems_materials='.length));
     acceptMaterialBundle(bundle);
+
+    const storedProof = sessionStorage.getItem(PROOF_KEY);
+    if (storedProof) {
+      acceptProof(storedProof);
+    }
+
+    history.replaceState(null, '', location.pathname + location.search);
+    return;
+  }
+
+  if (hash.startsWith('#pems_points=')) {
+    const bundle = decodeURIComponent(hash.slice('#pems_points='.length));
+    acceptPointSessionBundle(bundle);
 
     const storedProof = sessionStorage.getItem(PROOF_KEY);
     if (storedProof) {
@@ -767,6 +955,7 @@ if (currentProjects.length === 0) {
 
 restoreMaterialCache();
 restoreEvidenceDraft();
+restorePointSessions();
 
 function decodeJwtPayload(token) {
   try {
@@ -997,6 +1186,30 @@ photoInput.addEventListener('change', async function(){
   }
 });
 
+
+
+loadPointSessionsBtn.addEventListener('click', function(){
+  const projectId = getSelectedProjectId();
+
+  if (!currentServerProof) {
+    alert('Session proof belum ada / sudah expired. Login ulang dulu.');
+    return;
+  }
+
+  if (!projectId) {
+    alert('Pilih project dulu.');
+    return;
+  }
+
+  submitHiddenPost(
+    {
+      action: 'read_point_sessions_handoff',
+      proof: currentServerProof,
+      project_id: projectId
+    },
+    '_self'
+  );
+});
 
 retryGpsBtn.addEventListener('click', function(){
   retryGpsForCurrentPhoto();
