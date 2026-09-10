@@ -11,6 +11,9 @@ const materialStatusEl = document.getElementById('materialStatus');
 const materialsPanel = document.getElementById('materialsPanel');
 const materialSummaryEl = document.getElementById('materialSummary');
 const materialListEl = document.getElementById('materialList');
+const evidenceDraftStatusEl = document.getElementById('evidenceDraftStatus');
+const evidenceDraftPanel = document.getElementById('evidenceDraftPanel');
+const evidenceDraftResultEl = document.getElementById('evidenceDraftResult');
 const projectsPanel = document.getElementById('projectsPanel');
 const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
@@ -18,12 +21,14 @@ const selectedProjectBanner = document.getElementById('selectedProjectBanner');
 const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
 const PROJECTS_KEY = 'PEMS_PROJECTS_STEP5A';
 const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
-const MATERIALS_KEY = 'PEMS_MATERIALS_STEP6C';
+const MATERIALS_KEY = 'PEMS_MATERIALS_STEP7A';
+const EVIDENCE_DRAFTS_KEY = 'PEMS_EVIDENCE_DRAFTS_STEP7A';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
 let currentProjects = [];
 let currentMaterials = [];
+let currentEvidenceDraft = null;
 
 function getSelectedProjectId(){
   return localStorage.getItem(SELECTED_PROJECT_KEY) || '';
@@ -142,6 +147,130 @@ function acceptProjectBundle(bundle){
 }
 
 
+
+function loadEvidenceDrafts(){
+  try {
+    const drafts = JSON.parse(
+      localStorage.getItem(EVIDENCE_DRAFTS_KEY) || '[]'
+    );
+    return Array.isArray(drafts) ? drafts : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveEvidenceDrafts(drafts){
+  localStorage.setItem(
+    EVIDENCE_DRAFTS_KEY,
+    JSON.stringify(Array.isArray(drafts) ? drafts : [])
+  );
+}
+
+function makeLocalEvidenceDraftId(){
+  const stamp = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
+  return 'EVI-LOCAL-' + stamp + '-' + rand;
+}
+
+function createOrReuseEvidenceDraft(material){
+  const projectId = getSelectedProjectId();
+
+  if (!projectId || !material || !material.projectMaterialId) {
+    alert('Project / material belum valid.');
+    return;
+  }
+
+  const drafts = loadEvidenceDrafts();
+
+  let draft = drafts.find(function(item){
+    return (
+      item &&
+      item.projectId === projectId &&
+      item.projectMaterialId === material.projectMaterialId &&
+      item.status === 'DRAFT_LOCAL'
+    );
+  });
+
+  if (!draft) {
+    draft = {
+      evidenceDraftId: makeLocalEvidenceDraftId(),
+      projectId: projectId,
+      projectMaterialId: material.projectMaterialId,
+      materialId: material.materialId || '',
+      designator: material.designator || '',
+      materialName: material.materialName || '',
+      category: material.category || '',
+      qtyPlan:
+        material.qtyPlan === null || material.qtyPlan === undefined
+          ? ''
+          : material.qtyPlan,
+      unit: material.unit || '',
+      status: 'DRAFT_LOCAL',
+      createdAt: new Date().toISOString()
+    };
+
+    drafts.push(draft);
+    saveEvidenceDrafts(drafts);
+  }
+
+  currentEvidenceDraft = draft;
+  renderEvidenceDraft();
+  renderMaterials(projectId);
+}
+
+function renderEvidenceDraft(){
+  if (!currentEvidenceDraft) {
+    evidenceDraftStatusEl.textContent = 'BELUM ADA';
+    evidenceDraftStatusEl.className = '';
+    evidenceDraftPanel.hidden = true;
+    return;
+  }
+
+  evidenceDraftStatusEl.textContent = 'DRAFT LOCAL';
+  evidenceDraftStatusEl.className = 'ok';
+  evidenceDraftPanel.hidden = false;
+
+  evidenceDraftResultEl.innerHTML =
+    '<strong>✓ DRAFT EVIDENCE LOCAL</strong><br>' +
+    '<b>Evidence Draft ID:</b> ' +
+      escapeHtml(currentEvidenceDraft.evidenceDraftId || '-') + '<br>' +
+    '<b>Project:</b> ' +
+      escapeHtml(currentEvidenceDraft.projectId || '-') + '<br>' +
+    '<b>Project Material ID:</b> ' +
+      escapeHtml(currentEvidenceDraft.projectMaterialId || '-') + '<br>' +
+    '<b>Designator:</b> ' +
+      escapeHtml(currentEvidenceDraft.designator || '-') + '<br>' +
+    '<b>Material:</b> ' +
+      escapeHtml(currentEvidenceDraft.materialName || '-') + '<br>' +
+    '<b>Status:</b> ' +
+      escapeHtml(currentEvidenceDraft.status || '-') + '<br>' +
+    '<small>Draft tersimpan lokal. Belum dikirim ke server.</small>';
+}
+
+function restoreEvidenceDraft(){
+  const projectId = getSelectedProjectId();
+  if (!projectId) return;
+
+  const drafts = loadEvidenceDrafts();
+
+  const draft = drafts
+    .filter(function(item){
+      return (
+        item &&
+        item.projectId === projectId &&
+        item.status === 'DRAFT_LOCAL'
+      );
+    })
+    .sort(function(a, b){
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    })[0];
+
+  if (draft) {
+    currentEvidenceDraft = draft;
+    renderEvidenceDraft();
+  }
+}
+
 function acceptMaterialBundle(bundle){
   const payload = readSignedPayload(bundle);
   const nowSec = Math.floor(Date.now() / 1000);
@@ -200,7 +329,14 @@ function renderMaterials(projectId){
 
   currentMaterials.forEach(function(item, index){
     const card = document.createElement('div');
-    card.className = 'material-card';
+
+    const isDraftSelected =
+      currentEvidenceDraft &&
+      currentEvidenceDraft.projectMaterialId === item.projectMaterialId;
+
+    card.className =
+      'material-card' +
+      (isDraftSelected ? ' draft-selected' : '');
 
     card.innerHTML =
       '<div class="material-title">' +
@@ -221,7 +357,18 @@ function renderMaterials(projectId){
           ' ' + escapeHtml(item.unit || '') + '<br>' +
         '<b>Project Material ID:</b> ' +
           escapeHtml(item.projectMaterialId || '-') +
+      '</div>' +
+      '<div class="material-actions">' +
+        '<button class="evidence-btn" type="button">' +
+          (isDraftSelected ? 'DRAFT TERPILIH' : 'BUAT DRAFT EVIDENCE') +
+        '</button>' +
       '</div>';
+
+    card
+      .querySelector('.evidence-btn')
+      .addEventListener('click', function(){
+        createOrReuseEvidenceDraft(item);
+      });
 
     materialListEl.appendChild(card);
   });
@@ -307,6 +454,7 @@ if (currentProjects.length === 0) {
 }
 
 restoreMaterialCache();
+restoreEvidenceDraft();
 
 function decodeJwtPayload(token) {
   try {

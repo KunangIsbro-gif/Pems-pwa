@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 6C</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step6c-fix">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step6c-fix">
+  <title>PEMS V14C-B2A Step 7A</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step7a">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step7a">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -38,15 +38,29 @@
     }
     .material-title { font-weight:800; color:#0f2740; }
     .material-meta { margin-top:7px; font-size:13px; line-height:1.55; color:#475569; }
+    .material-actions { margin-top:12px; }
+    .evidence-btn {
+      border:0;
+      border-radius:9px;
+      padding:10px 14px;
+      cursor:pointer;
+      font-weight:700;
+      background:#0f4c81;
+      color:white;
+    }
+    .material-card.draft-selected {
+      outline:2px solid #0f4c81;
+      background:#f5f9fd;
+    }
 </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 6C</div>
-      <h1>Offline Material Cache</h1>
+      <div class="badge">PEMS V14C-B2A STEP 7A</div>
+      <h1>Local Evidence Draft</h1>
       <p class="lead">
-        Target tahap ini: material project yang sudah dimuat tetap tersedia setelah tab ditutup dan PEMS dibuka lagi saat <b>OFFLINE</b>.
+        Target tahap ini: pilih material dari cache project lalu buat <b>draft evidence lokal</b>. Tidak ada data yang dikirim ke server pada tahap ini.
       </p>
 
       <div class="status-grid">
@@ -65,6 +79,10 @@
         <div class="status-card">
           <span>MATERIAL CACHE</span>
           <strong id="materialStatus">BELUM ADA</strong>
+        </div>
+        <div class="status-card">
+          <span>EVIDENCE DRAFT</span>
+          <strong id="evidenceDraftStatus">BELUM ADA</strong>
         </div>
       </div>
 
@@ -130,10 +148,15 @@
         <div id="materialList" class="project-list"></div>
       </section>
 
+      <section id="evidenceDraftPanel" class="panel" hidden>
+        <h2>Draft Evidence Lokal</h2>
+        <div id="evidenceDraftResult" class="result okbox"></div>
+      </section>
+
       <div class="passbox">
-        <strong>PASS STEP 6C</strong> bila setelah material sudah dimuat:
-        WiFi OFF → tutup tab PEMS → buka PEMS lagi → 13 material tetap tampil dan
-        <strong>MATERIAL CACHE = CACHED OFFLINE</strong>.
+        <strong>PASS STEP 7A</strong> bila salah satu material dipilih lalu muncul
+        <strong>✓ DRAFT EVIDENCE LOCAL</strong> dengan Evidence Draft ID,
+        Project Material ID, dan status <strong>DRAFT_LOCAL</strong>.
       </div>
     </section>
   </main>
@@ -141,6 +164,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step6c-fix"></script>
+  <script src="./app.js?v=b2a-step7a"></script>
 </body>
 </html>
