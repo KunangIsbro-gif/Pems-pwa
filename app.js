@@ -6,6 +6,7 @@ const projectResultEl = document.getElementById('projectResult');
 const loginResultEl = document.getElementById('loginResult');
 const verifyBtn = document.getElementById('verifyBtn');
 const loadProjectsBtn = document.getElementById('loadProjectsBtn');
+const readMaterialsBtn = document.getElementById('readMaterialsBtn');
 const projectsPanel = document.getElementById('projectsPanel');
 const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
@@ -17,6 +18,17 @@ const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
 let currentGoogleCredential = '';
 let currentServerProof = '';
 let currentProjects = [];
+
+function getSelectedProjectId(){
+  return localStorage.getItem(SELECTED_PROJECT_KEY) || '';
+}
+
+function refreshMaterialButton(){
+  readMaterialsBtn.disabled = !(
+    currentServerProof &&
+    getSelectedProjectId()
+  );
+}
 
 function setConnectivity(){
   const online = navigator.onLine;
@@ -64,6 +76,7 @@ function acceptProof(proof){
     proofEl.textContent = 'INVALID / EXPIRED';
     proofEl.className = 'bad';
     loadProjectsBtn.disabled = true;
+    refreshMaterialButton();
     return false;
   }
 
@@ -72,6 +85,7 @@ function acceptProof(proof){
   proofEl.textContent = 'RECEIVED';
   proofEl.className = 'ok';
   loadProjectsBtn.disabled = false;
+  refreshMaterialButton();
   return true;
 }
 
@@ -219,6 +233,29 @@ loadProjectsBtn.addEventListener('click', function(){
   );
 });
 
+readMaterialsBtn.addEventListener('click', function(){
+  const projectId = getSelectedProjectId();
+
+  if (!currentServerProof) {
+    alert('Session proof belum ada / sudah expired. Login ulang dulu.');
+    return;
+  }
+
+  if (!projectId) {
+    alert('Pilih project dulu.');
+    return;
+  }
+
+  submitHiddenPost(
+    {
+      action: 'read_project_materials',
+      proof: currentServerProof,
+      project_id: projectId
+    },
+    '_blank'
+  );
+});
+
 function renderProjects(){
   projectsPanel.hidden = false;
   projectListEl.innerHTML = '';
@@ -247,6 +284,7 @@ function renderProjects(){
       localStorage.setItem(SELECTED_PROJECT_KEY, project.projectId || '');
       renderProjects();
       renderSelectedProject(project);
+      refreshMaterialButton();
     });
 
     projectListEl.appendChild(card);
@@ -256,6 +294,8 @@ function renderProjects(){
     const selected = currentProjects.find(p => p.projectId === selectedId);
     if (selected) renderSelectedProject(selected);
   }
+
+  refreshMaterialButton();
 }
 
 function renderSelectedProject(project){
@@ -294,3 +334,5 @@ function escapeHtml(value){
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
   }[ch]));
 }
+
+refreshMaterialButton();

@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 5A</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step5a">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step5a">
+  <title>PEMS V14C-B2A Step 6A</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step6a">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step6a">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -35,11 +35,10 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 5A</div>
-      <h1>Offline Project Cache</h1>
+      <div class="badge">PEMS V14C-B2A STEP 6A</div>
+      <h1>Read Project Material</h1>
       <p class="lead">
-        Target tahap ini: project yang sudah dipilih tetap tersedia setelah
-        tab ditutup dan PEMS dibuka lagi saat <b>OFFLINE</b>.
+        Target tahap ini: project yang sudah dipilih dipakai untuk membaca material dari <b>04_PROJECT_MATERIAL</b> secara <b>READ ONLY</b>.
       </p>
 
       <div class="status-grid">
@@ -102,10 +101,20 @@
         <div id="projectList" class="project-list"></div>
       </section>
 
+      <section class="panel">
+        <h2>4. Read Material Project</h2>
+        <p>
+          Gunakan project yang sudah dipilih. Server akan memvalidasi session,
+          lalu membaca <b>04_PROJECT_MATERIAL</b> secara read-only.
+        </p>
+        <button id="readMaterialsBtn" class="primary-btn" type="button" disabled>
+          READ MATERIAL DATA
+        </button>
+      </section>
+
       <div class="passbox">
-        <strong>PASS STEP 5A</strong> bila project sudah dipilih, lalu:
-        WiFi OFF → tutup tab PEMS → buka PEMS lagi → project tetap tampil
-        sebagai <strong>✓ PROJECT TERPILIH</strong>.
+        <strong>PASS STEP 6A</strong> bila tab server menampilkan
+        <strong>✓ MATERIAL READ OK</strong> dan daftar material milik project terpilih.
       </div>
     </section>
   </main>
@@ -113,6 +122,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step5a"></script>
+  <script src="./app.js?v=b2a-step6a"></script>
 </body>
 </html>
