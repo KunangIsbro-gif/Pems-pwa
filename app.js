@@ -665,12 +665,13 @@ function restoreEvidenceDraft(){
     .filter(function(item){
       return (
         item &&
-        item.projectId === projectId &&
-        item.status === 'DRAFT_LOCAL'
+        item.projectId === projectId
       );
     })
     .sort(function(a, b){
-      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+      const aTime = String(a.syncedAt || a.createdAt || '');
+      const bTime = String(b.syncedAt || b.createdAt || '');
+      return bTime.localeCompare(aTime);
     })[0];
 
   if (draft) {
@@ -1080,6 +1081,21 @@ function refreshSyncGate(){
     return;
   }
 
+  if (alreadySynced) {
+    syncServerStatusEl.textContent = 'SYNCED';
+    syncServerStatusEl.className = 'ok';
+    syncEvidenceBtn.disabled = true;
+
+    syncGateResultEl.className = 'result okbox';
+    syncGateResultEl.innerHTML =
+      '<strong>✓ EVIDENCE SUDAH SYNCED</strong><br>' +
+      'Evidence Item ID: ' +
+      escapeHtml(currentEvidenceDraft.evidenceItemId || '-') + '<br>' +
+      'Photo ID: ' +
+      escapeHtml(currentEvidenceDraft.photoId || '-');
+    return;
+  }
+
   if (!hasProof) {
     syncServerStatusEl.textContent = 'WAIT PROOF';
     syncServerStatusEl.className = '';
@@ -1094,21 +1110,6 @@ function refreshSyncGate(){
     syncGateResultEl.className = 'result muted';
     syncGateResultEl.textContent =
       'Draft Evidence harus punya Project ID, Project Material ID, dan Point Session ID.';
-    return;
-  }
-
-  if (alreadySynced) {
-    syncServerStatusEl.textContent = 'SYNCED';
-    syncServerStatusEl.className = 'ok';
-    syncEvidenceBtn.disabled = true;
-
-    syncGateResultEl.className = 'result okbox';
-    syncGateResultEl.innerHTML =
-      '<strong>✓ EVIDENCE SUDAH SYNCED</strong><br>' +
-      'Evidence Item ID: ' +
-      escapeHtml(currentEvidenceDraft.evidenceItemId || '-') + '<br>' +
-      'Photo ID: ' +
-      escapeHtml(currentEvidenceDraft.photoId || '-');
     return;
   }
 
@@ -1305,12 +1306,7 @@ async function acceptSyncResultBundle(bundle){
 
     saveEvidenceDrafts(drafts);
 
-    if (
-      currentEvidenceDraft &&
-      currentEvidenceDraft.evidenceDraftId === payload.evidenceDraftId
-    ) {
-      currentEvidenceDraft = drafts[draftIndex];
-    }
+    currentEvidenceDraft = drafts[draftIndex];
   }
 
   // Update photo record in IndexedDB.
