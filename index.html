@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 4B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step4b">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step4b">
+  <title>PEMS V14C-B2A Step 5A</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step5a">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step5a">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -35,11 +35,11 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 4B</div>
-      <h1>Project Data di PEMS</h1>
+      <div class="badge">PEMS V14C-B2A STEP 5A</div>
+      <h1>Offline Project Cache</h1>
       <p class="lead">
-        Target tahap ini: project dari <b>01_PROJECTS</b> kembali dan tampil
-        langsung di halaman PEMS.
+        Target tahap ini: project yang sudah dipilih tetap tersedia setelah
+        tab ditutup dan PEMS dibuka lagi saat <b>OFFLINE</b>.
       </p>
 
       <div class="status-grid">
@@ -52,13 +52,13 @@
           <strong id="proofStatus">BELUM ADA</strong>
         </div>
         <div class="status-card">
-          <span>PROJECT DATA</span>
+          <span>PROJECT CACHE</span>
           <strong id="projectStatus">BELUM ADA</strong>
         </div>
       </div>
 
       <section id="projectResult" class="result muted">
-        Belum ada project dari server.
+        Belum ada project di cache lokal.
       </section>
 
       <section class="panel">
@@ -86,9 +86,10 @@
       </section>
 
       <section class="panel">
-        <h2>3. Ambil Project ke PEMS</h2>
+        <h2>3. Ambil / Refresh Project</h2>
         <p>
-          Server memvalidasi session dan membaca <b>01_PROJECTS</b> secara read-only.
+          Saat online, server memvalidasi session dan membaca
+          <b>01_PROJECTS</b> secara read-only.
         </p>
         <button id="loadProjectsBtn" class="primary-btn" type="button" disabled>
           AMBIL PROJECT KE PEMS
@@ -96,14 +97,15 @@
       </section>
 
       <section id="projectsPanel" class="panel" hidden>
-        <h2>Project Aktif</h2>
+        <h2>Project Tersimpan</h2>
         <div id="selectedProjectBanner"></div>
         <div id="projectList" class="project-list"></div>
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 4B</strong> bila project tampil di halaman ini dan
-        tombol <strong>PILIH PROJECT</strong> bisa menandai project yang dipilih.
+        <strong>PASS STEP 5A</strong> bila project sudah dipilih, lalu:
+        WiFi OFF → tutup tab PEMS → buka PEMS lagi → project tetap tampil
+        sebagai <strong>✓ PROJECT TERPILIH</strong>.
       </div>
     </section>
   </main>
@@ -111,6 +113,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step4b"></script>
+  <script src="./app.js?v=b2a-step5a"></script>
 </body>
 </html>

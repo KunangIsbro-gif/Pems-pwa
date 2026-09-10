@@ -11,8 +11,8 @@ const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
 
 const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
-const PROJECTS_KEY = 'PEMS_PROJECTS_STEP4B';
-const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP4B';
+const PROJECTS_KEY = 'PEMS_PROJECTS_STEP5A';
+const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -95,16 +95,17 @@ function acceptProjectBundle(bundle){
   }
 
   currentProjects = payload.projects;
-  sessionStorage.setItem(PROJECTS_KEY, JSON.stringify(currentProjects));
+  localStorage.setItem(PROJECTS_KEY, JSON.stringify(currentProjects));
 
-  projectStatusEl.textContent = 'LOADED';
+  projectStatusEl.textContent = 'CACHED';
   projectStatusEl.className = 'ok';
 
   projectResultEl.className = 'result okbox';
   projectResultEl.innerHTML =
-    '<strong>✓ PROJECT DATA LOADED</strong><br>' +
+    '<strong>✓ PROJECT DATA LOADED & CACHED</strong><br>' +
     'Total project ACTIVE: ' + escapeHtml(String(currentProjects.length)) + '<br>' +
-    'Email session: ' + escapeHtml(payload.email || '-');
+    'Email session: ' + escapeHtml(payload.email || '-') + '<br>' +
+    '<small>Project disimpan lokal agar tetap tersedia saat PEMS dibuka kembali offline.</small>';
 
   renderProjects();
   return true;
@@ -141,15 +142,16 @@ if (!currentServerProof) {
 
 if (currentProjects.length === 0) {
   try {
-    const cached = JSON.parse(sessionStorage.getItem(PROJECTS_KEY) || '[]');
+    const cached = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]');
     if (Array.isArray(cached) && cached.length) {
       currentProjects = cached;
-      projectStatusEl.textContent = 'LOADED';
+      projectStatusEl.textContent = navigator.onLine ? 'CACHED' : 'CACHED OFFLINE';
       projectStatusEl.className = 'ok';
       projectResultEl.className = 'result okbox';
       projectResultEl.innerHTML =
-        '<strong>✓ PROJECT DATA LOADED</strong><br>' +
-        'Total project ACTIVE: ' + escapeHtml(String(currentProjects.length));
+        '<strong>✓ PROJECT CACHE READY</strong><br>' +
+        'Total project tersimpan: ' + escapeHtml(String(currentProjects.length)) + '<br>' +
+        '<small>Data project dibaca dari cache lokal perangkat.</small>';
       renderProjects();
     }
   } catch (e) {}
@@ -198,7 +200,7 @@ verifyBtn.addEventListener('click', function(){
       action: 'verify_google',
       credential: currentGoogleCredential
     },
-    '_self'
+    '_blank'
   );
 });
 
@@ -213,7 +215,7 @@ loadProjectsBtn.addEventListener('click', function(){
       action: 'read_projects_handoff',
       proof: currentServerProof
     },
-    '_self'
+    '_blank'
   );
 });
 
@@ -221,7 +223,7 @@ function renderProjects(){
   projectsPanel.hidden = false;
   projectListEl.innerHTML = '';
 
-  const selectedId = sessionStorage.getItem(SELECTED_PROJECT_KEY) || '';
+  const selectedId = localStorage.getItem(SELECTED_PROJECT_KEY) || '';
 
   currentProjects.forEach(function(project){
     const card = document.createElement('div');
@@ -242,7 +244,7 @@ function renderProjects(){
       '</div>';
 
     card.querySelector('.select-btn').addEventListener('click', function(){
-      sessionStorage.setItem(SELECTED_PROJECT_KEY, project.projectId || '');
+      localStorage.setItem(SELECTED_PROJECT_KEY, project.projectId || '');
       renderProjects();
       renderSelectedProject(project);
     });
@@ -271,7 +273,7 @@ function submitHiddenPost(fields, target){
   const form = document.createElement('form');
   form.method = 'POST';
   form.action = bridgeUrl;
-  form.target = target || '_self';
+  form.target = target || '_blank';
   form.style.display = 'none';
 
   Object.keys(fields || {}).forEach(function(key){

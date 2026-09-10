@@ -1,23 +1,32 @@
 
-const CACHE_NAME = 'pems-v14c-b2a-step4b-v1';
+const CACHE_NAME = 'pems-v14c-b2a-step5a-v1';
+
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=b2a-step4b',
-  './app.js?v=b2a-step4b',
-  './manifest.json?v=b2a-step4b'
+  './styles.css?v=b2a-step5a',
+  './app.js?v=b2a-step5a',
+  './manifest.json?v=b2a-step5a'
 ];
 
 self.addEventListener('install', event => {
   self.skipWaiting();
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL))
+  );
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then(keys =>
+        Promise.all(
+          keys
+            .filter(key => key !== CACHE_NAME)
+            .map(key => caches.delete(key))
+        )
+      )
+      .then(() => self.clients.claim())
   );
 });
 
@@ -36,13 +45,28 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy));
+          return response;
+        })
+        .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
   event.respondWith(
-    fetch(event.request)
-      .then(resp => {
-        const copy = resp.clone();
+    caches.match(event.request).then(cached => {
+      if (cached) return cached;
+
+      return fetch(event.request).then(response => {
+        const copy = response.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
-        return resp;
-      })
-      .catch(() => caches.match(event.request).then(r => r || caches.match('./index.html')))
+        return response;
+      });
+    })
   );
 });
