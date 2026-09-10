@@ -58,6 +58,9 @@ const POINT_REQUIREMENTS_KEY = 'PEMS_POINT_REQUIREMENTS_STEP9A';
 const AUTO_SYNC_ENABLED_KEY = 'PEMS_AUTO_SYNC_ENABLED_STEP9C';
 const AUTO_SYNC_ACTIVE_KEY = 'PEMS_AUTO_SYNC_ACTIVE_STEP9C';
 const AUTO_SYNC_LAST_PHOTO_KEY = 'PEMS_AUTO_SYNC_LAST_PHOTO_STEP9C';
+const PEMS_DEVICE_MODE = 'DEV';
+const DEV_LAST_GPS_KEY = 'PEMS_DEV_LAST_GPS_STEP9C';
+const DEV_FALLBACK_ACCURACY_M = 999;
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -882,42 +885,269 @@ function makeLocalPhotoId(){
   return 'PHOTO-LOCAL-' + stamp + '-' + rand;
 }
 
-function getGpsPosition(){
-  return new Promise(function(resolve, reject){
-    if (!navigator.geolocation) {
-      reject(new Error('Browser tidak mendukung GPS/geolocation.'));
-      return;
+
+function saveDevLastGps(gps){
+  if (
+    PEMS_DEVICE_MODE !== 'DEV' ||
+    !gps ||
+    !Number.isFinite(Number(gps.latitude)) ||
+    !Number.isFinite(Number(gps.longitude))
+  ) {
+    return;
+  }
+
+  localStorage.setItem(
+    DEV_LAST_GPS_KEY,
+    JSON.stringify({
+      latitude: Number(gps.latitude),
+      longitude: Number(gps.longitude),
+      accuracy: Number(gps.accuracy || 0),
+      capturedAt:
+        gps.capturedAt ||
+        new Date().toISOString(),
+      cachedAt:
+        new Date().toISOString(),
+      source:
+        gps.source || 'LIVE_GPS'
+    })
+  );
+}
+
+function readDevLastGps(){
+  if (PEMS_DEVICE_MODE !== 'DEV') {
+    return null;
+  }
+
+  try {
+    const raw =
+      JSON.parse(
+        localStorage.getItem(
+          DEV_LAST_GPS_KEY
+        ) || 'null'
+      );
+
+    if (
+      raw &&
+      Number.isFinite(Number(raw.latitude)) &&
+      Number.isFinite(Number(raw.longitude))
+    ) {
+      return raw;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+async function findLatestGpsFromLocalPhotos(){
+  if (PEMS_DEVICE_MODE !== 'DEV') {
+    return null;
+  }
+
+  try {
+    const photos =
+      await getAllLocalPhotos();
+
+    const candidates =
+      photos
+        .filter(function(item){
+          return (
+            item &&
+            Number.isFinite(Number(item.latitude)) &&
+            Number.isFinite(Number(item.longitude))
+          );
+        })
+        .sort(function(a, b){
+          return String(
+            b.capturedAt ||
+            b.createdAt ||
+            ''
+          ).localeCompare(
+            String(
+              a.capturedAt ||
+              a.createdAt ||
+              ''
+            )
+          );
+        });
+
+    if (!candidates.length) {
+      return null;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      function(position){
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          capturedAt: new Date().toISOString()
-        });
-      },
-      function(error){
-        let message = 'GPS gagal diperoleh.';
+    const latest =
+      candidates[0];
 
-        if (error && error.code === 1) {
-          message = 'Izin lokasi ditolak.';
-        } else if (error && error.code === 2) {
-          message = 'Lokasi tidak tersedia.';
-        } else if (error && error.code === 3) {
-          message = 'Permintaan GPS timeout.';
-        }
+    return {
+      latitude:
+        Number(latest.latitude),
+      longitude:
+        Number(latest.longitude),
+      accuracy:
+        Number(latest.accuracy || 0),
+      capturedAt:
+        latest.capturedAt ||
+        latest.createdAt ||
+        '',
+      cachedAt:
+        new Date().toISOString(),
+      source:
+        'LOCAL_PHOTO_HISTORY'
+    };
+  }
+  catch (e) {
+    return null;
+  }
+}
 
-        reject(new Error(message));
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 0
-      }
+async function getDevGpsFallback(reason){
+  if (
+    PEMS_DEVICE_MODE !== 'DEV' ||
+    navigator.onLine
+  ) {
+    return null;
+  }
+
+  let cached =
+    readDevLastGps();
+
+  if (!cached) {
+    cached =
+      await findLatestGpsFromLocalPhotos();
+
+    if (cached) {
+      saveDevLastGps(cached);
+    }
+  }
+
+  if (!cached) {
+    return null;
+  }
+
+  return {
+    latitude:
+      Number(cached.latitude),
+    longitude:
+      Number(cached.longitude),
+
+    // Sengaja dibikin sangat buruk agar tidak pernah
+    // dianggap GPS valid lapangan.
+    accuracy:
+      Math.max(
+        DEV_FALLBACK_ACCURACY_M,
+        Number(cached.accuracy || 0)
+      ),
+
+    capturedAt:
+      new Date().toISOString(),
+
+    gpsSource:
+      'DEV_CACHED_GPS',
+
+    cachedGpsAt:
+      cached.capturedAt ||
+      cached.cachedAt ||
+      '',
+
+    fallbackReason:
+      reason || 'OFFLINE_GPS_UNAVAILABLE'
+  };
+}
+
+async function getGpsPosition(){
+  if (!navigator.geolocation) {
+    const fallback =
+      await getDevGpsFallback(
+        'GEOLOCATION_NOT_SUPPORTED'
+      );
+
+    if (fallback) {
+      return fallback;
+    }
+
+    throw new Error(
+      'Browser tidak mendukung GPS/geolocation.'
     );
-  });
+  }
+
+  try {
+    const gps =
+      await new Promise(function(resolve, reject){
+        navigator.geolocation.getCurrentPosition(
+          function(position){
+            resolve({
+              latitude:
+                position.coords.latitude,
+              longitude:
+                position.coords.longitude,
+              accuracy:
+                position.coords.accuracy,
+              capturedAt:
+                new Date().toISOString(),
+              gpsSource:
+                'LIVE_GPS'
+            });
+          },
+          function(error){
+            let message =
+              'GPS gagal diperoleh.';
+
+            if (error && error.code === 1) {
+              message =
+                'Izin lokasi ditolak.';
+            }
+            else if (
+              error &&
+              error.code === 2
+            ) {
+              message =
+                'Lokasi tidak tersedia.';
+            }
+            else if (
+              error &&
+              error.code === 3
+            ) {
+              message =
+                'Permintaan GPS timeout.';
+            }
+
+            const err =
+              new Error(message);
+
+            err.gpsCode =
+              error && error.code
+                ? error.code
+                : 0;
+
+            reject(err);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 12000,
+            maximumAge: 0
+          }
+        );
+      });
+
+    saveDevLastGps(gps);
+    return gps;
+  }
+  catch (error) {
+    // DEV/LAPTOP only:
+    // saat offline dan browser gagal memperoleh lokasi,
+    // gunakan posisi terakhir sebagai placeholder test.
+    const fallback =
+      await getDevGpsFallback(
+        error && error.message
+          ? error.message
+          : 'GPS_FAILED'
+      );
+
+    if (fallback) {
+      return fallback;
+    }
+
+    throw error;
+  }
 }
 
 
@@ -990,7 +1220,14 @@ async function retryGpsForCurrentPhoto(){
       longitude: gps.longitude,
       accuracy: gps.accuracy,
       capturedAt: gps.capturedAt,
-      gpsRetriedAt: new Date().toISOString()
+      gpsSource:
+        gps.gpsSource || 'LIVE_GPS',
+      cachedGpsAt:
+        gps.cachedGpsAt || '',
+      gpsFallbackReason:
+        gps.fallbackReason || '',
+      gpsRetriedAt:
+        new Date().toISOString()
     });
 
     await putLocalPhoto(updated);
@@ -1077,6 +1314,15 @@ function renderLocalPhoto(record){
       escapeHtml(String(record.accuracy ?? '-')) + ' m<br>' +
     '<b>GPS Quality:</b> ' +
       escapeHtml(gpsQuality.label) + '<br>' +
+    '<b>GPS Source:</b> ' +
+      escapeHtml(record.gpsSource || 'LIVE_GPS') + '<br>' +
+    (
+      record.gpsSource === 'DEV_CACHED_GPS'
+        ? (
+            '<b>DEV Warning:</b> Cached GPS hanya untuk test laptop; bukan koordinat capture aktual.<br>'
+          )
+        : ''
+    ) +
     '<b>Status:</b> ' +
       escapeHtml(record.status || 'PHOTO_LOCAL_READY') +
     (
@@ -1199,6 +1445,7 @@ function refreshPhotoGallery(){
         '<b>Foto ' + escapeHtml(String(index + 1)) + '</b><br>' +
         escapeHtml(item.fileName || '-') + '<br>' +
         'GPS ' + escapeHtml(String(item.accuracy ?? '-')) + ' m<br>' +
+        escapeHtml(item.gpsSource || 'LIVE_GPS') + '<br>' +
         '<span class="photo-mini-status">' +
           escapeHtml(item.status || 'PHOTO_LOCAL_READY') +
         '</span>' +
@@ -2868,7 +3115,10 @@ photoInput.addEventListener('change', async function(){
   photoLocalStatusEl.textContent = 'PROCESSING';
   photoLocalStatusEl.className = '';
   photoResultEl.className = 'result muted';
-  photoResultEl.textContent = 'Mengambil GPS dan menyimpan foto lokal...';
+  photoResultEl.textContent =
+    navigator.onLine
+      ? 'Mengambil GPS dan menyimpan foto lokal...'
+      : 'OFFLINE: mencoba GPS perangkat. Jika timeout pada DEV/LAPTOP, PEMS akan memakai DEV CACHED GPS.';
 
   try {
     const gps = await getGpsPosition();
@@ -2886,6 +3136,12 @@ photoInput.addEventListener('change', async function(){
       longitude: gps.longitude,
       accuracy: gps.accuracy,
       capturedAt: gps.capturedAt,
+      gpsSource:
+        gps.gpsSource || 'LIVE_GPS',
+      cachedGpsAt:
+        gps.cachedGpsAt || '',
+      gpsFallbackReason:
+        gps.fallbackReason || '',
       createdAt: new Date().toISOString(),
       status: 'PHOTO_LOCAL_READY'
     };
