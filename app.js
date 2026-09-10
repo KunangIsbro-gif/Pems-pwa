@@ -3354,7 +3354,8 @@ window.handleGoogleCredential = function(response) {
   loginResultEl.innerHTML =
     '<strong>✓ LOGIN OK</strong><br>' +
     'Nama: ' + escapeHtml(claims.name || '-') + '<br>' +
-    'Email: ' + escapeHtml(claims.email || '-');
+    'Email: ' + escapeHtml(claims.email || '-') + '<br>' +
+    '<small>Setelah verifikasi, otorisasi memakai SERVER PROOF. Login Google tidak perlu tetap tampil aktif.</small>';
 };
 
 verifyBtn.addEventListener('click', function(){
@@ -3368,7 +3369,7 @@ verifyBtn.addEventListener('click', function(){
       action: 'verify_google',
       credential: currentGoogleCredential
     },
-    '_blank'
+    '_self'
   );
 });
 
