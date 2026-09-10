@@ -18,7 +18,7 @@ const selectedProjectBanner = document.getElementById('selectedProjectBanner');
 const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
 const PROJECTS_KEY = 'PEMS_PROJECTS_STEP5A';
 const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
-const MATERIALS_KEY = 'PEMS_MATERIALS_STEP6B';
+const MATERIALS_KEY = 'PEMS_MATERIALS_STEP6C';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -40,6 +40,16 @@ function setConnectivity(){
   const online = navigator.onLine;
   browserEl.textContent = online ? 'ONLINE' : 'OFFLINE';
   browserEl.className = online ? 'ok' : 'bad';
+
+  if (currentMaterials.length > 0) {
+    materialStatusEl.textContent = online ? 'CACHED' : 'CACHED OFFLINE';
+    materialStatusEl.className = 'ok';
+
+    const projectId = getSelectedProjectId();
+    if (projectId) {
+      renderMaterials(projectId);
+    }
+  }
 }
 window.addEventListener('online', setConnectivity);
 window.addEventListener('offline', setConnectivity);
@@ -139,7 +149,7 @@ function acceptMaterialBundle(bundle){
 
   const validShape =
     payload &&
-    payload.v === 'V14C-B2A-STEP6B' &&
+    payload.v === 'V14C-B2A-STEP6C' &&
     payload.kind === 'PROJECT_MATERIAL_LIST' &&
     typeof payload.projectId === 'string' &&
     payload.projectId === selectedProjectId &&
@@ -155,17 +165,17 @@ function acceptMaterialBundle(bundle){
 
   currentMaterials = payload.materials;
 
-  // Step 6B sengaja session-only. Offline persistent cache material
-  // baru diuji pada step berikutnya.
-  sessionStorage.setItem(
+  // Step 6C: material disimpan persistently agar tersedia saat offline.
+  localStorage.setItem(
     MATERIALS_KEY,
     JSON.stringify({
       projectId: payload.projectId,
-      materials: currentMaterials
+      materials: currentMaterials,
+      cachedAt: Date.now()
     })
   );
 
-  materialStatusEl.textContent = 'LOADED';
+  materialStatusEl.textContent = 'CACHED';
   materialStatusEl.className = 'ok';
 
   renderMaterials(payload.projectId);
@@ -177,9 +187,16 @@ function renderMaterials(projectId){
   materialListEl.innerHTML = '';
 
   materialSummaryEl.innerHTML =
-    '<strong>✓ MATERIAL DATA LOADED</strong><br>' +
+    '<strong>✓ ' +
+      (navigator.onLine ? 'MATERIAL DATA READY' : 'MATERIAL CACHE READY') +
+    '</strong><br>' +
     'Project: ' + escapeHtml(projectId || '-') + '<br>' +
-    'Total material: ' + escapeHtml(String(currentMaterials.length));
+    'Total material: ' + escapeHtml(String(currentMaterials.length)) + '<br>' +
+    '<small>' +
+      (navigator.onLine
+        ? 'Material tersedia di cache lokal perangkat.'
+        : 'Material dibaca dari cache lokal perangkat.')
+    + '</small>';
 
   currentMaterials.forEach(function(item, index){
     const card = document.createElement('div');
@@ -210,10 +227,10 @@ function renderMaterials(projectId){
   });
 }
 
-function restoreMaterialSession(){
+function restoreMaterialCache(){
   try {
     const stored = JSON.parse(
-      sessionStorage.getItem(MATERIALS_KEY) || 'null'
+      localStorage.getItem(MATERIALS_KEY) || 'null'
     );
 
     if (
@@ -222,7 +239,8 @@ function restoreMaterialSession(){
       Array.isArray(stored.materials)
     ) {
       currentMaterials = stored.materials;
-      materialStatusEl.textContent = 'LOADED';
+      materialStatusEl.textContent =
+        navigator.onLine ? 'CACHED' : 'CACHED OFFLINE';
       materialStatusEl.className = 'ok';
       renderMaterials(stored.projectId);
     }
@@ -288,7 +306,7 @@ if (currentProjects.length === 0) {
   } catch (e) {}
 }
 
-restoreMaterialSession();
+restoreMaterialCache();
 
 function decodeJwtPayload(token) {
   try {

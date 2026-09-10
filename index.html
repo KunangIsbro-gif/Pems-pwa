@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 6B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step6b">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step6b">
+  <title>PEMS V14C-B2A Step 6C</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step6c">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step6c">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -43,10 +43,10 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 6B</div>
-      <h1>Material Data di PEMS</h1>
+      <div class="badge">PEMS V14C-B2A STEP 6C</div>
+      <h1>Offline Material Cache</h1>
       <p class="lead">
-        Target tahap ini: material project yang sudah dibaca server kembali dan tampil langsung di halaman PEMS.
+        Target tahap ini: material project yang sudah dimuat tetap tersedia setelah tab ditutup dan PEMS dibuka lagi saat <b>OFFLINE</b>.
       </p>
 
       <div class="status-grid">
@@ -63,7 +63,7 @@
           <strong id="projectStatus">BELUM ADA</strong>
         </div>
         <div class="status-card">
-          <span>MATERIAL DATA</span>
+          <span>MATERIAL CACHE</span>
           <strong id="materialStatus">BELUM ADA</strong>
         </div>
       </div>
@@ -131,8 +131,9 @@
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 6B</strong> bila <strong>MATERIAL DATA = LOADED</strong>
-        dan 13 material project tampil langsung di halaman PEMS.
+        <strong>PASS STEP 6C</strong> bila setelah material sudah dimuat:
+        WiFi OFF → tutup tab PEMS → buka PEMS lagi → 13 material tetap tampil dan
+        <strong>MATERIAL CACHE = CACHED OFFLINE</strong>.
       </div>
     </section>
   </main>
@@ -140,6 +141,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step6b"></script>
+  <script src="./app.js?v=b2a-step6c"></script>
 </body>
 </html>
