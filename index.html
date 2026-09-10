@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 7A</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step7a">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step7a">
+  <title>PEMS V14C-B2A Step 7B</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step7b">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step7b">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -57,10 +57,10 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 7A</div>
-      <h1>Local Evidence Draft</h1>
+      <div class="badge">PEMS V14C-B2A STEP 7B</div>
+      <h1>Local Photo + GPS</h1>
       <p class="lead">
-        Target tahap ini: pilih material dari cache project lalu buat <b>draft evidence lokal</b>. Tidak ada data yang dikirim ke server pada tahap ini.
+        Target tahap ini: tambahkan <b>1 foto + GPS</b> ke draft evidence lokal. Foto disimpan di <b>IndexedDB</b>, belum dikirim ke server.
       </p>
 
       <div class="status-grid">
@@ -83,6 +83,10 @@
         <div class="status-card">
           <span>EVIDENCE DRAFT</span>
           <strong id="evidenceDraftStatus">BELUM ADA</strong>
+        </div>
+        <div class="status-card">
+          <span>PHOTO LOCAL</span>
+          <strong id="photoLocalStatus">BELUM ADA</strong>
         </div>
       </div>
 
@@ -153,10 +157,33 @@
         <div id="evidenceDraftResult" class="result okbox"></div>
       </section>
 
+      <section id="photoPanel" class="panel">
+        <h2>Foto + GPS Lokal</h2>
+        <p>
+          Pilih satu foto untuk draft evidence aktif. Setelah foto dipilih,
+          PEMS akan meminta lokasi GPS dan menyimpan foto + metadata secara lokal.
+        </p>
+
+        <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+
+        <button id="choosePhotoBtn" class="primary-btn" type="button" disabled>
+          PILIH FOTO + AMBIL GPS
+        </button>
+
+        <div id="photoResult" class="result muted" style="margin-top:12px;">
+          Belum ada foto lokal.
+        </div>
+
+        <div id="photoPreviewWrap" hidden style="margin-top:12px;">
+          <img id="photoPreview" alt="Preview evidence"
+               style="max-width:100%;max-height:420px;border-radius:12px;border:1px solid #d6e2ee;">
+        </div>
+      </section>
+
       <div class="passbox">
-        <strong>PASS STEP 7A</strong> bila salah satu material dipilih lalu muncul
-        <strong>✓ DRAFT EVIDENCE LOCAL</strong> dengan Evidence Draft ID,
-        Project Material ID, dan status <strong>DRAFT_LOCAL</strong>.
+        <strong>PASS STEP 7B</strong> bila setelah pilih foto:
+        <strong>PHOTO LOCAL = READY</strong>, preview tampil, latitude/longitude
+        tersimpan, dan foto tetap terkait ke Evidence Draft ID yang aktif.
       </div>
     </section>
   </main>
@@ -164,6 +191,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step7a"></script>
+  <script src="./app.js?v=b2a-step7b"></script>
 </body>
 </html>
