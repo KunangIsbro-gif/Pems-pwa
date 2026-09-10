@@ -27,6 +27,8 @@ const loadPointSessionsBtn = document.getElementById('loadPointSessionsBtn');
 const pointSessionsPanel = document.getElementById('pointSessionsPanel');
 const pointSessionSummaryEl = document.getElementById('pointSessionSummary');
 const pointSessionListEl = document.getElementById('pointSessionList');
+const pointSessionSearchEl = document.getElementById('pointSessionSearch');
+const pointSessionRenderInfoEl = document.getElementById('pointSessionRenderInfo');
 const syncServerStatusEl = document.getElementById('syncServerStatus');
 const syncEvidenceBtn = document.getElementById('syncEvidenceBtn');
 const syncGateResultEl = document.getElementById('syncGateResult');
@@ -49,6 +51,9 @@ let currentMaterials = [];
 let currentEvidenceDraft = null;
 let currentLocalPhoto = null;
 let currentPointSessions = [];
+
+const POINT_RENDER_LIMIT = 30;
+let pointSessionSearchTerm = '';
 
 const PHOTO_DB_NAME = 'PEMS_LOCAL_EVIDENCE_DB';
 const PHOTO_DB_VERSION = 1;
@@ -810,13 +815,68 @@ function renderPointSessions(projectId){
   const selectedSessionId =
     localStorage.getItem(SELECTED_POINT_SESSION_KEY) || '';
 
+  const normalizedSearch =
+    String(pointSessionSearchTerm || '')
+      .trim()
+      .toLowerCase();
+
+  let filtered = currentPointSessions;
+
+  if (normalizedSearch) {
+    filtered = currentPointSessions.filter(function(item){
+      const haystack = [
+        item.sessionId,
+        item.anchorPointId,
+        item.anchorLabel,
+        item.anchorRole,
+        item.pointId,
+        item.verifyStatus
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.indexOf(normalizedSearch) !== -1;
+    });
+  }
+
+  // Selected point selalu diprioritaskan supaya tidak "hilang"
+  // walaupun berada di luar 30 hasil pertama.
+  let visible = filtered.slice(0, POINT_RENDER_LIMIT);
+
+  if (selectedSessionId) {
+    const selectedItem = currentPointSessions.find(function(item){
+      return String(item.sessionId || '') === selectedSessionId;
+    });
+
+    const alreadyVisible = visible.some(function(item){
+      return String(item.sessionId || '') === selectedSessionId;
+    });
+
+    if (selectedItem && !alreadyVisible) {
+      visible = [selectedItem].concat(
+        visible.slice(0, Math.max(0, POINT_RENDER_LIMIT - 1))
+      );
+    }
+  }
+
   pointSessionSummaryEl.innerHTML =
     '<strong>✓ POINT SESSION DATA LOADED</strong><br>' +
     'Project: ' + escapeHtml(projectId || '-') + '<br>' +
     'Total point session: ' +
       escapeHtml(String(currentPointSessions.length));
 
-  currentPointSessions.forEach(function(item, index){
+  pointSessionRenderInfoEl.textContent =
+    'Tampil ' +
+    visible.length +
+    ' dari ' +
+    filtered.length +
+    ' hasil' +
+    (normalizedSearch ? ' pencarian' : '') +
+    '. Total cache: ' +
+    currentPointSessions.length +
+    '.';
+
+  visible.forEach(function(item, visibleIndex){
     const card = document.createElement('div');
     const selected =
       selectedSessionId === String(item.sessionId || '');
@@ -829,7 +889,7 @@ function renderPointSessions(projectId){
 
     card.innerHTML =
       '<div class="point-title">' +
-        escapeHtml(String(index + 1)) + '. ' +
+        escapeHtml(String(visibleIndex + 1)) + '. ' +
         escapeHtml(item.anchorLabel || item.sessionId || '-') +
       '</div>' +
       '<div class="point-meta">' +
@@ -870,8 +930,12 @@ function renderPointSessions(projectId){
 
     pointSessionListEl.appendChild(card);
   });
-}
 
+  if (!visible.length) {
+    pointSessionListEl.innerHTML =
+      '<div class="result muted">Point Session tidak ditemukan.</div>';
+  }
+}
 function restorePointSessions(){
   try {
     const stored = JSON.parse(
@@ -1432,6 +1496,14 @@ loadPointSessionsBtn.addEventListener('click', function(){
   );
 });
 
+
+pointSessionSearchEl.addEventListener('input', function(){
+  pointSessionSearchTerm = String(pointSessionSearchEl.value || '');
+
+  if (currentPointSessions.length) {
+    renderPointSessions(getSelectedProjectId());
+  }
+});
 
 syncEvidenceBtn.addEventListener('click', function(){
   syncCurrentEvidence();

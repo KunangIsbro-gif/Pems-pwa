@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
   <title>PEMS V14C-B2A Step 8B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step8b-fix1">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step8b-fix1">
+  <link rel="manifest" href="./manifest.json?v=b2a-step8b-perf1">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step8b-perf1">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -222,7 +222,7 @@
         <h2>Point Session</h2>
         <p>
           Server akan membaca <b>06D_POINT_SESSIONS</b> untuk project terpilih.
-          Pilih satu titik agar draft evidence aktif memiliki Session ID.
+          Pilih satu titik agar draft evidence aktif memiliki Session ID. Untuk performa, PEMS hanya merender maksimal 30 titik sekaligus.
         </p>
         <button id="loadPointSessionsBtn" class="primary-btn" type="button" disabled>
           AMBIL POINT SESSION KE PEMS
@@ -232,6 +232,18 @@
       <section id="pointSessionsPanel" class="panel" hidden>
         <h2>Titik Pekerjaan</h2>
         <div id="pointSessionSummary" class="result okbox"></div>
+
+        <div style="margin:12px 0;">
+          <input
+            id="pointSessionSearch"
+            type="search"
+            placeholder="Cari Session ID / label / anchor..."
+            autocomplete="off"
+            style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;"
+          >
+          <div id="pointSessionRenderInfo" style="margin-top:7px;font-size:12px;color:#64748b;"></div>
+        </div>
+
         <div id="pointSessionList" class="project-list"></div>
       </section>
 
@@ -263,6 +275,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step8b-fix1"></script>
+  <script src="./app.js?v=b2a-step8b-perf1"></script>
 </body>
 </html>
