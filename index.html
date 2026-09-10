@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 8B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step8b-perf1">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step8b-perf1">
+  <title>PEMS V14C-B2A Step 8C</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step8c">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step8c">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -79,10 +79,10 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 8B</div>
-      <h1>Evidence Sync Test</h1>
+      <div class="badge">PEMS V14C-B2A STEP 8C</div>
+      <h1>Sync Result di PEMS</h1>
       <p class="lead">
-        Target tahap ini: kirim <b>1 draft evidence + 1 foto lokal</b> ke server. Mode saat ini <b>DEV / LAPTOP</b>, jadi GPS buruk boleh lewat hanya untuk pengujian.
+        Target tahap ini: setelah sync sukses, hasil server kembali ke PEMS dan status lokal berubah menjadi <b>SYNCED</b>.
       </p>
 
       <div class="status-grid">
@@ -262,12 +262,16 @@
         <div id="syncGateResult" class="result muted" style="margin-top:12px;">
           Belum siap sync.
         </div>
+
+        <div id="syncResultLocal" class="result muted" style="margin-top:12px;">
+          Belum ada hasil sync yang kembali ke PEMS.
+        </div>
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 8B</strong> bila halaman server menampilkan
-        <strong>✓ EVIDENCE SYNC OK</strong>, lalu Evidence Item ID dan Photo ID muncul.
-        Retry dengan draft/foto yang sama tidak boleh membuat data ganda.
+        <strong>PASS STEP 8C</strong> bila setelah klik <strong>KEMBALI KE PEMS</strong>:
+        Evidence Draft berubah menjadi <strong>SYNCED</strong>, Photo Local berubah menjadi
+        <strong>SYNCED</strong>, dan Evidence Item ID + Photo ID server tampil di halaman PEMS.
       </div>
     </section>
   </main>
@@ -275,6 +279,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step8b-perf1"></script>
+  <script src="./app.js?v=b2a-step8c"></script>
 </body>
 </html>

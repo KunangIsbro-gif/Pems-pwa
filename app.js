@@ -32,6 +32,7 @@ const pointSessionRenderInfoEl = document.getElementById('pointSessionRenderInfo
 const syncServerStatusEl = document.getElementById('syncServerStatus');
 const syncEvidenceBtn = document.getElementById('syncEvidenceBtn');
 const syncGateResultEl = document.getElementById('syncGateResult');
+const syncResultLocalEl = document.getElementById('syncResultLocal');
 const projectsPanel = document.getElementById('projectsPanel');
 const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
@@ -238,6 +239,45 @@ function putLocalPhoto(record){
   });
 }
 
+
+function updateLocalPhotoRecord(photoLocalId, patch){
+  return openPhotoDb().then(function(db){
+    return new Promise(function(resolve, reject){
+      const tx = db.transaction(PHOTO_STORE, 'readwrite');
+      const store = tx.objectStore(PHOTO_STORE);
+      const getReq = store.get(photoLocalId);
+
+      getReq.onsuccess = function(){
+        const current = getReq.result;
+
+        if (!current) {
+          db.close();
+          reject(new Error('Photo Local ID tidak ditemukan.'));
+          return;
+        }
+
+        const updated = Object.assign({}, current, patch || {});
+        store.put(updated);
+
+        tx.oncomplete = function(){
+          db.close();
+          resolve(updated);
+        };
+      };
+
+      getReq.onerror = function(){
+        db.close();
+        reject(getReq.error || new Error('Foto lokal gagal dibaca.'));
+      };
+
+      tx.onerror = function(){
+        db.close();
+        reject(tx.error || new Error('Foto lokal gagal diperbarui.'));
+      };
+    });
+  });
+}
+
 function getLatestPhotoByEvidenceDraftId(evidenceDraftId){
   return openPhotoDb().then(function(db){
     return new Promise(function(resolve, reject){
@@ -422,7 +462,10 @@ function renderLocalPhoto(record){
     return;
   }
 
-  photoLocalStatusEl.textContent = 'READY';
+  photoLocalStatusEl.textContent =
+    record.status === 'SYNCED'
+      ? 'SYNCED'
+      : 'READY';
   photoLocalStatusEl.className = 'ok';
 
   const gpsQuality = classifyGpsAccuracy(record.accuracy);
@@ -450,8 +493,19 @@ function renderLocalPhoto(record){
       escapeHtml(gpsQuality.label) + '<br>' +
     '<b>Sync Gate:</b> ' +
       (gpsQuality.syncAllowed ? 'ALLOWED' : 'BLOCKED - RETRY GPS') + '<br>' +
-    '<b>Status:</b> PHOTO_LOCAL_READY<br>' +
-    '<small>Foto + GPS tersimpan lokal. Belum sync ke server.</small>';
+    '<b>Status:</b> ' +
+      escapeHtml(record.status || 'PHOTO_LOCAL_READY') + '<br>' +
+    (
+      record.status === 'SYNCED'
+        ? (
+            '<b>Evidence Item ID:</b> ' +
+            escapeHtml(record.evidenceItemId || '-') + '<br>' +
+            '<b>Photo ID:</b> ' +
+            escapeHtml(record.photoId || '-') + '<br>' +
+            '<small>Foto sudah tersinkron ke server.</small>'
+          )
+        : '<small>Foto + GPS tersimpan lokal. Belum sync ke server.</small>'
+    );
 
   if (record.blob) {
     const objectUrl = URL.createObjectURL(record.blob);
@@ -561,7 +615,10 @@ function renderEvidenceDraft(){
     return;
   }
 
-  evidenceDraftStatusEl.textContent = 'DRAFT LOCAL';
+  evidenceDraftStatusEl.textContent =
+    currentEvidenceDraft.status === 'SYNCED'
+      ? 'SYNCED'
+      : 'DRAFT LOCAL';
   evidenceDraftStatusEl.className = 'ok';
   evidenceDraftPanel.hidden = false;
 
@@ -581,7 +638,17 @@ function renderEvidenceDraft(){
       escapeHtml(currentEvidenceDraft.status || '-') + '<br>' +
     '<b>Point Session ID:</b> ' +
       escapeHtml(currentEvidenceDraft.sessionId || 'BELUM DIPILIH') + '<br>' +
-    '<small>Draft tersimpan lokal. Belum dikirim ke server.</small>';
+    (
+      currentEvidenceDraft.status === 'SYNCED'
+        ? (
+            '<b>Evidence Item ID:</b> ' +
+            escapeHtml(currentEvidenceDraft.evidenceItemId || '-') + '<br>' +
+            '<b>Photo ID:</b> ' +
+            escapeHtml(currentEvidenceDraft.photoId || '-') + '<br>' +
+            '<small>Evidence sudah tersinkron ke server.</small>'
+          )
+        : '<small>Draft tersimpan lokal. Belum dikirim ke server.</small>'
+    );
 
   choosePhotoBtn.disabled = false;
   restoreLocalPhoto();
@@ -990,13 +1057,18 @@ function refreshSyncGate(){
     Number.isFinite(Number(currentLocalPhoto.longitude)) &&
     Number.isFinite(Number(currentLocalPhoto.accuracy));
 
+  const alreadySynced =
+    !!currentEvidenceDraft &&
+    currentEvidenceDraft.status === 'SYNCED';
+
   const ready =
     navigator.onLine &&
     hasProof &&
     hasDraft &&
     hasPointSession &&
     hasPhoto &&
-    hasGps;
+    hasGps &&
+    !alreadySynced;
 
   syncEvidenceBtn.disabled = !ready;
 
@@ -1022,6 +1094,21 @@ function refreshSyncGate(){
     syncGateResultEl.className = 'result muted';
     syncGateResultEl.textContent =
       'Draft Evidence harus punya Project ID, Project Material ID, dan Point Session ID.';
+    return;
+  }
+
+  if (alreadySynced) {
+    syncServerStatusEl.textContent = 'SYNCED';
+    syncServerStatusEl.className = 'ok';
+    syncEvidenceBtn.disabled = true;
+
+    syncGateResultEl.className = 'result okbox';
+    syncGateResultEl.innerHTML =
+      '<strong>✓ EVIDENCE SUDAH SYNCED</strong><br>' +
+      'Evidence Item ID: ' +
+      escapeHtml(currentEvidenceDraft.evidenceItemId || '-') + '<br>' +
+      'Photo ID: ' +
+      escapeHtml(currentEvidenceDraft.photoId || '-');
     return;
   }
 
@@ -1166,6 +1253,136 @@ async function syncCurrentEvidence(){
   }
 }
 
+
+async function acceptSyncResultBundle(bundle){
+  const payload = readSignedPayload(bundle);
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  const validShape =
+    payload &&
+    payload.v === 'V14C-B2A-STEP8C' &&
+    payload.kind === 'SYNC_RESULT' &&
+    payload.success === true &&
+    Number(payload.exp || 0) > nowSec &&
+    payload.evidenceDraftId &&
+    payload.photoLocalId &&
+    payload.evidenceItemId &&
+    payload.photoId;
+
+  if (!validShape) {
+    syncServerStatusEl.textContent = 'RESULT INVALID';
+    syncServerStatusEl.className = 'bad';
+    syncResultLocalEl.className = 'result errbox';
+    syncResultLocalEl.textContent =
+      'Sync result tidak valid / expired.';
+    return false;
+  }
+
+  // Update Evidence Draft localStorage.
+  const drafts = loadEvidenceDrafts();
+  const draftIndex = drafts.findIndex(function(item){
+    return (
+      item &&
+      item.evidenceDraftId === payload.evidenceDraftId
+    );
+  });
+
+  if (draftIndex >= 0) {
+    drafts[draftIndex] = Object.assign(
+      {},
+      drafts[draftIndex],
+      {
+        status: 'SYNCED',
+        evidenceItemId: payload.evidenceItemId,
+        photoId: payload.photoId,
+        syncMessage: payload.message || '',
+        alreadySynced: payload.alreadySynced === true,
+        gpsPolicy: payload.gpsPolicy || '',
+        gpsBypass: payload.gpsBypass === true,
+        syncedAt: new Date().toISOString()
+      }
+    );
+
+    saveEvidenceDrafts(drafts);
+
+    if (
+      currentEvidenceDraft &&
+      currentEvidenceDraft.evidenceDraftId === payload.evidenceDraftId
+    ) {
+      currentEvidenceDraft = drafts[draftIndex];
+    }
+  }
+
+  // Update photo record in IndexedDB.
+  try {
+    const updatedPhoto = await updateLocalPhotoRecord(
+      payload.photoLocalId,
+      {
+        status: 'SYNCED',
+        evidenceItemId: payload.evidenceItemId,
+        photoId: payload.photoId,
+        serverFileName: payload.fileName || '',
+        alreadySynced: payload.alreadySynced === true,
+        syncedAt: new Date().toISOString()
+      }
+    );
+
+    if (
+      currentLocalPhoto &&
+      currentLocalPhoto.photoLocalId === payload.photoLocalId
+    ) {
+      currentLocalPhoto = updatedPhoto;
+    }
+  } catch (e) {
+    // Draft result tetap valid walau foto lokal sudah tidak tersedia.
+  }
+
+  syncServerStatusEl.textContent = 'SYNCED';
+  syncServerStatusEl.className = 'ok';
+
+  syncResultLocalEl.className = 'result okbox';
+  syncResultLocalEl.innerHTML =
+    '<strong>✓ SYNC RESULT RECEIVED</strong><br>' +
+    '<b>Evidence Draft:</b> ' +
+      escapeHtml(payload.evidenceDraftId) + '<br>' +
+    '<b>Evidence Item ID:</b> ' +
+      escapeHtml(payload.evidenceItemId) + '<br>' +
+    '<b>Photo Local ID:</b> ' +
+      escapeHtml(payload.photoLocalId) + '<br>' +
+    '<b>Photo ID:</b> ' +
+      escapeHtml(payload.photoId) + '<br>' +
+    '<b>Status:</b> SYNCED<br>' +
+    '<b>Already Synced:</b> ' +
+      (payload.alreadySynced ? 'YES' : 'NO');
+
+  renderEvidenceDraft();
+  renderLocalPhoto(currentLocalPhoto);
+  refreshSyncGate();
+
+  return true;
+}
+
+function restoreSyncedResult(){
+  if (
+    currentEvidenceDraft &&
+    currentEvidenceDraft.status === 'SYNCED' &&
+    currentEvidenceDraft.evidenceItemId &&
+    currentEvidenceDraft.photoId
+  ) {
+    syncServerStatusEl.textContent = 'SYNCED';
+    syncServerStatusEl.className = 'ok';
+
+    syncResultLocalEl.className = 'result okbox';
+    syncResultLocalEl.innerHTML =
+      '<strong>✓ EVIDENCE SUDAH SYNCED</strong><br>' +
+      '<b>Evidence Item ID:</b> ' +
+        escapeHtml(currentEvidenceDraft.evidenceItemId) + '<br>' +
+      '<b>Photo ID:</b> ' +
+        escapeHtml(currentEvidenceDraft.photoId) + '<br>' +
+      '<b>Status:</b> SYNCED';
+  }
+}
+
 function processHashHandoffs(){
   const hash = String(location.hash || '');
 
@@ -1212,6 +1429,22 @@ function processHashHandoffs(){
     }
 
     history.replaceState(null, '', location.pathname + location.search);
+    return;
+  }
+
+  if (hash.startsWith('#pems_sync_result=')) {
+    const bundle = decodeURIComponent(
+      hash.slice('#pems_sync_result='.length)
+    );
+
+    acceptSyncResultBundle(bundle);
+
+    const storedProof = sessionStorage.getItem(PROOF_KEY);
+    if (storedProof) {
+      acceptProof(storedProof);
+    }
+
+    history.replaceState(null, '', location.pathname + location.search);
   }
 }
 processHashHandoffs();
@@ -1241,6 +1474,7 @@ if (currentProjects.length === 0) {
 restoreMaterialCache();
 restoreEvidenceDraft();
 restorePointSessions();
+restoreSyncedResult();
 
 function decodeJwtPayload(token) {
   try {
