@@ -1,12 +1,12 @@
 
-const CACHE_NAME = 'pems-v14c-b2a-step9c-gpsfallback-v2';
+const CACHE_NAME = 'pems-v14c-b2a-step9c-photoopt-v2';
 
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=b2a-step9c-gpsfallback',
-  './app.js?v=b2a-step9c-gpsfallback',
-  './manifest.json?v=b2a-step9c-gpsfallback'
+  './styles.css?v=b2a-step9c-photoopt',
+  './app.js?v=b2a-step9c-photoopt',
+  './manifest.json?v=b2a-step9c-photoopt'
 ];
 
 self.addEventListener('install', event => {

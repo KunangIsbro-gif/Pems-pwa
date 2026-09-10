@@ -61,6 +61,9 @@ const AUTO_SYNC_LAST_PHOTO_KEY = 'PEMS_AUTO_SYNC_LAST_PHOTO_STEP9C';
 const PEMS_DEVICE_MODE = 'DEV';
 const DEV_LAST_GPS_KEY = 'PEMS_DEV_LAST_GPS_STEP9C';
 const DEV_FALLBACK_ACCURACY_M = 999;
+const PHOTO_UPLOAD_SAFE_BYTES = 5.5 * 1024 * 1024;
+const PHOTO_MAX_LONG_EDGE = 2560;
+const PHOTO_JPEG_QUALITY = 0.84;
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -548,7 +551,13 @@ async function refreshAutoSyncQueueUI(){
           String(queue.orphan)
         ) + '<br>' +
       '<b>Auto Sync:</b> ' +
-        (enabled ? 'ON' : 'OFF');
+        (enabled ? 'ON' : 'OFF') + '<br>' +
+      '<b>Upload Safe Size:</b> ≤ ' +
+        escapeHtml(
+          formatBytes(
+            PHOTO_UPLOAD_SAFE_BYTES
+          )
+        );
 
     if (!enabled) {
       autoSyncStatusEl.textContent = 'OFF';
@@ -585,7 +594,7 @@ async function submitAutoSyncEntry(entry){
   }
 
   const draft = entry.draft;
-  const photo = entry.photo;
+  let photo = entry.photo;
 
   autoSyncBusy = true;
 
@@ -609,6 +618,13 @@ async function submitAutoSyncEntry(entry){
     'Menyiapkan foto...';
 
   try {
+    photo =
+      await ensurePhotoSyncSafe(
+        photo
+      );
+
+    currentLocalPhoto = photo;
+
     const base64 =
       await blobToBase64Payload(
         photo.blob
@@ -1310,6 +1326,21 @@ function renderLocalPhoto(record){
       escapeHtml(record.fileName || '-') + '<br>' +
     '<b>Size:</b> ' +
       escapeHtml(formatBytes(record.fileSize || 0)) + '<br>' +
+    (
+      record.originalFileSize &&
+      Number(record.originalFileSize) !==
+        Number(record.fileSize || 0)
+        ? (
+            '<b>Original Size:</b> ' +
+            escapeHtml(
+              formatBytes(
+                record.originalFileSize
+              )
+            ) +
+            '<br><b>Photo Optimize:</b> YES<br>'
+          )
+        : ''
+    ) +
     '<b>GPS Accuracy:</b> ' +
       escapeHtml(String(record.accuracy ?? '-')) + ' m<br>' +
     '<b>GPS Quality:</b> ' +
@@ -2502,6 +2533,373 @@ function refreshSyncGate(){
     '<b>DEV Sync:</b> ALLOWED FOR TEST ONLY';
 }
 
+
+function replaceExtensionWithJpg(fileName){
+  const name =
+    String(fileName || 'evidence.jpg');
+
+  return /\.[^.]+$/.test(name)
+    ? name.replace(/\.[^.]+$/, '.jpg')
+    : name + '.jpg';
+}
+
+function canvasToJpegBlob(canvas, quality){
+  return new Promise(function(resolve, reject){
+    canvas.toBlob(
+      function(blob){
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(
+            new Error('Kompresi foto gagal.')
+          );
+        }
+      },
+      'image/jpeg',
+      quality
+    );
+  });
+}
+
+async function decodeImageForCanvas(blob){
+  if ('createImageBitmap' in window) {
+    try {
+      const bitmap =
+        await createImageBitmap(blob);
+
+      return {
+        image: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        cleanup: function(){
+          try {
+            bitmap.close();
+          } catch (e) {}
+        }
+      };
+    } catch (e) {}
+  }
+
+  return new Promise(function(resolve, reject){
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+
+    img.onload = function(){
+      resolve({
+        image: img,
+        width: img.naturalWidth || img.width,
+        height: img.naturalHeight || img.height,
+        cleanup: function(){
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+
+    img.onerror = function(){
+      URL.revokeObjectURL(url);
+      reject(
+        new Error(
+          'Format foto tidak dapat diproses browser.'
+        )
+      );
+    };
+
+    img.src = url;
+  });
+}
+
+async function optimizeEvidencePhotoBlob(
+  blob,
+  fileName,
+  mimeType
+){
+  if (!blob) {
+    throw new Error('Blob foto kosong.');
+  }
+
+  const originalBytes =
+    Number(blob.size || 0);
+
+  const originalType =
+    String(
+      mimeType ||
+      blob.type ||
+      'image/jpeg'
+    ).toLowerCase();
+
+  // JPEG/WebP kecil tidak perlu disentuh.
+  if (
+    originalBytes <= PHOTO_UPLOAD_SAFE_BYTES &&
+    (
+      originalType === 'image/jpeg' ||
+      originalType === 'image/jpg' ||
+      originalType === 'image/webp'
+    )
+  ) {
+    return {
+      blob: blob,
+      fileName:
+        String(fileName || 'evidence.jpg'),
+      fileType:
+        blob.type ||
+        mimeType ||
+        'image/jpeg',
+      originalBytes:
+        originalBytes,
+      optimizedBytes:
+        originalBytes,
+      optimized: false
+    };
+  }
+
+  const decoded =
+    await decodeImageForCanvas(blob);
+
+  try {
+    let width =
+      Number(decoded.width || 0);
+
+    let height =
+      Number(decoded.height || 0);
+
+    if (!width || !height) {
+      throw new Error(
+        'Dimensi foto tidak valid.'
+      );
+    }
+
+    const longEdge =
+      Math.max(width, height);
+
+    let scale =
+      longEdge > PHOTO_MAX_LONG_EDGE
+        ? PHOTO_MAX_LONG_EDGE / longEdge
+        : 1;
+
+    let targetWidth =
+      Math.max(
+        1,
+        Math.round(width * scale)
+      );
+
+    let targetHeight =
+      Math.max(
+        1,
+        Math.round(height * scale)
+      );
+
+    let quality =
+      PHOTO_JPEG_QUALITY;
+
+    let outputBlob = null;
+
+    // Maksimal 5 iterasi agar output aman untuk transport Apps Script.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const canvas =
+        document.createElement('canvas');
+
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+
+      const ctx =
+        canvas.getContext('2d', {
+          alpha: false
+        });
+
+      if (!ctx) {
+        throw new Error(
+          'Canvas browser tidak tersedia.'
+        );
+      }
+
+      // Background putih agar PNG transparan aman saat menjadi JPEG.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(
+        0,
+        0,
+        targetWidth,
+        targetHeight
+      );
+
+      ctx.drawImage(
+        decoded.image,
+        0,
+        0,
+        targetWidth,
+        targetHeight
+      );
+
+      outputBlob =
+        await canvasToJpegBlob(
+          canvas,
+          quality
+        );
+
+      if (
+        outputBlob.size <=
+        PHOTO_UPLOAD_SAFE_BYTES
+      ) {
+        break;
+      }
+
+      quality =
+        Math.max(
+          0.58,
+          quality - 0.08
+        );
+
+      targetWidth =
+        Math.max(
+          1,
+          Math.round(
+            targetWidth * 0.86
+          )
+        );
+
+      targetHeight =
+        Math.max(
+          1,
+          Math.round(
+            targetHeight * 0.86
+          )
+        );
+    }
+
+    if (!outputBlob) {
+      throw new Error(
+        'Kompresi foto tidak menghasilkan file.'
+      );
+    }
+
+    if (
+      outputBlob.size >
+      PHOTO_UPLOAD_SAFE_BYTES
+    ) {
+      throw new Error(
+        'Foto masih terlalu besar setelah optimasi: ' +
+        formatBytes(outputBlob.size) +
+        '. Gunakan foto dengan resolusi lebih kecil.'
+      );
+    }
+
+    return {
+      blob: outputBlob,
+      fileName:
+        replaceExtensionWithJpg(
+          fileName
+        ),
+      fileType: 'image/jpeg',
+      originalBytes:
+        originalBytes,
+      optimizedBytes:
+        outputBlob.size,
+      optimized: true
+    };
+  }
+  finally {
+    decoded.cleanup();
+  }
+}
+
+async function ensurePhotoSyncSafe(record){
+  if (
+    !record ||
+    !record.blob
+  ) {
+    throw new Error(
+      'Foto lokal tidak memiliki blob.'
+    );
+  }
+
+  if (
+    Number(record.blob.size || 0) <=
+      PHOTO_UPLOAD_SAFE_BYTES &&
+    (
+      String(
+        record.fileType ||
+        record.blob.type ||
+        ''
+      ).toLowerCase() ===
+        'image/jpeg' ||
+      String(
+        record.fileType ||
+        record.blob.type ||
+        ''
+      ).toLowerCase() ===
+        'image/jpg' ||
+      String(
+        record.fileType ||
+        record.blob.type ||
+        ''
+      ).toLowerCase() ===
+        'image/webp'
+    )
+  ) {
+    return record;
+  }
+
+  photoLocalStatusEl.textContent =
+    'OPTIMIZING';
+
+  const optimized =
+    await optimizeEvidencePhotoBlob(
+      record.blob,
+      record.fileName,
+      record.fileType
+    );
+
+  const updated =
+    Object.assign(
+      {},
+      record,
+      {
+        blob: optimized.blob,
+        fileName:
+          optimized.fileName,
+        fileType:
+          optimized.fileType,
+        fileSize:
+          optimized.optimizedBytes,
+        originalFileSize:
+          Number(
+            record.originalFileSize ||
+            optimized.originalBytes
+          ),
+        photoOptimized:
+          optimized.optimized === true,
+        optimizedAt:
+          optimized.optimized
+            ? new Date().toISOString()
+            : (
+                record.optimizedAt ||
+                ''
+              )
+      }
+    );
+
+  await putLocalPhoto(updated);
+
+  currentLocalPhotos =
+    currentLocalPhotos.map(function(item){
+      return (
+        item.photoLocalId ===
+        updated.photoLocalId
+      )
+        ? updated
+        : item;
+    });
+
+  if (
+    currentLocalPhoto &&
+    currentLocalPhoto.photoLocalId ===
+      updated.photoLocalId
+  ) {
+    currentLocalPhoto = updated;
+  }
+
+  return updated;
+}
+
 function blobToBase64Payload(blob){
   return new Promise(function(resolve, reject){
     const reader = new FileReader();
@@ -2554,6 +2952,11 @@ async function syncCurrentEvidence(){
     'Menyiapkan foto untuk dikirim ke server...';
 
   try {
+    currentLocalPhoto =
+      await ensurePhotoSyncSafe(
+        currentLocalPhoto
+      );
+
     const base64 =
       await blobToBase64Payload(
         currentLocalPhoto.blob
@@ -3123,15 +3526,34 @@ photoInput.addEventListener('change', async function(){
   try {
     const gps = await getGpsPosition();
 
+    photoLocalStatusEl.textContent =
+      'OPTIMIZING';
+
+    photoResultEl.textContent =
+      'GPS sudah didapat. Mengoptimalkan ukuran foto untuk penyimpanan lokal + sync...';
+
+    const optimized =
+      await optimizeEvidencePhotoBlob(
+        file,
+        file.name || 'evidence.jpg',
+        file.type || 'image/jpeg'
+      );
+
     const record = {
       photoLocalId: makeLocalPhotoId(),
       evidenceDraftId: currentEvidenceDraft.evidenceDraftId,
       projectId: currentEvidenceDraft.projectId,
       projectMaterialId: currentEvidenceDraft.projectMaterialId,
-      fileName: file.name || 'evidence.jpg',
-      fileType: file.type || 'image/jpeg',
-      fileSize: file.size || 0,
-      blob: file,
+      fileName: optimized.fileName,
+      fileType: optimized.fileType,
+      fileSize: optimized.optimizedBytes,
+      originalFileSize: optimized.originalBytes,
+      photoOptimized: optimized.optimized === true,
+      optimizedAt:
+        optimized.optimized
+          ? new Date().toISOString()
+          : '',
+      blob: optimized.blob,
       latitude: gps.latitude,
       longitude: gps.longitude,
       accuracy: gps.accuracy,
