@@ -27,6 +27,9 @@ const loadPointSessionsBtn = document.getElementById('loadPointSessionsBtn');
 const pointSessionsPanel = document.getElementById('pointSessionsPanel');
 const pointSessionSummaryEl = document.getElementById('pointSessionSummary');
 const pointSessionListEl = document.getElementById('pointSessionList');
+const syncServerStatusEl = document.getElementById('syncServerStatus');
+const syncEvidenceBtn = document.getElementById('syncEvidenceBtn');
+const syncGateResultEl = document.getElementById('syncGateResult');
 const projectsPanel = document.getElementById('projectsPanel');
 const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
@@ -36,8 +39,8 @@ const PROJECTS_KEY = 'PEMS_PROJECTS_STEP5A';
 const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
 const MATERIALS_KEY = 'PEMS_MATERIALS_STEP7D';
 const EVIDENCE_DRAFTS_KEY = 'PEMS_EVIDENCE_DRAFTS_STEP7D';
-const POINT_SESSIONS_KEY = 'PEMS_POINT_SESSIONS_STEP8A';
-const SELECTED_POINT_SESSION_KEY = 'PEMS_SELECTED_POINT_SESSION_STEP8A';
+const POINT_SESSIONS_KEY = 'PEMS_POINT_SESSIONS_STEP8B';
+const SELECTED_POINT_SESSION_KEY = 'PEMS_SELECTED_POINT_SESSION_STEP8B';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -77,6 +80,10 @@ function setConnectivity(){
     if (projectId) {
       renderMaterials(projectId);
     }
+  }
+
+  if (typeof refreshSyncGate === 'function') {
+    refreshSyncGate();
   }
 }
 window.addEventListener('online', setConnectivity);
@@ -121,6 +128,7 @@ function acceptProof(proof){
     proofEl.className = 'bad';
     loadProjectsBtn.disabled = true;
     refreshMaterialButton();
+    refreshSyncGate();
     return false;
   }
 
@@ -130,6 +138,7 @@ function acceptProof(proof){
   proofEl.className = 'ok';
   loadProjectsBtn.disabled = false;
   refreshMaterialButton();
+  refreshSyncGate();
   return true;
 }
 
@@ -446,6 +455,8 @@ function renderLocalPhoto(record){
   } else {
     photoPreviewWrap.hidden = true;
   }
+
+  refreshSyncGate();
 }
 
 function restoreLocalPhoto(){
@@ -569,6 +580,7 @@ function renderEvidenceDraft(){
 
   choosePhotoBtn.disabled = false;
   restoreLocalPhoto();
+  refreshSyncGate();
 }
 
 function restoreEvidenceDraft(){
@@ -760,7 +772,7 @@ function acceptPointSessionBundle(bundle){
 
   const validShape =
     payload &&
-    payload.v === 'V14C-B2A-STEP8A' &&
+    payload.v === 'V14C-B2A-STEP8B' &&
     payload.kind === 'POINT_SESSION_LIST' &&
     payload.projectId === selectedProjectId &&
     Array.isArray(payload.pointSessions) &&
@@ -852,6 +864,7 @@ function renderPointSessions(projectId){
 
         updateEvidenceDraftPointSession(item);
         renderPointSessions(projectId);
+        refreshSyncGate();
       }
     );
 
@@ -879,6 +892,193 @@ function restorePointSessions(){
       renderPointSessions(stored.projectId);
     }
   } catch (e) {}
+}
+
+
+function refreshSyncGate(){
+  const hasProof = !!currentServerProof;
+  const hasDraft =
+    !!currentEvidenceDraft &&
+    !!currentEvidenceDraft.evidenceDraftId &&
+    !!currentEvidenceDraft.projectId &&
+    !!currentEvidenceDraft.projectMaterialId &&
+    !!currentEvidenceDraft.sessionId;
+
+  const hasPhoto =
+    !!currentLocalPhoto &&
+    !!currentLocalPhoto.photoLocalId &&
+    !!currentLocalPhoto.blob;
+
+  const hasGps =
+    hasPhoto &&
+    Number.isFinite(Number(currentLocalPhoto.latitude)) &&
+    Number.isFinite(Number(currentLocalPhoto.longitude)) &&
+    Number.isFinite(Number(currentLocalPhoto.accuracy));
+
+  const ready =
+    navigator.onLine &&
+    hasProof &&
+    hasDraft &&
+    hasPhoto &&
+    hasGps;
+
+  syncEvidenceBtn.disabled = !ready;
+
+  if (!navigator.onLine) {
+    syncServerStatusEl.textContent = 'OFFLINE';
+    syncServerStatusEl.className = 'bad';
+    syncGateResultEl.className = 'result errbox';
+    syncGateResultEl.textContent = 'Offline. Sync server belum bisa dilakukan.';
+    return;
+  }
+
+  if (!hasProof) {
+    syncServerStatusEl.textContent = 'WAIT PROOF';
+    syncServerStatusEl.className = '';
+    syncGateResultEl.className = 'result muted';
+    syncGateResultEl.textContent = 'Login + verifikasi server dulu.';
+    return;
+  }
+
+  if (!hasDraft) {
+    syncServerStatusEl.textContent = 'WAIT DRAFT';
+    syncServerStatusEl.className = '';
+    syncGateResultEl.className = 'result muted';
+    syncGateResultEl.textContent =
+      'Draft Evidence harus punya Project ID, Project Material ID, dan Point Session ID.';
+    return;
+  }
+
+  if (!hasPhoto || !hasGps) {
+    syncServerStatusEl.textContent = 'WAIT PHOTO';
+    syncServerStatusEl.className = '';
+    syncGateResultEl.className = 'result muted';
+    syncGateResultEl.textContent = 'Foto lokal + GPS belum siap.';
+    return;
+  }
+
+  const gpsQuality =
+    classifyGpsAccuracy(currentLocalPhoto.accuracy);
+
+  syncServerStatusEl.textContent = 'READY';
+  syncServerStatusEl.className = 'ok';
+
+  syncGateResultEl.className =
+    gpsQuality.code === 'RETRY'
+      ? 'result errbox'
+      : 'result okbox';
+
+  syncGateResultEl.innerHTML =
+    '<strong>✓ SYNC GATE READY</strong><br>' +
+    '<b>Mode:</b> DEV / LAPTOP<br>' +
+    '<b>Evidence Draft:</b> ' +
+      escapeHtml(currentEvidenceDraft.evidenceDraftId || '-') + '<br>' +
+    '<b>Point Session:</b> ' +
+      escapeHtml(currentEvidenceDraft.sessionId || '-') + '<br>' +
+    '<b>Photo Local:</b> ' +
+      escapeHtml(currentLocalPhoto.photoLocalId || '-') + '<br>' +
+    '<b>GPS:</b> ' +
+      escapeHtml(String(currentLocalPhoto.accuracy ?? '-')) +
+      ' m — ' +
+      escapeHtml(gpsQuality.label) + '<br>' +
+    '<b>DEV Sync:</b> ALLOWED FOR TEST ONLY';
+}
+
+function blobToBase64Payload(blob){
+  return new Promise(function(resolve, reject){
+    const reader = new FileReader();
+
+    reader.onload = function(){
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+
+      resolve(
+        comma >= 0
+          ? result.slice(comma + 1)
+          : result
+      );
+    };
+
+    reader.onerror = function(){
+      reject(
+        reader.error ||
+        new Error('Foto gagal dikonversi ke base64.')
+      );
+    };
+
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function syncCurrentEvidence(){
+  refreshSyncGate();
+
+  if (syncEvidenceBtn.disabled) {
+    alert('Data belum siap untuk sync.');
+    return;
+  }
+
+  syncEvidenceBtn.disabled = true;
+  syncServerStatusEl.textContent = 'PREPARING';
+  syncServerStatusEl.className = '';
+  syncGateResultEl.className = 'result muted';
+  syncGateResultEl.textContent =
+    'Menyiapkan foto untuk dikirim ke server...';
+
+  try {
+    const base64 =
+      await blobToBase64Payload(
+        currentLocalPhoto.blob
+      );
+
+    syncServerStatusEl.textContent = 'SENDING';
+
+    submitHiddenPost(
+      {
+        action: 'sync_local_capture',
+        proof: currentServerProof,
+        project_id:
+          currentEvidenceDraft.projectId,
+        project_material_id:
+          currentEvidenceDraft.projectMaterialId,
+        session_id:
+          currentEvidenceDraft.sessionId,
+        evidence_draft_id:
+          currentEvidenceDraft.evidenceDraftId,
+        photo_local_id:
+          currentLocalPhoto.photoLocalId,
+        latitude:
+          currentLocalPhoto.latitude,
+        longitude:
+          currentLocalPhoto.longitude,
+        gps_accuracy:
+          currentLocalPhoto.accuracy,
+        captured_at:
+          currentLocalPhoto.capturedAt ||
+          currentLocalPhoto.createdAt ||
+          '',
+        file_name:
+          currentLocalPhoto.fileName ||
+          'evidence.jpg',
+        mime_type:
+          currentLocalPhoto.fileType ||
+          'image/jpeg',
+        base64: base64
+      },
+      '_self'
+    );
+
+  } catch (error) {
+    syncServerStatusEl.textContent = 'FAILED';
+    syncServerStatusEl.className = 'bad';
+    syncGateResultEl.className = 'result errbox';
+    syncGateResultEl.textContent =
+      error && error.message
+        ? error.message
+        : 'Gagal menyiapkan data sync.';
+
+    refreshSyncGate();
+  }
 }
 
 function processHashHandoffs(){
@@ -1211,8 +1411,15 @@ loadPointSessionsBtn.addEventListener('click', function(){
   );
 });
 
+
+syncEvidenceBtn.addEventListener('click', function(){
+  syncCurrentEvidence();
+});
+
 retryGpsBtn.addEventListener('click', function(){
   retryGpsForCurrentPhoto();
 });
 
 refreshMaterialButton();
+
+refreshSyncGate();

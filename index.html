@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 8A</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step8a">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step8a">
+  <title>PEMS V14C-B2A Step 8B</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step8b">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step8b">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -79,10 +79,10 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 8A</div>
-      <h1>Point Session Data</h1>
+      <div class="badge">PEMS V14C-B2A STEP 8B</div>
+      <h1>Evidence Sync Test</h1>
       <p class="lead">
-        Target tahap ini: ambil dan pilih <b>Point Session</b> untuk project aktif agar draft evidence terhubung ke titik pekerjaan yang benar.
+        Target tahap ini: kirim <b>1 draft evidence + 1 foto lokal</b> ke server. Mode saat ini <b>DEV / LAPTOP</b>, jadi GPS buruk boleh lewat hanya untuk pengujian.
       </p>
 
       <div class="status-grid">
@@ -117,6 +117,10 @@
         <div class="status-card">
           <span>POINT SESSION</span>
           <strong id="pointSessionStatus">BELUM ADA</strong>
+        </div>
+        <div class="status-card">
+          <span>SYNC SERVER</span>
+          <strong id="syncServerStatus">BELUM</strong>
         </div>
       </div>
 
@@ -231,10 +235,27 @@
         <div id="pointSessionList" class="project-list"></div>
       </section>
 
+      <section class="panel">
+        <h2>Sync Evidence + Foto</h2>
+        <p>
+          <b>DEVICE MODE: DEVELOPMENT / LAPTOP</b><br>
+          GPS &gt; 50 m tetap ditandai buruk, tetapi boleh dikirim untuk test.
+          Pada FIELD/HP nanti aturan &gt; 50 m akan diblok.
+        </p>
+
+        <button id="syncEvidenceBtn" class="primary-btn" type="button" disabled>
+          SYNC EVIDENCE + FOTO
+        </button>
+
+        <div id="syncGateResult" class="result muted" style="margin-top:12px;">
+          Belum siap sync.
+        </div>
+      </section>
+
       <div class="passbox">
-        <strong>PASS STEP 8A</strong> bila <strong>POINT SESSION = LOADED</strong>,
-        daftar titik tampil, lalu satu titik berhasil menjadi
-        <strong>POINT SESSION TERPILIH</strong> dan Session ID masuk ke draft evidence.
+        <strong>PASS STEP 8B</strong> bila halaman server menampilkan
+        <strong>✓ EVIDENCE SYNC OK</strong>, lalu Evidence Item ID dan Photo ID muncul.
+        Retry dengan draft/foto yang sama tidak boleh membuat data ganda.
       </div>
     </section>
   </main>
@@ -242,6 +263,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step8a"></script>
+  <script src="./app.js?v=b2a-step8b"></script>
 </body>
 </html>
