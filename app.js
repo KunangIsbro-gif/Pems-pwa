@@ -1104,7 +1104,8 @@ function createDraftFromRequirement(requirement){
       (
         item.status === 'DRAFT_LOCAL' ||
         item.status === 'PARTIAL_SYNC' ||
-        item.status === 'COMPLETE'
+        item.status === 'COMPLETE' ||
+        item.status === 'SYNCED'
       )
     );
   });
@@ -1268,8 +1269,43 @@ function renderRequirements(meta){
     return;
   }
 
+  const allDrafts = loadEvidenceDrafts();
+
   currentRequirements.forEach(function(item, index){
     const card = document.createElement('div');
+
+    const matchingDrafts =
+      allDrafts
+        .filter(function(draft){
+          return (
+            draft &&
+            draft.projectId === projectId &&
+            draft.sessionId === sessionId &&
+            draft.projectMaterialId === item.projectMaterialId
+          );
+        })
+        .sort(function(a, b){
+          const aTime =
+            String(a.syncedAt || a.createdAt || '');
+          const bTime =
+            String(b.syncedAt || b.createdAt || '');
+
+          return bTime.localeCompare(aTime);
+        });
+
+    const requirementDraft =
+      matchingDrafts[0] || null;
+
+    const complete =
+      !!requirementDraft &&
+      (
+        requirementDraft.status === 'COMPLETE' ||
+        requirementDraft.status === 'SYNCED'
+      );
+
+    const partial =
+      !!requirementDraft &&
+      requirementDraft.status === 'PARTIAL_SYNC';
 
     const selected =
       currentEvidenceDraft &&
@@ -1288,6 +1324,60 @@ function renderRequirements(meta){
       item.canSelect === false ||
       !item.projectMaterialId;
 
+    let progressHtml = '';
+
+    if (requirementDraft) {
+      const requiredCount =
+        Math.max(
+          1,
+          Number(
+            requirementDraft.requiredPhotoCount ||
+            requirementDraft.evidenceRequired ||
+            item.evidenceRequired ||
+            1
+          )
+        );
+
+      const serverCount =
+        Number(
+          requirementDraft.serverPhotoCount ||
+          (
+            complete
+              ? requiredCount
+              : 0
+          )
+        );
+
+      progressHtml =
+        '<br><b>Evidence Progress:</b> ' +
+        escapeHtml(String(serverCount)) +
+        ' / ' +
+        escapeHtml(String(requiredCount)) +
+        (
+          requirementDraft.evidenceItemId
+            ? (
+                '<br><b>Evidence Item ID:</b> ' +
+                escapeHtml(requirementDraft.evidenceItemId)
+              )
+            : ''
+        );
+    }
+
+    let buttonText =
+      'PILIH MATERIAL EVIDENCE';
+
+    if (complete) {
+      buttonText = 'EVIDENCE COMPLETE';
+    }
+    else if (selected) {
+      buttonText = partial
+        ? 'EVIDENCE PARTIAL'
+        : 'MATERIAL EVIDENCE TERPILIH';
+    }
+    else if (partial) {
+      buttonText = 'LANJUTKAN EVIDENCE';
+    }
+
     card.innerHTML =
       '<div class="requirement-title">' +
         escapeHtml(String(index + 1)) + '. ' +
@@ -1300,20 +1390,13 @@ function renderRequirements(meta){
         '<b>Evidence Required:</b> ' + escapeHtml(String(item.evidenceRequired ?? 0)) + '<br>' +
         '<b>Verify Status:</b> ' + escapeHtml(item.verifyStatus || 'DRAFT') + '<br>' +
         '<b>Point ID:</b> ' + escapeHtml(item.pointId || '-') +
+        progressHtml +
       '</div>' +
       '<span class="requirement-tag">' + requiredText + '</span><br>' +
       '<button class="point-btn requirement-select-btn" type="button"' +
         (buttonDisabled ? ' disabled' : '') +
       '>' +
-        (
-          selected
-            ? (
-                currentEvidenceDraft.status === 'COMPLETE'
-                  ? 'EVIDENCE COMPLETE'
-                  : 'MATERIAL EVIDENCE TERPILIH'
-              )
-            : 'PILIH MATERIAL EVIDENCE'
-        ) +
+        buttonText +
       '</button>';
 
     const btn = card.querySelector('.requirement-select-btn');
