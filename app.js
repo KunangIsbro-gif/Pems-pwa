@@ -772,7 +772,7 @@ function acceptPointSessionBundle(bundle){
 
   const validShape =
     payload &&
-    payload.v === 'V14C-B2A-STEP8B' &&
+    payload.v === 'V14C-B2A-STEP8A' &&
     payload.kind === 'POINT_SESSION_LIST' &&
     payload.projectId === selectedProjectId &&
     Array.isArray(payload.pointSessions) &&
@@ -904,6 +904,17 @@ function refreshSyncGate(){
     !!currentEvidenceDraft.projectMaterialId &&
     !!currentEvidenceDraft.sessionId;
 
+  const selectedPointSessionId =
+    localStorage.getItem(SELECTED_POINT_SESSION_KEY) || '';
+
+  const hasPointSession =
+    !!selectedPointSessionId &&
+    currentPointSessions.some(function(item){
+      return String(item.sessionId || '') === selectedPointSessionId;
+    }) &&
+    (!currentEvidenceDraft ||
+      String(currentEvidenceDraft.sessionId || '') === selectedPointSessionId);
+
   const hasPhoto =
     !!currentLocalPhoto &&
     !!currentLocalPhoto.photoLocalId &&
@@ -919,6 +930,7 @@ function refreshSyncGate(){
     navigator.onLine &&
     hasProof &&
     hasDraft &&
+    hasPointSession &&
     hasPhoto &&
     hasGps;
 
@@ -946,6 +958,15 @@ function refreshSyncGate(){
     syncGateResultEl.className = 'result muted';
     syncGateResultEl.textContent =
       'Draft Evidence harus punya Project ID, Project Material ID, dan Point Session ID.';
+    return;
+  }
+
+  if (!hasPointSession) {
+    syncServerStatusEl.textContent = 'WAIT POINT';
+    syncServerStatusEl.className = '';
+    syncGateResultEl.className = 'result muted';
+    syncGateResultEl.textContent =
+      'Point Session belum valid / belum dipilih ulang.';
     return;
   }
 
