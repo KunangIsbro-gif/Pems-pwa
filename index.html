@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 9A</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step9a">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step9a">
+  <title>PEMS V14C-B2A Step 9B</title>
+  <link rel="manifest" href="./manifest.json?v=b2a-step9b">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step9b">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -110,15 +110,46 @@
       background:#eef6fd;
       color:#0f4c81;
     }
+    .photo-mini-card {
+      display:grid;
+      grid-template-columns:72px 1fr auto;
+      gap:10px;
+      align-items:center;
+      border:1px solid #d6e2ee;
+      border-radius:12px;
+      padding:10px;
+      background:#fff;
+    }
+    .photo-mini-card.active {
+      outline:2px solid #0f4c81;
+      background:#f5f9fd;
+    }
+    .photo-mini-card img {
+      width:72px;
+      height:72px;
+      object-fit:cover;
+      border-radius:8px;
+      border:1px solid #d6e2ee;
+    }
+    .photo-mini-meta {
+      font-size:12px;
+      line-height:1.45;
+      color:#475569;
+      overflow-wrap:anywhere;
+    }
+    .photo-mini-status {
+      font-size:11px;
+      font-weight:800;
+    }
 </style>
 </head>
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 9A</div>
-      <h1>Point Requirement Validation</h1>
+      <div class="badge">PEMS V14C-B2A STEP 9B</div>
+      <h1>Multi Photo Evidence</h1>
       <p class="lead">
-        Target tahap ini: setelah <b>Point Session</b> dipilih, PEMS hanya mengizinkan material evidence yang memang termasuk requirement titik tersebut.
+        Target tahap ini: satu Evidence Draft dapat memiliki <b>beberapa foto</b>. PEMS membandingkan jumlah foto dengan <b>Evidence Required</b> dan baru menandai evidence COMPLETE saat target terpenuhi.
       </p>
 
       <div class="status-grid">
@@ -234,22 +265,28 @@
       <section id="photoPanel" class="panel">
         <h2>Foto + GPS Lokal</h2>
         <p>
-          Pilih satu foto untuk draft evidence aktif. Setelah foto dipilih,
-          PEMS akan meminta lokasi GPS dan menyimpan foto + metadata secara lokal.
+          Tambahkan foto satu per satu untuk draft evidence aktif. Setiap foto disimpan
+          di IndexedDB bersama GPS. Jumlah minimum mengikuti <b>Evidence Required</b>.
         </p>
 
         <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
 
         <button id="choosePhotoBtn" class="primary-btn" type="button" disabled>
-          PILIH FOTO + AMBIL GPS
+          TAMBAH FOTO + AMBIL GPS
         </button>
 
         <button id="retryGpsBtn" class="primary-btn" type="button" hidden style="margin-left:8px;">
-          RETRY GPS
+          RETRY GPS FOTO AKTIF
         </button>
 
+        <div id="photoCountSummary" class="result muted" style="margin-top:12px;">
+          Belum ada foto pada draft aktif.
+        </div>
+
+        <div id="photoList" class="project-list" style="margin-top:12px;"></div>
+
         <div id="photoResult" class="result muted" style="margin-top:12px;">
-          Belum ada foto lokal.
+          Belum ada foto aktif.
         </div>
 
         <div id="photoPreviewWrap" hidden style="margin-top:12px;">
@@ -313,7 +350,7 @@
         </p>
 
         <button id="syncEvidenceBtn" class="primary-btn" type="button" disabled>
-          SYNC EVIDENCE + FOTO
+          SYNC FOTO BERIKUTNYA
         </button>
 
         <div id="syncGateResult" class="result muted" style="margin-top:12px;">
@@ -326,10 +363,9 @@
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 9A</strong> bila setelah Point Session dipilih dan requirement diambil:
-        <strong>POINT REQUIREMENT = LOADED</strong>, daftar material valid tampil,
-        lalu tombol <strong>PILIH MATERIAL EVIDENCE</strong> membuat Draft Evidence baru
-        dengan Project Material ID + Point Session ID yang sesuai.
+        <strong>PASS STEP 9B</strong> bila jumlah foto mengikuti <strong>Evidence Required</strong>:
+        contoh target 2 foto → setelah foto pertama server mengembalikan <strong>1 / 2 · PARTIAL</strong>,
+        lalu setelah foto kedua menjadi <strong>2 / 2 · COMPLETE</strong>. Foto yang sama tetap tidak boleh dobel.
       </div>
     </section>
   </main>
@@ -337,6 +373,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step9a"></script>
+  <script src="./app.js?v=b2a-step9b"></script>
 </body>
 </html>

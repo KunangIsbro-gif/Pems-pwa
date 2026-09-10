@@ -18,6 +18,8 @@ const photoLocalStatusEl = document.getElementById('photoLocalStatus');
 const photoInput = document.getElementById('photoInput');
 const choosePhotoBtn = document.getElementById('choosePhotoBtn');
 const photoResultEl = document.getElementById('photoResult');
+const photoCountSummaryEl = document.getElementById('photoCountSummary');
+const photoListEl = document.getElementById('photoList');
 const photoPreviewWrap = document.getElementById('photoPreviewWrap');
 const photoPreview = document.getElementById('photoPreview');
 const gpsQualityStatusEl = document.getElementById('gpsQualityStatus');
@@ -57,6 +59,7 @@ let currentProjects = [];
 let currentMaterials = [];
 let currentEvidenceDraft = null;
 let currentLocalPhoto = null;
+let currentLocalPhotos = [];
 let currentPointSessions = [];
 let currentRequirements = [];
 
@@ -341,6 +344,67 @@ function getLatestPhotoByEvidenceDraftId(evidenceDraftId){
   });
 }
 
+
+function getAllPhotosByEvidenceDraftId(evidenceDraftId){
+  return openPhotoDb().then(function(db){
+    return new Promise(function(resolve, reject){
+      const tx = db.transaction(PHOTO_STORE, 'readonly');
+      const store = tx.objectStore(PHOTO_STORE);
+      const index = store.index('evidenceDraftId');
+      const request = index.getAll(evidenceDraftId);
+
+      request.onsuccess = function(){
+        const rows = Array.isArray(request.result)
+          ? request.result
+          : [];
+
+        rows.sort(function(a, b){
+          return String(a.createdAt || '')
+            .localeCompare(String(b.createdAt || ''));
+        });
+
+        db.close();
+        resolve(rows);
+      };
+
+      request.onerror = function(){
+        db.close();
+        reject(
+          request.error ||
+          new Error('Daftar foto lokal gagal dibaca.')
+        );
+      };
+    });
+  });
+}
+
+function getRequiredPhotoCount(){
+  if (!currentEvidenceDraft) return 1;
+
+  return Math.max(
+    1,
+    Math.floor(
+      Number(
+        currentEvidenceDraft.requiredPhotoCount ||
+        currentEvidenceDraft.evidenceRequired ||
+        1
+      )
+    )
+  );
+}
+
+function getUnsyncedLocalPhotos(){
+  return currentLocalPhotos.filter(function(item){
+    return item && item.status !== 'SYNCED';
+  });
+}
+
+function getSyncedLocalPhotos(){
+  return currentLocalPhotos.filter(function(item){
+    return item && item.status === 'SYNCED';
+  });
+}
+
 function makeLocalPhotoId(){
   const stamp = Date.now().toString(36).toUpperCase();
   const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -459,6 +523,14 @@ async function retryGpsForCurrentPhoto(){
     });
 
     await putLocalPhoto(updated);
+
+    currentLocalPhotos =
+      currentLocalPhotos.map(function(item){
+        return item.photoLocalId === updated.photoLocalId
+          ? updated
+          : item;
+      });
+
     renderLocalPhoto(updated);
   } catch (error) {
     gpsQualityStatusEl.textContent = 'RETRY FAILED';
@@ -485,59 +557,65 @@ function renderLocalPhoto(record){
   currentLocalPhoto = record || null;
 
   if (!record) {
-    photoLocalStatusEl.textContent = 'BELUM ADA';
-    photoLocalStatusEl.className = '';
+    photoLocalStatusEl.textContent =
+      currentLocalPhotos.length > 0 ? 'READY' : 'BELUM ADA';
+    photoLocalStatusEl.className =
+      currentLocalPhotos.length > 0 ? 'ok' : '';
+
     photoResultEl.className = 'result muted';
-    photoResultEl.textContent = 'Belum ada foto lokal.';
+    photoResultEl.textContent = 'Belum ada foto aktif.';
     photoPreviewWrap.hidden = true;
     photoPreview.removeAttribute('src');
     renderGpsQuality(null);
+    refreshPhotoGallery();
+    refreshSyncGate();
     return;
   }
 
+  const unsyncedCount = getUnsyncedLocalPhotos().length;
+
   photoLocalStatusEl.textContent =
-    record.status === 'SYNCED'
-      ? 'SYNCED'
-      : 'READY';
+    unsyncedCount > 0
+      ? 'READY'
+      : (
+          currentEvidenceDraft &&
+          currentEvidenceDraft.status === 'COMPLETE'
+            ? 'COMPLETE'
+            : 'SYNCED'
+        );
   photoLocalStatusEl.className = 'ok';
 
   const gpsQuality = classifyGpsAccuracy(record.accuracy);
   renderGpsQuality(record);
 
   photoResultEl.className =
-    gpsQuality.code === 'RETRY' ? 'result errbox' : 'result okbox';
+    gpsQuality.code === 'RETRY' &&
+    record.status !== 'SYNCED'
+      ? 'result errbox'
+      : 'result okbox';
+
   photoResultEl.innerHTML =
-    '<strong>✓ PHOTO LOCAL READY</strong><br>' +
+    '<strong>✓ FOTO AKTIF</strong><br>' +
     '<b>Photo Local ID:</b> ' +
       escapeHtml(record.photoLocalId || '-') + '<br>' +
-    '<b>Evidence Draft ID:</b> ' +
-      escapeHtml(record.evidenceDraftId || '-') + '<br>' +
     '<b>File:</b> ' +
       escapeHtml(record.fileName || '-') + '<br>' +
     '<b>Size:</b> ' +
       escapeHtml(formatBytes(record.fileSize || 0)) + '<br>' +
-    '<b>Latitude:</b> ' +
-      escapeHtml(String(record.latitude ?? '-')) + '<br>' +
-    '<b>Longitude:</b> ' +
-      escapeHtml(String(record.longitude ?? '-')) + '<br>' +
     '<b>GPS Accuracy:</b> ' +
       escapeHtml(String(record.accuracy ?? '-')) + ' m<br>' +
     '<b>GPS Quality:</b> ' +
       escapeHtml(gpsQuality.label) + '<br>' +
-    '<b>Sync Gate:</b> ' +
-      (gpsQuality.syncAllowed ? 'ALLOWED' : 'BLOCKED - RETRY GPS') + '<br>' +
     '<b>Status:</b> ' +
-      escapeHtml(record.status || 'PHOTO_LOCAL_READY') + '<br>' +
+      escapeHtml(record.status || 'PHOTO_LOCAL_READY') +
     (
       record.status === 'SYNCED'
         ? (
-            '<b>Evidence Item ID:</b> ' +
-            escapeHtml(record.evidenceItemId || '-') + '<br>' +
-            '<b>Photo ID:</b> ' +
-            escapeHtml(record.photoId || '-') + '<br>' +
-            '<small>Foto sudah tersinkron ke server.</small>'
+            '<br><b>Photo ID Server:</b> ' +
+            escapeHtml(record.photoId || '-') +
+            '<br><small>Foto ini sudah tersinkron ke server.</small>'
           )
-        : '<small>Foto + GPS tersimpan lokal. Belum sync ke server.</small>'
+        : '<br><small>Foto ini masih lokal dan siap disinkronkan.</small>'
     );
 
   if (record.blob) {
@@ -548,24 +626,125 @@ function renderLocalPhoto(record){
     photoPreviewWrap.hidden = true;
   }
 
+  refreshPhotoGallery();
   refreshSyncGate();
 }
 
 function restoreLocalPhoto(){
-  if (!currentEvidenceDraft || !currentEvidenceDraft.evidenceDraftId) {
+  if (
+    !currentEvidenceDraft ||
+    !currentEvidenceDraft.evidenceDraftId
+  ) {
+    currentLocalPhotos = [];
     renderLocalPhoto(null);
     return;
   }
 
-  getLatestPhotoByEvidenceDraftId(
+  getAllPhotosByEvidenceDraftId(
     currentEvidenceDraft.evidenceDraftId
   )
-    .then(function(record){
-      renderLocalPhoto(record);
+    .then(function(rows){
+      currentLocalPhotos = rows;
+
+      const firstUnsynced =
+        rows.find(function(item){
+          return item.status !== 'SYNCED';
+        });
+
+      const active =
+        firstUnsynced ||
+        rows[rows.length - 1] ||
+        null;
+
+      renderLocalPhoto(active);
     })
     .catch(function(){
+      currentLocalPhotos = [];
       renderLocalPhoto(null);
     });
+}
+
+
+function refreshPhotoGallery(){
+  if (!photoCountSummaryEl || !photoListEl) return;
+
+  const required = getRequiredPhotoCount();
+  const localCount = currentLocalPhotos.length;
+  const syncedLocalCount = getSyncedLocalPhotos().length;
+
+  const serverCount =
+    currentEvidenceDraft
+      ? Number(currentEvidenceDraft.serverPhotoCount || 0)
+      : 0;
+
+  const effectiveServerCount =
+    Math.max(serverCount, syncedLocalCount);
+
+  const complete =
+    !!currentEvidenceDraft &&
+    currentEvidenceDraft.status === 'COMPLETE';
+
+  photoCountSummaryEl.className =
+    complete ? 'result okbox' : 'result muted';
+
+  photoCountSummaryEl.innerHTML =
+    '<strong>' +
+      (complete
+        ? '✓ EVIDENCE PHOTO COMPLETE'
+        : 'EVIDENCE PHOTO PROGRESS') +
+    '</strong><br>' +
+    '<b>Target:</b> ' + escapeHtml(String(required)) + ' foto<br>' +
+    '<b>Foto lokal:</b> ' + escapeHtml(String(localCount)) + '<br>' +
+    '<b>Foto server:</b> ' +
+      escapeHtml(String(effectiveServerCount)) + ' / ' +
+      escapeHtml(String(required)) + '<br>' +
+    '<b>Status:</b> ' +
+      (complete ? 'COMPLETE' : 'BELUM LENGKAP');
+
+  photoListEl.innerHTML = '';
+
+  currentLocalPhotos.forEach(function(item, index){
+    const card = document.createElement('div');
+
+    const active =
+      currentLocalPhoto &&
+      currentLocalPhoto.photoLocalId === item.photoLocalId;
+
+    card.className =
+      'photo-mini-card' + (active ? ' active' : '');
+
+    let preview = '<div></div>';
+
+    if (item.blob) {
+      const objectUrl = URL.createObjectURL(item.blob);
+      preview =
+        '<img src="' + objectUrl + '" alt="Foto ' +
+        escapeHtml(String(index + 1)) + '">';
+    }
+
+    card.innerHTML =
+      preview +
+      '<div class="photo-mini-meta">' +
+        '<b>Foto ' + escapeHtml(String(index + 1)) + '</b><br>' +
+        escapeHtml(item.fileName || '-') + '<br>' +
+        'GPS ' + escapeHtml(String(item.accuracy ?? '-')) + ' m<br>' +
+        '<span class="photo-mini-status">' +
+          escapeHtml(item.status || 'PHOTO_LOCAL_READY') +
+        '</span>' +
+      '</div>' +
+      '<button class="point-btn photo-open-btn" type="button">LIHAT</button>';
+
+    card
+      .querySelector('.photo-open-btn')
+      .addEventListener('click', function(){
+        renderLocalPhoto(item);
+      });
+
+    photoListEl.appendChild(card);
+  });
+
+  choosePhotoBtn.disabled =
+    !currentEvidenceDraft || complete;
 }
 
 function loadEvidenceDrafts(){
@@ -644,19 +823,40 @@ function renderEvidenceDraft(){
     evidenceDraftStatusEl.className = '';
     evidenceDraftPanel.hidden = true;
     choosePhotoBtn.disabled = true;
+    currentLocalPhotos = [];
     renderLocalPhoto(null);
     return;
   }
 
-  evidenceDraftStatusEl.textContent =
-    currentEvidenceDraft.status === 'SYNCED'
-      ? 'SYNCED'
-      : 'DRAFT LOCAL';
+  const status =
+    String(currentEvidenceDraft.status || 'DRAFT_LOCAL');
+
+  let label = 'DRAFT LOCAL';
+
+  if (status === 'PARTIAL_SYNC') {
+    label = 'PARTIAL';
+  } else if (status === 'COMPLETE') {
+    label = 'COMPLETE';
+  } else if (status === 'SYNCED') {
+    label = 'SYNCED';
+  }
+
+  evidenceDraftStatusEl.textContent = label;
   evidenceDraftStatusEl.className = 'ok';
   evidenceDraftPanel.hidden = false;
 
+  const required =
+    Math.max(
+      1,
+      Number(
+        currentEvidenceDraft.requiredPhotoCount ||
+        currentEvidenceDraft.evidenceRequired ||
+        1
+      )
+    );
+
   evidenceDraftResultEl.innerHTML =
-    '<strong>✓ DRAFT EVIDENCE LOCAL</strong><br>' +
+    '<strong>✓ EVIDENCE DRAFT</strong><br>' +
     '<b>Evidence Draft ID:</b> ' +
       escapeHtml(currentEvidenceDraft.evidenceDraftId || '-') + '<br>' +
     '<b>Project:</b> ' +
@@ -665,25 +865,37 @@ function renderEvidenceDraft(){
       escapeHtml(currentEvidenceDraft.projectMaterialId || '-') + '<br>' +
     '<b>Designator:</b> ' +
       escapeHtml(currentEvidenceDraft.designator || '-') + '<br>' +
-    '<b>Material:</b> ' +
-      escapeHtml(currentEvidenceDraft.materialName || '-') + '<br>' +
-    '<b>Status:</b> ' +
-      escapeHtml(currentEvidenceDraft.status || '-') + '<br>' +
+    '<b>Requirement:</b> ' +
+      escapeHtml(currentEvidenceDraft.requirementCode || '-') + '<br>' +
+    '<b>Evidence Required:</b> ' +
+      escapeHtml(String(required)) + ' foto<br>' +
     '<b>Point Session ID:</b> ' +
-      escapeHtml(currentEvidenceDraft.sessionId || 'BELUM DIPILIH') + '<br>' +
+      escapeHtml(currentEvidenceDraft.sessionId || '-') + '<br>' +
+    '<b>Status:</b> ' +
+      escapeHtml(status) +
     (
-      currentEvidenceDraft.status === 'SYNCED'
+      currentEvidenceDraft.evidenceItemId
         ? (
-            '<b>Evidence Item ID:</b> ' +
-            escapeHtml(currentEvidenceDraft.evidenceItemId || '-') + '<br>' +
-            '<b>Photo ID:</b> ' +
-            escapeHtml(currentEvidenceDraft.photoId || '-') + '<br>' +
-            '<small>Evidence sudah tersinkron ke server.</small>'
+            '<br><b>Evidence Item ID:</b> ' +
+            escapeHtml(currentEvidenceDraft.evidenceItemId)
           )
-        : '<small>Draft tersimpan lokal. Belum dikirim ke server.</small>'
+        : ''
+    ) +
+    (
+      currentEvidenceDraft.serverPhotoCount !== undefined
+        ? (
+            '<br><b>Server Photo:</b> ' +
+            escapeHtml(
+              String(currentEvidenceDraft.serverPhotoCount || 0)
+            ) +
+            ' / ' +
+            escapeHtml(String(required))
+          )
+        : ''
     );
 
-  choosePhotoBtn.disabled = false;
+  choosePhotoBtn.disabled = status === 'COMPLETE';
+
   restoreLocalPhoto();
   refreshSyncGate();
 }
@@ -763,7 +975,7 @@ function renderMaterials(projectId){
     '</strong><br>' +
     'Project: ' + escapeHtml(projectId || '-') + '<br>' +
     'Total material project: ' + escapeHtml(String(currentMaterials.length)) + '<br>' +
-    '<small>Cache ini hanya referensi. Mulai STEP 9A, pemilihan material evidence dilakukan dari Requirement Material Titik.</small>';
+    '<small>Cache ini hanya referensi. Mulai STEP 9B, pemilihan material evidence dilakukan dari Requirement Material Titik.</small>';
 
   currentMaterials.forEach(function(item, index){
     const card = document.createElement('div');
@@ -889,7 +1101,11 @@ function createDraftFromRequirement(requirement){
       item.projectId === projectId &&
       item.projectMaterialId === requirement.projectMaterialId &&
       item.sessionId === sessionId &&
-      item.status === 'DRAFT_LOCAL'
+      (
+        item.status === 'DRAFT_LOCAL' ||
+        item.status === 'PARTIAL_SYNC' ||
+        item.status === 'COMPLETE'
+      )
     );
   });
 
@@ -910,7 +1126,10 @@ function createDraftFromRequirement(requirement){
       unit: requirement.unit || '',
       requirementId: requirement.requirementId || '',
       requirementCode: requirement.requirementCode || 'MATERIAL',
-      evidenceRequired: Number(requirement.evidenceRequired || 0),
+      evidenceRequired:
+        Math.max(1, Number(requirement.evidenceRequired || 1)),
+      requiredPhotoCount:
+        Math.max(1, Number(requirement.evidenceRequired || 1)),
       required: requirement.required === true,
       sessionId: sessionId,
       anchorPointId: pointSession.anchorPointId || '',
@@ -930,6 +1149,7 @@ function createDraftFromRequirement(requirement){
 
   currentEvidenceDraft = draft;
   currentLocalPhoto = null;
+  currentLocalPhotos = [];
 
   renderEvidenceDraft();
   renderRequirements();
@@ -1053,7 +1273,6 @@ function renderRequirements(meta){
 
     const selected =
       currentEvidenceDraft &&
-      currentEvidenceDraft.status === 'DRAFT_LOCAL' &&
       currentEvidenceDraft.sessionId === sessionId &&
       currentEvidenceDraft.projectMaterialId === item.projectMaterialId;
 
@@ -1086,7 +1305,15 @@ function renderRequirements(meta){
       '<button class="point-btn requirement-select-btn" type="button"' +
         (buttonDisabled ? ' disabled' : '') +
       '>' +
-        (selected ? 'MATERIAL EVIDENCE TERPILIH' : 'PILIH MATERIAL EVIDENCE') +
+        (
+          selected
+            ? (
+                currentEvidenceDraft.status === 'COMPLETE'
+                  ? 'EVIDENCE COMPLETE'
+                  : 'MATERIAL EVIDENCE TERPILIH'
+              )
+            : 'PILIH MATERIAL EVIDENCE'
+        ) +
       '</button>';
 
     const btn = card.querySelector('.requirement-select-btn');
@@ -1327,6 +1554,7 @@ function restorePointSessions(){
 
 function refreshSyncGate(){
   const hasProof = !!currentServerProof;
+
   const hasDraft =
     !!currentEvidenceDraft &&
     !!currentEvidenceDraft.evidenceDraftId &&
@@ -1342,23 +1570,28 @@ function refreshSyncGate(){
     currentPointSessions.some(function(item){
       return String(item.sessionId || '') === selectedPointSessionId;
     }) &&
-    (!currentEvidenceDraft ||
-      String(currentEvidenceDraft.sessionId || '') === selectedPointSessionId);
+    (
+      !currentEvidenceDraft ||
+      String(currentEvidenceDraft.sessionId || '') === selectedPointSessionId
+    );
+
+  const complete =
+    !!currentEvidenceDraft &&
+    currentEvidenceDraft.status === 'COMPLETE';
+
+  const unsyncedPhotos = getUnsyncedLocalPhotos();
+  const nextPhoto = unsyncedPhotos[0] || null;
 
   const hasPhoto =
-    !!currentLocalPhoto &&
-    !!currentLocalPhoto.photoLocalId &&
-    !!currentLocalPhoto.blob;
+    !!nextPhoto &&
+    !!nextPhoto.photoLocalId &&
+    !!nextPhoto.blob;
 
   const hasGps =
     hasPhoto &&
-    Number.isFinite(Number(currentLocalPhoto.latitude)) &&
-    Number.isFinite(Number(currentLocalPhoto.longitude)) &&
-    Number.isFinite(Number(currentLocalPhoto.accuracy));
-
-  const alreadySynced =
-    !!currentEvidenceDraft &&
-    currentEvidenceDraft.status === 'SYNCED';
+    Number.isFinite(Number(nextPhoto.latitude)) &&
+    Number.isFinite(Number(nextPhoto.longitude)) &&
+    Number.isFinite(Number(nextPhoto.accuracy));
 
   const ready =
     navigator.onLine &&
@@ -1367,7 +1600,7 @@ function refreshSyncGate(){
     hasPointSession &&
     hasPhoto &&
     hasGps &&
-    !alreadySynced;
+    !complete;
 
   syncEvidenceBtn.disabled = !ready;
 
@@ -1375,22 +1608,27 @@ function refreshSyncGate(){
     syncServerStatusEl.textContent = 'OFFLINE';
     syncServerStatusEl.className = 'bad';
     syncGateResultEl.className = 'result errbox';
-    syncGateResultEl.textContent = 'Offline. Sync server belum bisa dilakukan.';
+    syncGateResultEl.textContent =
+      'Offline. Foto tetap aman lokal; sync menunggu online.';
     return;
   }
 
-  if (alreadySynced) {
-    syncServerStatusEl.textContent = 'SYNCED';
+  if (complete) {
+    const required = getRequiredPhotoCount();
+    const count =
+      Number(currentEvidenceDraft.serverPhotoCount || required);
+
+    syncServerStatusEl.textContent = 'COMPLETE';
     syncServerStatusEl.className = 'ok';
-    syncEvidenceBtn.disabled = true;
 
     syncGateResultEl.className = 'result okbox';
     syncGateResultEl.innerHTML =
-      '<strong>✓ EVIDENCE SUDAH SYNCED</strong><br>' +
-      'Evidence Item ID: ' +
-      escapeHtml(currentEvidenceDraft.evidenceItemId || '-') + '<br>' +
-      'Photo ID: ' +
-      escapeHtml(currentEvidenceDraft.photoId || '-');
+      '<strong>✓ EVIDENCE COMPLETE</strong><br>' +
+      '<b>Evidence Item ID:</b> ' +
+        escapeHtml(currentEvidenceDraft.evidenceItemId || '-') + '<br>' +
+      '<b>Foto Server:</b> ' +
+        escapeHtml(String(count)) + ' / ' +
+        escapeHtml(String(required));
     return;
   }
 
@@ -1407,7 +1645,7 @@ function refreshSyncGate(){
     syncServerStatusEl.className = '';
     syncGateResultEl.className = 'result muted';
     syncGateResultEl.textContent =
-      'Draft Evidence harus punya Project ID, Project Material ID, dan Point Session ID.';
+      'Pilih material evidence dari Requirement Material Titik.';
     return;
   }
 
@@ -1416,20 +1654,30 @@ function refreshSyncGate(){
     syncServerStatusEl.className = '';
     syncGateResultEl.className = 'result muted';
     syncGateResultEl.textContent =
-      'Point Session belum valid / belum dipilih ulang.';
+      'Point Session belum valid / belum dipilih.';
     return;
   }
 
   if (!hasPhoto || !hasGps) {
+    const required = getRequiredPhotoCount();
+    const count =
+      Number(currentEvidenceDraft.serverPhotoCount || 0);
+
     syncServerStatusEl.textContent = 'WAIT PHOTO';
     syncServerStatusEl.className = '';
     syncGateResultEl.className = 'result muted';
-    syncGateResultEl.textContent = 'Foto lokal + GPS belum siap.';
+    syncGateResultEl.innerHTML =
+      'Belum ada foto lokal yang menunggu sync.<br>' +
+      '<b>Progress server:</b> ' +
+      escapeHtml(String(count)) + ' / ' +
+      escapeHtml(String(required));
     return;
   }
 
+  currentLocalPhoto = nextPhoto;
+
   const gpsQuality =
-    classifyGpsAccuracy(currentLocalPhoto.accuracy);
+    classifyGpsAccuracy(nextPhoto.accuracy);
 
   syncServerStatusEl.textContent = 'READY';
   syncServerStatusEl.className = 'ok';
@@ -1440,18 +1688,16 @@ function refreshSyncGate(){
       : 'result okbox';
 
   syncGateResultEl.innerHTML =
-    '<strong>✓ SYNC GATE READY</strong><br>' +
-    '<b>Mode:</b> DEV / LAPTOP<br>' +
-    '<b>Evidence Draft:</b> ' +
-      escapeHtml(currentEvidenceDraft.evidenceDraftId || '-') + '<br>' +
-    '<b>Point Session:</b> ' +
-      escapeHtml(currentEvidenceDraft.sessionId || '-') + '<br>' +
+    '<strong>✓ FOTO BERIKUTNYA SIAP SYNC</strong><br>' +
     '<b>Photo Local:</b> ' +
-      escapeHtml(currentLocalPhoto.photoLocalId || '-') + '<br>' +
+      escapeHtml(nextPhoto.photoLocalId || '-') + '<br>' +
     '<b>GPS:</b> ' +
-      escapeHtml(String(currentLocalPhoto.accuracy ?? '-')) +
+      escapeHtml(String(nextPhoto.accuracy ?? '-')) +
       ' m — ' +
       escapeHtml(gpsQuality.label) + '<br>' +
+    '<b>Queue lokal:</b> ' +
+      escapeHtml(String(unsyncedPhotos.length)) +
+      ' foto belum sync<br>' +
     '<b>DEV Sync:</b> ALLOWED FOR TEST ONLY';
 }
 
@@ -1488,6 +1734,16 @@ async function syncCurrentEvidence(){
     alert('Data belum siap untuk sync.');
     return;
   }
+
+  const nextPhoto =
+    getUnsyncedLocalPhotos()[0] || null;
+
+  if (!nextPhoto) {
+    alert('Tidak ada foto lokal yang menunggu sync.');
+    return;
+  }
+
+  currentLocalPhoto = nextPhoto;
 
   syncEvidenceBtn.disabled = true;
   syncServerStatusEl.textContent = 'PREPARING';
@@ -1559,7 +1815,7 @@ async function acceptSyncResultBundle(bundle){
 
   const validShape =
     payload &&
-    payload.v === 'V14C-B2A-STEP8C' &&
+    payload.v === 'V14C-B2A-STEP9B' &&
     payload.kind === 'SYNC_RESULT' &&
     payload.success === true &&
     Number(payload.exp || 0) > nowSec &&
@@ -1577,23 +1833,39 @@ async function acceptSyncResultBundle(bundle){
     return false;
   }
 
-  // Update Evidence Draft localStorage.
+  const required =
+    Math.max(1, Number(payload.requiredPhotoCount || 1));
+
+  const count =
+    Math.max(0, Number(payload.photoCount || 0));
+
+  const complete =
+    payload.evidenceComplete === true ||
+    count >= required;
+
   const drafts = loadEvidenceDrafts();
-  const draftIndex = drafts.findIndex(function(item){
-    return (
-      item &&
-      item.evidenceDraftId === payload.evidenceDraftId
-    );
-  });
+
+  const draftIndex =
+    drafts.findIndex(function(item){
+      return (
+        item &&
+        item.evidenceDraftId === payload.evidenceDraftId
+      );
+    });
 
   if (draftIndex >= 0) {
     drafts[draftIndex] = Object.assign(
       {},
       drafts[draftIndex],
       {
-        status: 'SYNCED',
+        status:
+          complete ? 'COMPLETE' : 'PARTIAL_SYNC',
         evidenceItemId: payload.evidenceItemId,
         photoId: payload.photoId,
+        lastPhotoId: payload.photoId,
+        serverPhotoCount: count,
+        requiredPhotoCount: required,
+        evidenceComplete: complete,
         syncMessage: payload.message || '',
         alreadySynced: payload.alreadySynced === true,
         gpsPolicy: payload.gpsPolicy || '',
@@ -1603,77 +1875,123 @@ async function acceptSyncResultBundle(bundle){
     );
 
     saveEvidenceDrafts(drafts);
-
     currentEvidenceDraft = drafts[draftIndex];
   }
 
-  // Update photo record in IndexedDB.
   try {
-    const updatedPhoto = await updateLocalPhotoRecord(
-      payload.photoLocalId,
-      {
-        status: 'SYNCED',
-        evidenceItemId: payload.evidenceItemId,
-        photoId: payload.photoId,
-        serverFileName: payload.fileName || '',
-        alreadySynced: payload.alreadySynced === true,
-        syncedAt: new Date().toISOString()
-      }
-    );
+    const updatedPhoto =
+      await updateLocalPhotoRecord(
+        payload.photoLocalId,
+        {
+          status: 'SYNCED',
+          evidenceItemId: payload.evidenceItemId,
+          photoId: payload.photoId,
+          serverFileName: payload.fileName || '',
+          alreadySynced: payload.alreadySynced === true,
+          syncedAt: new Date().toISOString()
+        }
+      );
 
-    if (
-      currentLocalPhoto &&
-      currentLocalPhoto.photoLocalId === payload.photoLocalId
-    ) {
-      currentLocalPhoto = updatedPhoto;
-    }
-  } catch (e) {
-    // Draft result tetap valid walau foto lokal sudah tidak tersedia.
-  }
+    currentLocalPhotos =
+      currentLocalPhotos.map(function(item){
+        return item.photoLocalId === updatedPhoto.photoLocalId
+          ? updatedPhoto
+          : item;
+      });
 
-  syncServerStatusEl.textContent = 'SYNCED';
-  syncServerStatusEl.className = 'ok';
+    currentLocalPhoto =
+      getUnsyncedLocalPhotos()[0] ||
+      updatedPhoto;
 
-  syncResultLocalEl.className = 'result okbox';
+  } catch (e) {}
+
+  syncServerStatusEl.textContent =
+    complete ? 'COMPLETE' : 'PARTIAL';
+  syncServerStatusEl.className =
+    complete ? 'ok' : '';
+
+  syncResultLocalEl.className =
+    complete ? 'result okbox' : 'result muted';
+
   syncResultLocalEl.innerHTML =
-    '<strong>✓ SYNC RESULT RECEIVED</strong><br>' +
-    '<b>Evidence Draft:</b> ' +
-      escapeHtml(payload.evidenceDraftId) + '<br>' +
+    '<strong>' +
+      (
+        complete
+          ? '✓ EVIDENCE COMPLETE'
+          : '✓ FOTO SYNCED · EVIDENCE BELUM LENGKAP'
+      ) +
+    '</strong><br>' +
     '<b>Evidence Item ID:</b> ' +
       escapeHtml(payload.evidenceItemId) + '<br>' +
-    '<b>Photo Local ID:</b> ' +
-      escapeHtml(payload.photoLocalId) + '<br>' +
     '<b>Photo ID:</b> ' +
       escapeHtml(payload.photoId) + '<br>' +
-    '<b>Status:</b> SYNCED<br>' +
+    '<b>Evidence Photos:</b> ' +
+      escapeHtml(String(count)) + ' / ' +
+      escapeHtml(String(required)) + '<br>' +
+    '<b>Status:</b> ' +
+      (complete ? 'COMPLETE' : 'PARTIAL') + '<br>' +
     '<b>Already Synced:</b> ' +
       (payload.alreadySynced ? 'YES' : 'NO');
 
   renderEvidenceDraft();
-  renderLocalPhoto(currentLocalPhoto);
-  refreshSyncGate();
-
   return true;
 }
 
 function restoreSyncedResult(){
-  if (
-    currentEvidenceDraft &&
-    currentEvidenceDraft.status === 'SYNCED' &&
-    currentEvidenceDraft.evidenceItemId &&
-    currentEvidenceDraft.photoId
-  ) {
-    syncServerStatusEl.textContent = 'SYNCED';
-    syncServerStatusEl.className = 'ok';
+  if (!currentEvidenceDraft) return;
 
-    syncResultLocalEl.className = 'result okbox';
+  const status =
+    String(currentEvidenceDraft.status || '');
+
+  if (
+    (status === 'COMPLETE' ||
+     status === 'PARTIAL_SYNC' ||
+     status === 'SYNCED') &&
+    currentEvidenceDraft.evidenceItemId
+  ) {
+    const required =
+      Math.max(
+        1,
+        Number(
+          currentEvidenceDraft.requiredPhotoCount ||
+          currentEvidenceDraft.evidenceRequired ||
+          1
+        )
+      );
+
+    const count =
+      Number(
+        currentEvidenceDraft.serverPhotoCount ||
+        (
+          status === 'SYNCED'
+            ? required
+            : 0
+        )
+      );
+
+    const complete =
+      status === 'COMPLETE' ||
+      status === 'SYNCED';
+
+    syncServerStatusEl.textContent =
+      complete ? 'COMPLETE' : 'PARTIAL';
+    syncServerStatusEl.className =
+      complete ? 'ok' : '';
+
+    syncResultLocalEl.className =
+      complete ? 'result okbox' : 'result muted';
+
     syncResultLocalEl.innerHTML =
-      '<strong>✓ EVIDENCE SUDAH SYNCED</strong><br>' +
+      '<strong>' +
+        (complete ? '✓ EVIDENCE COMPLETE' : 'EVIDENCE PARTIAL') +
+      '</strong><br>' +
       '<b>Evidence Item ID:</b> ' +
         escapeHtml(currentEvidenceDraft.evidenceItemId) + '<br>' +
-      '<b>Photo ID:</b> ' +
-        escapeHtml(currentEvidenceDraft.photoId) + '<br>' +
-      '<b>Status:</b> SYNCED';
+      '<b>Foto Server:</b> ' +
+        escapeHtml(String(count)) + ' / ' +
+        escapeHtml(String(required)) + '<br>' +
+      '<b>Status:</b> ' +
+        (complete ? 'COMPLETE' : 'PARTIAL');
   }
 }
 
@@ -2003,6 +2321,8 @@ photoInput.addEventListener('change', async function(){
     };
 
     await putLocalPhoto(record);
+    currentLocalPhotos.push(record);
+    currentLocalPhoto = record;
     renderLocalPhoto(record);
 
   } catch (error) {
