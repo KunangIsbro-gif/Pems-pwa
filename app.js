@@ -149,7 +149,7 @@ function acceptMaterialBundle(bundle){
 
   const validShape =
     payload &&
-    payload.v === 'V14C-B2A-STEP6C' &&
+    payload.v === 'V14C-B2A-STEP6B' &&
     payload.kind === 'PROJECT_MATERIAL_LIST' &&
     typeof payload.projectId === 'string' &&
     payload.projectId === selectedProjectId &&
