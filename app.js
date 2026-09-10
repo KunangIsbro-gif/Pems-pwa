@@ -40,6 +40,9 @@ const syncServerStatusEl = document.getElementById('syncServerStatus');
 const syncEvidenceBtn = document.getElementById('syncEvidenceBtn');
 const syncGateResultEl = document.getElementById('syncGateResult');
 const syncResultLocalEl = document.getElementById('syncResultLocal');
+const autoSyncStatusEl = document.getElementById('autoSyncStatus');
+const autoSyncToggleBtn = document.getElementById('autoSyncToggleBtn');
+const queueSummaryEl = document.getElementById('queueSummary');
 const projectsPanel = document.getElementById('projectsPanel');
 const projectListEl = document.getElementById('projectList');
 const selectedProjectBanner = document.getElementById('selectedProjectBanner');
@@ -52,6 +55,9 @@ const EVIDENCE_DRAFTS_KEY = 'PEMS_EVIDENCE_DRAFTS_STEP7D';
 const POINT_SESSIONS_KEY = 'PEMS_POINT_SESSIONS_STEP8B';
 const SELECTED_POINT_SESSION_KEY = 'PEMS_SELECTED_POINT_SESSION_STEP8B';
 const POINT_REQUIREMENTS_KEY = 'PEMS_POINT_REQUIREMENTS_STEP9A';
+const AUTO_SYNC_ENABLED_KEY = 'PEMS_AUTO_SYNC_ENABLED_STEP9C';
+const AUTO_SYNC_ACTIVE_KEY = 'PEMS_AUTO_SYNC_ACTIVE_STEP9C';
+const AUTO_SYNC_LAST_PHOTO_KEY = 'PEMS_AUTO_SYNC_LAST_PHOTO_STEP9C';
 
 let currentGoogleCredential = '';
 let currentServerProof = '';
@@ -65,10 +71,16 @@ let currentRequirements = [];
 
 const POINT_RENDER_LIMIT = 30;
 let pointSessionSearchTerm = '';
+let autoSyncBusy = false;
+let autoSyncUiToken = 0;
 
 const PHOTO_DB_NAME = 'PEMS_LOCAL_EVIDENCE_DB';
 const PHOTO_DB_VERSION = 1;
 const PHOTO_STORE = 'photos';
+
+if (localStorage.getItem(AUTO_SYNC_ENABLED_KEY) === null) {
+  localStorage.setItem(AUTO_SYNC_ENABLED_KEY, '1');
+}
 
 function getSelectedProjectId(){
   return localStorage.getItem(SELECTED_PROJECT_KEY) || '';
@@ -127,9 +139,19 @@ function setConnectivity(){
   if (typeof refreshSyncGate === 'function') {
     refreshSyncGate();
   }
+
+  if (typeof refreshAutoSyncQueueUI === 'function') {
+    refreshAutoSyncQueueUI();
+  }
 }
 window.addEventListener('online', setConnectivity);
 window.addEventListener('offline', setConnectivity);
+
+window.addEventListener('online', function(){
+  setTimeout(function(){
+    runAutoSyncQueue('network_online');
+  }, 1200);
+});
 setConnectivity();
 
 function base64UrlDecodeUtf8(value){
@@ -181,6 +203,18 @@ function acceptProof(proof){
   loadProjectsBtn.disabled = false;
   refreshMaterialButton();
   refreshSyncGate();
+
+  refreshAutoSyncQueueUI();
+
+  if (
+    navigator.onLine &&
+    isAutoSyncEnabled()
+  ) {
+    setTimeout(function(){
+      runAutoSyncQueue('proof_received');
+    }, 700);
+  }
+
   return true;
 }
 
@@ -275,6 +309,443 @@ function putLocalPhoto(record){
   });
 }
 
+
+
+function getAllLocalPhotos(){
+  return openPhotoDb().then(function(db){
+    return new Promise(function(resolve, reject){
+      const tx = db.transaction(PHOTO_STORE, 'readonly');
+      const store = tx.objectStore(PHOTO_STORE);
+      const request = store.getAll();
+
+      request.onsuccess = function(){
+        const rows =
+          Array.isArray(request.result)
+            ? request.result
+            : [];
+
+        db.close();
+        resolve(rows);
+      };
+
+      request.onerror = function(){
+        db.close();
+        reject(
+          request.error ||
+          new Error('Queue foto lokal gagal dibaca.')
+        );
+      };
+    });
+  });
+}
+
+function isAutoSyncEnabled(){
+  return localStorage.getItem(AUTO_SYNC_ENABLED_KEY) !== '0';
+}
+
+function getProofRemainingSeconds(){
+  const proof =
+    currentServerProof ||
+    sessionStorage.getItem(PROOF_KEY) ||
+    '';
+
+  const payload = readSignedPayload(proof);
+
+  if (!payload) return 0;
+
+  return Math.max(
+    0,
+    Number(payload.exp || 0) -
+    Math.floor(Date.now() / 1000)
+  );
+}
+
+async function buildAutoSyncQueue(){
+  const photos = await getAllLocalPhotos();
+  const drafts = loadEvidenceDrafts();
+
+  const photoGroups = new Map();
+
+  photos
+    .filter(function(photo){
+      return (
+        photo &&
+        photo.status !== 'SYNCED' &&
+        photo.evidenceDraftId
+      );
+    })
+    .sort(function(a, b){
+      return String(a.createdAt || '')
+        .localeCompare(String(b.createdAt || ''));
+    })
+    .forEach(function(photo){
+      const key =
+        String(photo.evidenceDraftId || '');
+
+      if (!photoGroups.has(key)) {
+        photoGroups.set(key, []);
+      }
+
+      photoGroups.get(key).push(photo);
+    });
+
+  const entries = [];
+  let heldExtra = 0;
+  let orphan = 0;
+
+  drafts.forEach(function(draft){
+    if (
+      !draft ||
+      !draft.evidenceDraftId ||
+      draft.status === 'COMPLETE' ||
+      draft.status === 'SYNCED'
+    ) {
+      return;
+    }
+
+    const photosForDraft =
+      photoGroups.get(
+        String(draft.evidenceDraftId)
+      ) || [];
+
+    if (!photosForDraft.length) {
+      return;
+    }
+
+    if (
+      !draft.projectId ||
+      !draft.projectMaterialId ||
+      !draft.sessionId
+    ) {
+      orphan += photosForDraft.length;
+      return;
+    }
+
+    const required =
+      Math.max(
+        1,
+        Number(
+          draft.requiredPhotoCount ||
+          draft.evidenceRequired ||
+          1
+        )
+      );
+
+    const serverCount =
+      Math.max(
+        0,
+        Number(draft.serverPhotoCount || 0)
+      );
+
+    const remaining =
+      Math.max(
+        0,
+        required - serverCount
+      );
+
+    photosForDraft.forEach(
+      function(photo, index){
+        if (index < remaining) {
+          entries.push({
+            draft: draft,
+            photo: photo
+          });
+        } else {
+          heldExtra++;
+        }
+      }
+    );
+  });
+
+  // Foto yang tidak punya draft lokal.
+  photos.forEach(function(photo){
+    if (
+      photo &&
+      photo.status !== 'SYNCED' &&
+      photo.evidenceDraftId &&
+      !drafts.some(function(draft){
+        return (
+          draft &&
+          draft.evidenceDraftId ===
+            photo.evidenceDraftId
+        );
+      })
+    ) {
+      orphan++;
+    }
+  });
+
+  entries.sort(function(a, b){
+    return String(a.photo.createdAt || '')
+      .localeCompare(String(b.photo.createdAt || ''));
+  });
+
+  return {
+    entries: entries,
+    heldExtra: heldExtra,
+    orphan: orphan,
+    totalLocalUnsynced:
+      photos.filter(function(photo){
+        return photo && photo.status !== 'SYNCED';
+      }).length
+  };
+}
+
+async function refreshAutoSyncQueueUI(){
+  if (
+    !queueSummaryEl ||
+    !autoSyncStatusEl
+  ) {
+    return;
+  }
+
+  const token = ++autoSyncUiToken;
+
+  try {
+    const queue = await buildAutoSyncQueue();
+
+    if (token !== autoSyncUiToken) {
+      return;
+    }
+
+    const enabled = isAutoSyncEnabled();
+
+    autoSyncToggleBtn.textContent =
+      enabled
+        ? 'AUTO SYNC: ON'
+        : 'AUTO SYNC: OFF';
+
+    queueSummaryEl.className =
+      queue.entries.length > 0
+        ? 'result muted'
+        : 'result okbox';
+
+    queueSummaryEl.innerHTML =
+      '<strong>' +
+        (
+          queue.entries.length > 0
+            ? 'OFFLINE QUEUE READY'
+            : '✓ QUEUE KOSONG'
+        ) +
+      '</strong><br>' +
+      '<b>Menunggu sync:</b> ' +
+        escapeHtml(
+          String(queue.entries.length)
+        ) + '<br>' +
+      '<b>Total foto lokal belum SYNCED:</b> ' +
+        escapeHtml(
+          String(queue.totalLocalUnsynced)
+        ) + '<br>' +
+      '<b>Extra/Hold:</b> ' +
+        escapeHtml(
+          String(queue.heldExtra)
+        ) + '<br>' +
+      '<b>Orphan:</b> ' +
+        escapeHtml(
+          String(queue.orphan)
+        ) + '<br>' +
+      '<b>Auto Sync:</b> ' +
+        (enabled ? 'ON' : 'OFF');
+
+    if (!enabled) {
+      autoSyncStatusEl.textContent = 'OFF';
+      autoSyncStatusEl.className = '';
+    }
+    else if (!navigator.onLine) {
+      autoSyncStatusEl.textContent = 'QUEUE OFFLINE';
+      autoSyncStatusEl.className = 'bad';
+    }
+    else if (queue.entries.length === 0) {
+      autoSyncStatusEl.textContent = 'IDLE';
+      autoSyncStatusEl.className = 'ok';
+    }
+  }
+  catch (error) {
+    queueSummaryEl.className = 'result errbox';
+    queueSummaryEl.textContent =
+      error && error.message
+        ? error.message
+        : 'Queue lokal gagal dibaca.';
+
+    autoSyncStatusEl.textContent = 'QUEUE ERROR';
+    autoSyncStatusEl.className = 'bad';
+  }
+}
+
+async function submitAutoSyncEntry(entry){
+  if (
+    !entry ||
+    !entry.draft ||
+    !entry.photo
+  ) {
+    return false;
+  }
+
+  const draft = entry.draft;
+  const photo = entry.photo;
+
+  autoSyncBusy = true;
+
+  currentEvidenceDraft = draft;
+  currentLocalPhoto = photo;
+
+  autoSyncStatusEl.textContent = 'SENDING';
+  autoSyncStatusEl.className = '';
+  syncServerStatusEl.textContent = 'AUTO SENDING';
+  syncServerStatusEl.className = '';
+
+  queueSummaryEl.className = 'result muted';
+  queueSummaryEl.innerHTML =
+    '<strong>AUTO SYNC BERJALAN</strong><br>' +
+    '<b>Evidence Draft:</b> ' +
+      escapeHtml(draft.evidenceDraftId || '-') +
+      '<br>' +
+    '<b>Photo Local:</b> ' +
+      escapeHtml(photo.photoLocalId || '-') +
+      '<br>' +
+    'Menyiapkan foto...';
+
+  try {
+    const base64 =
+      await blobToBase64Payload(
+        photo.blob
+      );
+
+    sessionStorage.setItem(
+      AUTO_SYNC_ACTIVE_KEY,
+      '1'
+    );
+
+    sessionStorage.setItem(
+      AUTO_SYNC_LAST_PHOTO_KEY,
+      photo.photoLocalId || ''
+    );
+
+    submitHiddenPost(
+      {
+        action: 'sync_local_capture',
+        proof: currentServerProof,
+        project_id: draft.projectId,
+        project_material_id:
+          draft.projectMaterialId,
+        session_id: draft.sessionId,
+        evidence_draft_id:
+          draft.evidenceDraftId,
+        photo_local_id:
+          photo.photoLocalId,
+        latitude:
+          photo.latitude,
+        longitude:
+          photo.longitude,
+        gps_accuracy:
+          photo.accuracy,
+        captured_at:
+          photo.capturedAt ||
+          photo.createdAt ||
+          '',
+        file_name:
+          photo.fileName ||
+          'evidence.jpg',
+        mime_type:
+          photo.fileType ||
+          'image/jpeg',
+        base64: base64,
+        auto_sync: '1'
+      },
+      '_self'
+    );
+
+    return true;
+  }
+  catch (error) {
+    autoSyncBusy = false;
+    sessionStorage.removeItem(
+      AUTO_SYNC_ACTIVE_KEY
+    );
+
+    autoSyncStatusEl.textContent = 'FAILED';
+    autoSyncStatusEl.className = 'bad';
+
+    queueSummaryEl.className = 'result errbox';
+    queueSummaryEl.textContent =
+      error && error.message
+        ? error.message
+        : 'Auto Sync gagal menyiapkan foto.';
+
+    return false;
+  }
+}
+
+async function runAutoSyncQueue(reason){
+  if (autoSyncBusy) {
+    return;
+  }
+
+  await refreshAutoSyncQueueUI();
+
+  if (!isAutoSyncEnabled()) {
+    return;
+  }
+
+  if (!navigator.onLine) {
+    autoSyncStatusEl.textContent = 'QUEUE OFFLINE';
+    autoSyncStatusEl.className = 'bad';
+    return;
+  }
+
+  const queue = await buildAutoSyncQueue();
+
+  if (!queue.entries.length) {
+    sessionStorage.removeItem(
+      AUTO_SYNC_ACTIVE_KEY
+    );
+    sessionStorage.removeItem(
+      AUTO_SYNC_LAST_PHOTO_KEY
+    );
+
+    autoSyncStatusEl.textContent = 'QUEUE CLEAR';
+    autoSyncStatusEl.className = 'ok';
+
+    await refreshAutoSyncQueueUI();
+    return;
+  }
+
+  const remainingProof =
+    getProofRemainingSeconds();
+
+  // Jangan mulai putaran baru jika proof tinggal sebentar.
+  // User cukup Verify sekali lagi; queue lokal tetap aman.
+  if (remainingProof < 45) {
+    autoSyncStatusEl.textContent = 'WAIT VERIFY';
+    autoSyncStatusEl.className = 'bad';
+
+    queueSummaryEl.className = 'result muted';
+    queueSummaryEl.innerHTML =
+      '<strong>QUEUE MENUNGGU SESSION</strong><br>' +
+      '<b>Pending:</b> ' +
+        escapeHtml(
+          String(queue.entries.length)
+        ) + ' foto<br>' +
+      'Session proof tidak ada / hampir expired. Login + Verifikasi Server sekali lagi.';
+
+    return;
+  }
+
+  currentServerProof =
+    currentServerProof ||
+    sessionStorage.getItem(PROOF_KEY) ||
+    '';
+
+  const entry =
+    queue.entries[0];
+
+  autoSyncStatusEl.textContent =
+    'SYNC 1 / ' +
+    String(queue.entries.length);
+  autoSyncStatusEl.className = '';
+
+  await submitAutoSyncEntry(entry);
+}
 
 function updateLocalPhotoRecord(photoLocalId, patch){
   return openPhotoDb().then(function(db){
@@ -975,7 +1446,7 @@ function renderMaterials(projectId){
     '</strong><br>' +
     'Project: ' + escapeHtml(projectId || '-') + '<br>' +
     'Total material project: ' + escapeHtml(String(currentMaterials.length)) + '<br>' +
-    '<small>Cache ini hanya referensi. Mulai STEP 9B, pemilihan material evidence dilakukan dari Requirement Material Titik.</small>';
+    '<small>Cache ini hanya referensi. Mulai STEP 9C, pemilihan material evidence dilakukan dari Requirement Material Titik.</small>';
 
   currentMaterials.forEach(function(item, index){
     const card = document.createElement('div');
@@ -1898,7 +2369,7 @@ async function acceptSyncResultBundle(bundle){
 
   const validShape =
     payload &&
-    payload.v === 'V14C-B2A-STEP9B' &&
+    payload.v === 'V14C-B2A-STEP9C' &&
     payload.kind === 'SYNC_RESULT' &&
     payload.success === true &&
     Number(payload.exp || 0) > nowSec &&
@@ -2017,6 +2488,22 @@ async function acceptSyncResultBundle(bundle){
       (payload.alreadySynced ? 'YES' : 'NO');
 
   renderEvidenceDraft();
+
+  autoSyncBusy = false;
+
+  refreshAutoSyncQueueUI();
+
+  if (
+    sessionStorage.getItem(
+      AUTO_SYNC_ACTIVE_KEY
+    ) === '1' &&
+    isAutoSyncEnabled()
+  ) {
+    setTimeout(function(){
+      runAutoSyncQueue('after_sync_result');
+    }, 900);
+  }
+
   return true;
 }
 
@@ -2408,6 +2895,17 @@ photoInput.addEventListener('change', async function(){
     currentLocalPhoto = record;
     renderLocalPhoto(record);
 
+    await refreshAutoSyncQueueUI();
+
+    if (
+      navigator.onLine &&
+      isAutoSyncEnabled()
+    ) {
+      setTimeout(function(){
+        runAutoSyncQueue('photo_added');
+      }, 700);
+    }
+
   } catch (error) {
     photoLocalStatusEl.textContent = 'GPS / SAVE FAILED';
     photoLocalStatusEl.className = 'bad';
@@ -2484,6 +2982,33 @@ pointSessionSearchEl.addEventListener('input', function(){
   }
 });
 
+autoSyncToggleBtn.addEventListener('click', function(){
+  const nextEnabled =
+    !isAutoSyncEnabled();
+
+  localStorage.setItem(
+    AUTO_SYNC_ENABLED_KEY,
+    nextEnabled ? '1' : '0'
+  );
+
+  if (!nextEnabled) {
+    sessionStorage.removeItem(
+      AUTO_SYNC_ACTIVE_KEY
+    );
+  }
+
+  refreshAutoSyncQueueUI();
+
+  if (
+    nextEnabled &&
+    navigator.onLine
+  ) {
+    setTimeout(function(){
+      runAutoSyncQueue('toggle_on');
+    }, 400);
+  }
+});
+
 syncEvidenceBtn.addEventListener('click', function(){
   syncCurrentEvidence();
 });
@@ -2495,3 +3020,14 @@ retryGpsBtn.addEventListener('click', function(){
 refreshMaterialButton();
 
 refreshSyncGate();
+
+refreshAutoSyncQueueUI();
+
+if (
+  navigator.onLine &&
+  isAutoSyncEnabled()
+) {
+  setTimeout(function(){
+    runAutoSyncQueue('boot');
+  }, 1200);
+}

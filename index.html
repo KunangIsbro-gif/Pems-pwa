@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f4c81">
   <title>PEMS V14C-B2A Step 9B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step9b">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step9b">
+  <link rel="manifest" href="./manifest.json?v=b2a-step9c">
+  <link rel="stylesheet" href="./styles.css?v=b2a-step9c">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     .project-list { display:grid; gap:12px; margin-top:14px; }
@@ -146,10 +146,10 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 9B</div>
-      <h1>Multi Photo Evidence</h1>
+      <div class="badge">PEMS V14C-B2A STEP 9C</div>
+      <h1>Offline Queue + Auto Sync</h1>
       <p class="lead">
-        Target tahap ini: satu Evidence Draft dapat memiliki <b>beberapa foto</b>. PEMS membandingkan jumlah foto dengan <b>Evidence Required</b> dan baru menandai evidence COMPLETE saat target terpenuhi.
+        Target tahap ini: foto evidence yang dibuat saat <b>OFFLINE</b> masuk queue lokal. Saat internet kembali dan session proof masih valid, PEMS mengirim queue otomatis satu per satu sampai habis.
       </p>
 
       <div class="status-grid">
@@ -192,6 +192,10 @@
         <div class="status-card">
           <span>SYNC SERVER</span>
           <strong id="syncServerStatus">BELUM</strong>
+        </div>
+        <div class="status-card">
+          <span>AUTO SYNC</span>
+          <strong id="autoSyncStatus">IDLE</strong>
         </div>
       </div>
 
@@ -342,16 +346,24 @@
       </section>
 
       <section class="panel">
-        <h2>Sync Evidence + Foto</h2>
+        <h2>Offline Queue + Auto Sync</h2>
         <p>
           <b>DEVICE MODE: DEVELOPMENT / LAPTOP</b><br>
-          GPS &gt; 50 m tetap ditandai buruk, tetapi boleh dikirim untuk test.
-          Pada FIELD/HP nanti aturan &gt; 50 m akan diblok.
+          Foto tetap disimpan lokal saat offline. Saat ONLINE, Auto Sync mengirim
+          satu foto per putaran. GPS &gt; 50 m masih boleh lewat hanya untuk test DEV.
         </p>
 
-        <button id="syncEvidenceBtn" class="primary-btn" type="button" disabled>
-          SYNC FOTO BERIKUTNYA
+        <button id="autoSyncToggleBtn" class="primary-btn" type="button">
+          AUTO SYNC: ON
         </button>
+
+        <button id="syncEvidenceBtn" class="primary-btn" type="button" disabled style="margin-left:8px;">
+          SYNC 1 FOTO MANUAL
+        </button>
+
+        <div id="queueSummary" class="result muted" style="margin-top:12px;">
+          Membaca queue lokal...
+        </div>
 
         <div id="syncGateResult" class="result muted" style="margin-top:12px;">
           Belum siap sync.
@@ -363,9 +375,9 @@
       </section>
 
       <div class="passbox">
-        <strong>PASS STEP 9B</strong> bila jumlah foto mengikuti <strong>Evidence Required</strong>:
-        contoh target 2 foto → setelah foto pertama server mengembalikan <strong>1 / 2 · PARTIAL</strong>,
-        lalu setelah foto kedua menjadi <strong>2 / 2 · COMPLETE</strong>. Foto yang sama tetap tidak boleh dobel.
+        <strong>PASS STEP 9C</strong> bila saat OFFLINE ada foto masuk queue, lalu WiFi dinyalakan:
+        <strong>AUTO SYNC</strong> mengirim foto satu per satu, kembali otomatis ke PEMS,
+        dan queue turun sampai <strong>0</strong> tanpa membuat data ganda.
       </div>
     </section>
   </main>
@@ -373,6 +385,6 @@
   <script>
     window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
   </script>
-  <script src="./app.js?v=b2a-step9b"></script>
+  <script src="./app.js?v=b2a-step9c"></script>
 </body>
 </html>
