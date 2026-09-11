@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-consolidated-v6';
+const CACHE_NAME = 'pems-v15-consolidated-v7';
 const STATIC_ASSETS = [
   './',
   './index.html',

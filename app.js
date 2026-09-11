@@ -7,6 +7,7 @@ const SESSION_EXP_KEY = 'PEMS_V15_SESSION_EXP';
 const DEVICE_KEY = 'PEMS_V15_DEVICE_ID';
 const LAST_GPS_KEY = 'PEMS_V15_LAST_GPS';
 const SELECTED_PROJECT_KEY = 'PEMS_V15_SELECTED_PROJECT';
+const ACTIVE_DRAFT_KEY = 'PEMS_V15_ACTIVE_DRAFT_ID';
 
 const DB_NAME = 'PEMS_V15_DB';
 const DB_VERSION = 1;
@@ -39,7 +40,8 @@ const state = {
   draftsPhotos: [],
   photoPreviewUrls: new Map(),
   serverPhotoCache: new Map(),
-  verifierPhotoObjectUrls: new Map()
+  verifierPhotoObjectUrls: new Map(),
+  activeDraftId: ''
 };
 
 const el = {
@@ -139,7 +141,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-rev2-20260911');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-r7-active-draft');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -286,6 +288,20 @@ async function bootAuthenticated() {
     }
 
     await refreshLocalState();
+
+    state.activeDraftId =
+      localStorage.getItem(ACTIVE_DRAFT_KEY) || '';
+
+    if (
+      state.activeDraftId &&
+      !state.drafts.some(
+        d => d.draftId === state.activeDraftId
+      )
+    ) {
+      state.activeDraftId = '';
+      localStorage.removeItem(ACTIVE_DRAFT_KEY);
+    }
+
     showAppShell();
     renderNavigation();
     navigate('home');
@@ -437,6 +453,25 @@ async function startRevision(evidenceId) {
     if (!state.selectedRequirement) throw new Error('Material requirement revisi tidak ditemukan.');
     state.revisionTargetPmId = ev.projectMaterialId;
 
+    // Local V1 rows are history after NEED_REVISION.
+    // They must never compete with the new V2 draft for "current draft".
+    const parentLocalDrafts = state.drafts.filter(
+      d =>
+        d.projectId === ev.projectId &&
+        d.sessionId === ev.sessionId &&
+        d.projectMaterialId === ev.projectMaterialId &&
+        d.serverEvidenceId === ev.evidenceId
+    );
+
+    for (const parentDraft of parentLocalDrafts) {
+      parentDraft.workflow = 'NEED_REVISION';
+      parentDraft.isHistory = true;
+      parentDraft.updatedAt =
+        parentDraft.updatedAt ||
+        new Date().toISOString();
+      await idbPut(STORE_DRAFTS, parentDraft);
+    }
+
     const draft = {
       draftId: `LED-${crypto.randomUUID?.() || uid()}`,
       projectId: ev.projectId,
@@ -463,6 +498,12 @@ async function startRevision(evidenceId) {
       updatedAt: new Date().toISOString()
     };
     await idbPut(STORE_DRAFTS, draft);
+
+    state.activeDraftId = draft.draftId;
+    localStorage.setItem(
+      ACTIVE_DRAFT_KEY,
+      draft.draftId
+    );
 
     // Prevent parent V1 preview/count from leaking into the new revision UI.
     state.serverPhotoCache.delete(ev.evidenceId);
@@ -583,14 +624,29 @@ function renderRequirementsPanel() {
     const target = Number(r.evidenceRequired || 0);
 
     const revisionDraft = state.drafts
-      .filter(d =>
-        d.projectId === state.selectedProjectId &&
-        d.sessionId === state.selectedSession.sessionId &&
-        d.projectMaterialId === r.projectMaterialId &&
-        d.parentEvidenceId
+      .filter(
+        d =>
+          d.projectId ===
+            state.selectedProjectId &&
+          d.sessionId ===
+            state.selectedSession.sessionId &&
+          d.projectMaterialId ===
+            r.projectMaterialId &&
+          d.parentEvidenceId &&
+          !d.isHistory &&
+          !['NEED_REVISION','REJECTED','VERIFIED']
+            .includes(
+              String(
+                d.workflow || ''
+              ).toUpperCase()
+            )
       )
-      .sort((a,b) =>
-        String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+      .sort(
+        (a,b) =>
+          String(b.updatedAt || '')
+            .localeCompare(
+              String(a.updatedAt || '')
+            )
       )[0] || null;
 
     let serverCount = Number(r.photoCount || 0);
@@ -1207,7 +1263,18 @@ async function onCameraFileSelected(event) {
 
 async function getOrCreateCurrentDraft(ctx) {
   const existing = findCurrentDraft();
-  if (existing && !['SUBMITTED','VERIFIED','REJECTED'].includes(existing.workflow)) {
+  if (
+    existing &&
+    ![
+      'SUBMITTED',
+      'VERIFIED',
+      'REJECTED',
+      'NEED_REVISION'
+    ].includes(
+      String(existing.workflow || '')
+        .toUpperCase()
+    )
+  ) {
     existing.qtyReal = ctx.qtyReal;
     existing.fieldNote = ctx.fieldNote;
     existing.updatedAt = new Date().toISOString();
@@ -1240,15 +1307,113 @@ async function getOrCreateCurrentDraft(ctx) {
     updatedAt: new Date().toISOString()
   };
   await idbPut(STORE_DRAFTS, draft);
+
+  state.activeDraftId = draft.draftId;
+  localStorage.setItem(
+    ACTIVE_DRAFT_KEY,
+    draft.draftId
+  );
+
   await refreshLocalState();
   return draft;
 }
 
 function findCurrentDraft() {
-  if (!state.selectedRequirement || !state.selectedSession) return null;
-  return state.drafts
-    .filter(d => d.projectId === state.selectedProjectId && d.sessionId === state.selectedSession.sessionId && d.projectMaterialId === state.selectedRequirement.projectMaterialId)
-    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] || null;
+  if (
+    !state.selectedRequirement ||
+    !state.selectedSession
+  ) {
+    return null;
+  }
+
+  const candidates = state.drafts.filter(
+    d =>
+      d.projectId === state.selectedProjectId &&
+      d.sessionId === state.selectedSession.sessionId &&
+      d.projectMaterialId ===
+        state.selectedRequirement.projectMaterialId
+  );
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  // 1. Explicit active draft always wins.
+  if (state.activeDraftId) {
+    const active = candidates.find(
+      d => d.draftId === state.activeDraftId
+    );
+
+    if (active) {
+      return active;
+    }
+  }
+
+  // 2. An open revision V2+ wins over any V1 history.
+  const revisionOpen = candidates
+    .filter(
+      d =>
+        d.parentEvidenceId &&
+        !d.isHistory &&
+        !['NEED_REVISION','REJECTED','VERIFIED']
+          .includes(
+            String(d.workflow || '')
+              .toUpperCase()
+          )
+    )
+    .sort(
+      (a, b) =>
+        String(b.updatedAt || '')
+          .localeCompare(
+            String(a.updatedAt || '')
+          )
+    )[0];
+
+  if (revisionOpen) {
+    state.activeDraftId =
+      revisionOpen.draftId;
+
+    localStorage.setItem(
+      ACTIVE_DRAFT_KEY,
+      revisionOpen.draftId
+    );
+
+    return revisionOpen;
+  }
+
+  // 3. Prefer an editable normal draft.
+  const normalOpen = candidates
+    .filter(
+      d =>
+        !d.isHistory &&
+        !['NEED_REVISION','REJECTED','VERIFIED']
+          .includes(
+            String(d.workflow || '')
+              .toUpperCase()
+          )
+    )
+    .sort(
+      (a, b) =>
+        String(b.updatedAt || '')
+          .localeCompare(
+            String(a.updatedAt || '')
+          )
+    )[0];
+
+  if (normalOpen) {
+    return normalOpen;
+  }
+
+  // 4. Fallback for read-only history display.
+  return candidates
+    .slice()
+    .sort(
+      (a, b) =>
+        String(b.updatedAt || '')
+          .localeCompare(
+            String(a.updatedAt || '')
+          )
+    )[0];
 }
 
 function assignmentForCurrentPoint() {
