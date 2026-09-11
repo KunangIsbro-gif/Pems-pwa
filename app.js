@@ -455,12 +455,18 @@ async function startRevision(evidenceId) {
       serverPhotoCount: 0,
       workflow: 'DRAFT_LOCAL',
       parentEvidenceId: ev.evidenceId,
+      parentVersionNo: Number(ev.versionNo || 1),
+      revisionVersionNo: Number(ev.versionNo || 1) + 1,
       revisionReason: ev.revisionReason || 'NEED_REVISION',
       assignmentId: assignmentForCurrentPoint()?.assignmentId || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
     await idbPut(STORE_DRAFTS, draft);
+
+    // Prevent parent V1 preview/count from leaking into the new revision UI.
+    state.serverPhotoCache.delete(ev.evidenceId);
+
     await refreshLocalState();
     await navigate('pekerjaan');
     toast('Draft revisi dibuat. Ambil foto perbaikan tanpa mengubah evidence lama.', 'success', 5000);
@@ -575,12 +581,78 @@ function renderRequirementsPanel() {
   const list = document.getElementById('requirementList');
   list.innerHTML = reqs.length ? reqs.map(r => {
     const target = Number(r.evidenceRequired || 0);
-    const serverCount = Number(r.photoCount || 0);
-    const complete = target > 0 && serverCount >= target;
+
+    const revisionDraft = state.drafts
+      .filter(d =>
+        d.projectId === state.selectedProjectId &&
+        d.sessionId === state.selectedSession.sessionId &&
+        d.projectMaterialId === r.projectMaterialId &&
+        d.parentEvidenceId
+      )
+      .sort((a,b) =>
+        String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+      )[0] || null;
+
+    let serverCount = Number(r.photoCount || 0);
+    let label = '';
+    let badgeClass = '';
+    let badgeText = '';
+
+    if (revisionDraft) {
+      const localUnsynced = (state.draftsPhotos || []).filter(
+        p =>
+          p.draftId === revisionDraft.draftId &&
+          p.state !== 'SYNCED'
+      ).length;
+
+      serverCount =
+        Number(revisionDraft.serverPhotoCount || 0) +
+        localUnsynced;
+
+      label =
+        ` • REVISI V${Number(revisionDraft.revisionVersionNo || 2)}`;
+
+      const revisionComplete =
+        target > 0 &&
+        Number(revisionDraft.serverPhotoCount || 0) >= target;
+
+      badgeClass =
+        revisionComplete ? 'success' : 'warning';
+
+      badgeText =
+        revisionComplete ? 'REVISI COMPLETE' : 'PERLU PERBAIKAN';
+    } else {
+      const complete =
+        target > 0 &&
+        serverCount >= target;
+
+      badgeClass =
+        complete
+          ? 'success'
+          : r.required
+            ? 'warning'
+            : 'neutral';
+
+      badgeText =
+        complete
+          ? 'COMPLETE'
+          : r.required
+            ? 'BELUM'
+            : 'OPSIONAL';
+    }
+
     return `
       <div class="list-item clickable material-card ${state.selectedRequirement?.projectMaterialId === r.projectMaterialId ? 'selected' : ''}" data-pm="${escapeAttr(r.projectMaterialId)}">
-        <div><div class="item-title">${escapeHtml(r.designator || r.materialName || r.projectMaterialId)}</div><div class="item-sub">${escapeHtml(r.materialName || '')}<br>${escapeHtml(r.requirementCode || 'MATERIAL')} • ${r.required ? 'WAJIB' : 'OPSIONAL'} • Evidence ${serverCount}/${target}</div></div>
-        <span class="badge ${complete ? 'success' : r.required ? 'warning' : 'neutral'}">${complete ? 'COMPLETE' : r.required ? 'BELUM' : 'OPSIONAL'}</span>
+        <div>
+          <div class="item-title">${escapeHtml(r.designator || r.materialName || r.projectMaterialId)}</div>
+          <div class="item-sub">
+            ${escapeHtml(r.materialName || '')}<br>
+            ${escapeHtml(r.requirementCode || 'MATERIAL')} •
+            ${r.required ? 'WAJIB' : 'OPSIONAL'} •
+            Evidence ${serverCount}/${target}${escapeHtml(label)}
+          </div>
+        </div>
+        <span class="badge ${badgeClass}">${escapeHtml(badgeText)}</span>
       </div>`;
   }).join('') : '<div class="empty">Tidak ada material valid pada titik ini.</div>';
   list.querySelectorAll('[data-pm]').forEach(node => node.addEventListener('click', () => selectRequirement(node.dataset.pm)));
@@ -763,12 +835,15 @@ async function renderCapturePanel() {
   const actualLocal =
     await photoCountForDraft(draft?.draftId);
 
+  // IMPORTANT:
+  // A revision draft (V2+) must be isolated from its parent V1.
+  // If a local draft exists but has not synced yet, there is NO server
+  // evidence for the new version yet. Do not fall back to r.evidenceItemId,
+  // because that belongs to the previous version.
   const serverEvidenceId =
-    String(
-      draft?.serverEvidenceId ||
-      r.evidenceItemId ||
-      ''
-    ).trim();
+    draft
+      ? String(draft.serverEvidenceId || '').trim()
+      : String(r.evidenceItemId || '').trim();
 
   const serverPhotos =
     serverEvidenceId
@@ -790,14 +865,16 @@ async function renderCapturePanel() {
       )
     );
 
-  const serverCount = Math.max(
-    Number(
-      draft?.serverPhotoCount ??
-      r.photoCount ??
-      0
-    ),
-    serverPhotos.length
-  );
+  const serverCount =
+    draft
+      ? Math.max(
+          Number(draft.serverPhotoCount || 0),
+          serverPhotos.length
+        )
+      : Math.max(
+          Number(r.photoCount || 0),
+          serverPhotos.length
+        );
 
   const target =
     Math.max(
@@ -819,14 +896,24 @@ async function renderCapturePanel() {
     ['SUBMITTED','VERIFIED','REJECTED']
       .includes(
         String(
-          draft?.workflow ||
-          r.verifyStatus ||
-          ''
+          draft
+            ? (draft.workflow || '')
+            : (r.verifyStatus || '')
         ).toUpperCase()
       );
 
   panel.innerHTML = `
     <div class="divider"></div>
+
+    ${draft?.parentEvidenceId ? `
+      <div class="status-box warning revision-banner">
+        <b>REVISI V${escapeHtml(String(draft.revisionVersionNo || 2))}</b><br>
+        Parent: ${escapeHtml(draft.parentEvidenceId)}<br>
+        Alasan: ${escapeHtml(draft.revisionReason || 'Perlu perbaikan evidence')}<br>
+        <span class="tiny">Foto versi sebelumnya tetap tersimpan sebagai histori dan tidak ikut dihitung pada revisi ini.</span>
+      </div>
+    ` : ''}
+
     <h3>Realisasi Evidence</h3>
     <div class="grid two">
       <div class="field"><label>Quantity Realisasi</label><input id="qtyRealInput" class="input" type="number" step="any" value="${escapeAttr(draft?.qtyReal ?? '')}" placeholder="Opsional" ${locked ? 'disabled' : ''}></div>
