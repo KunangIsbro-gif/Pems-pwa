@@ -37,7 +37,8 @@ const state = {
   cameraContext: null,
   revisionTargetPmId: '',
   draftsPhotos: [],
-  photoPreviewUrls: new Map()
+  photoPreviewUrls: new Map(),
+  serverPhotoCache: new Map()
 };
 
 const el = {
@@ -591,20 +592,237 @@ async function selectRequirement(projectMaterialId) {
   await renderCapturePanel();
 }
 
+
+async function getServerPhotosForEvidence(evidenceId) {
+  if (!evidenceId || !navigator.onLine) {
+    return state.serverPhotoCache.get(evidenceId) || [];
+  }
+
+  try {
+    const result = await api(
+      `/evidence/${encodeURIComponent(evidenceId)}/photos`
+    );
+    const photos = Array.isArray(result?.photos)
+      ? result.photos
+      : [];
+
+    state.serverPhotoCache.set(
+      evidenceId,
+      photos
+    );
+
+    return photos;
+  } catch (err) {
+    console.warn(
+      'Server photo preview unavailable',
+      evidenceId,
+      err
+    );
+    return state.serverPhotoCache.get(evidenceId) || [];
+  }
+}
+
+function serverPhotoPreviewUrl(photo) {
+  const fileId = String(photo?.fileId || '').trim();
+  if (!fileId) return '';
+  return `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=w1600`;
+}
+
+function serverPhotoCardHtml(photo, index, locked, evidenceId) {
+  const previewUrl = serverPhotoPreviewUrl(photo);
+  return `
+    <div class="photo-card evidence-preview-card server-photo-card">
+      ${previewUrl
+        ? `<button type="button" class="photo-thumb-button" data-view-server-photo="${escapeAttr(photo.photoId)}" data-evidence-id="${escapeAttr(evidenceId)}" aria-label="Lihat foto evidence server">
+             <img src="${escapeAttr(previewUrl)}" alt="Evidence ${index + 1}" loading="lazy"
+                  onerror="this.closest('.photo-thumb-button').classList.add('thumb-error')">
+           </button>`
+        : `<div class="photo-placeholder">Preview server tidak tersedia</div>`
+      }
+      <div class="photo-card-body">
+        <div class="photo-card-title">
+          <b>Foto ${index + 1}</b>
+          <span class="badge success">SERVER</span>
+        </div>
+        <div class="tiny muted">${escapeHtml(photo.fileName || photo.photoId || '')}</div>
+        <div class="photo-meta-grid">
+          <div><span>GPS Accuracy</span><b>${escapeHtml(formatNumber(photo.gpsAccuracy))} m</b></div>
+          <div><span>Ke Titik Plan</span><b>${escapeHtml(formatNumber(photo.distanceToPlanM))} m</b></div>
+          <div><span>GPS Source</span><b>${escapeHtml(photo.gpsSource || '-')}</b></div>
+          <div><span>Status</span><b>${escapeHtml(photo.status || 'SYNCED')}</b></div>
+          <div class="full"><span>Waktu Capture</span><b>${escapeHtml(formatDate(photo.capturedAt))}</b></div>
+        </div>
+        <div class="toolbar compact">
+          ${previewUrl ? `<button type="button" class="btn outline small" data-view-server-photo="${escapeAttr(photo.photoId)}" data-evidence-id="${escapeAttr(evidenceId)}">Lihat / Perbesar</button>` : ''}
+          ${photo.url ? `<a class="btn outline small" href="${escapeAttr(photo.url)}" target="_blank" rel="noopener" style="text-decoration:none">Buka Drive</a>` : ''}
+          ${!locked ? `<button type="button" class="btn danger small" data-delete-server-photo="${escapeAttr(photo.photoId)}" data-evidence-id="${escapeAttr(evidenceId)}">Hapus / Ganti</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function openServerPhotoModal(evidenceId, photoId) {
+  const photos = await getServerPhotosForEvidence(evidenceId);
+  const photo = photos.find(p => String(p.photoId) === String(photoId));
+  if (!photo) {
+    toast('Foto server tidak ditemukan.', 'warning');
+    return;
+  }
+
+  const url = serverPhotoPreviewUrl(photo);
+  if (!url) {
+    if (photo.url) {
+      window.open(photo.url, '_blank', 'noopener');
+      return;
+    }
+    toast('Preview foto server tidak tersedia.', 'warning');
+    return;
+  }
+
+  el.photoModalImage.src = url;
+  el.photoModalMeta.innerHTML = `
+    <div><b>${escapeHtml(photo.fileName || photo.photoId)}</b></div>
+    <div>GPS Accuracy: <b>${escapeHtml(formatNumber(photo.gpsAccuracy))} m</b></div>
+    <div>Jarak ke titik plan: <b>${escapeHtml(formatNumber(photo.distanceToPlanM))} m</b></div>
+    <div>GPS Source: <b>${escapeHtml(photo.gpsSource || '-')}</b></div>
+    <div>Captured: <b>${escapeHtml(formatDate(photo.capturedAt))}</b></div>
+    <div>Status: <b>${escapeHtml(photo.status || 'SYNCED')}</b></div>
+  `;
+  el.photoModal.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+async function deleteServerCapturePhoto(evidenceId, photoId) {
+  const draft = findCurrentDraft();
+  const workflow = String(draft?.workflow || '').toUpperCase();
+
+  if (['SUBMITTED','VERIFIED','REJECTED'].includes(workflow)) {
+    toast('Evidence sudah dikunci. Gunakan Revision/Reopen.', 'warning', 6000);
+    return;
+  }
+
+  if (!navigator.onLine) {
+    toast('Foto yang sudah ada di server hanya dapat dihapus saat ONLINE.', 'warning', 6000);
+    return;
+  }
+
+  const yes = window.confirm(
+    'Foto ini sudah tersimpan di server. Hapus foto ini agar bisa ambil ulang?'
+  );
+  if (!yes) return;
+
+  try {
+    const result = await api(
+      `/evidence/${encodeURIComponent(evidenceId)}/photos/${encodeURIComponent(photoId)}`,
+      { method: 'DELETE' }
+    );
+
+    state.serverPhotoCache.delete(evidenceId);
+
+    if (draft) {
+      draft.serverPhotoCount = Number(result.photoCount || 0);
+      draft.workflow =
+        result.workflowStatus ||
+        (draft.serverPhotoCount > 0 ? 'SYNCED' : 'DRAFT_LOCAL');
+      draft.updatedAt = new Date().toISOString();
+      await idbPut(STORE_DRAFTS, draft);
+    }
+
+    if (state.selectedRequirement) {
+      state.selectedRequirement.photoCount = Number(result.photoCount || 0);
+      state.selectedRequirement.evidenceProgress =
+        Number(result.photoCount || 0) > 0
+          ? 'SYNCED'
+          : 'BELUM_EVIDENCE';
+    }
+
+    await refreshLocalState();
+    toast('Foto server dihapus. Silakan ambil foto pengganti.', 'success', 5000);
+    renderRequirementsPanel();
+    await renderCapturePanel();
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+  }
+}
+
 async function renderCapturePanel() {
   const panel = document.getElementById('capturePanel');
   if (!panel || !state.selectedRequirement || !state.selectedSession) return;
   await refreshLocalState();
   const r = state.selectedRequirement;
   const draft = findCurrentDraft();
-  const localPhotos = draft ? state.draftsPhotos?.filter?.(p => p.draftId === draft.draftId) || [] : [];
-  const actualLocal = await photoCountForDraft(draft?.draftId);
-  const serverCount = Number(draft?.serverPhotoCount ?? r.photoCount ?? 0);
-  const target = Math.max(0, Number(r.evidenceRequired || 0));
-  const totalKnown = Math.max(serverCount, serverCount + actualLocal.unsynced);
-  const complete = target === 0 || serverCount >= target;
 
-  const locked = ['SUBMITTED','VERIFIED','REJECTED'].includes(String(draft?.workflow || '').toUpperCase());
+  const localPhotos = draft
+    ? state.draftsPhotos?.filter?.(
+        p => p.draftId === draft.draftId
+      ) || []
+    : [];
+
+  const actualLocal =
+    await photoCountForDraft(draft?.draftId);
+
+  const serverEvidenceId =
+    String(
+      draft?.serverEvidenceId ||
+      r.evidenceItemId ||
+      ''
+    ).trim();
+
+  const serverPhotos =
+    serverEvidenceId
+      ? await getServerPhotosForEvidence(
+          serverEvidenceId
+        )
+      : [];
+
+  const localServerIds = new Set(
+    localPhotos
+      .map(p => String(p.serverPhotoId || ''))
+      .filter(Boolean)
+  );
+
+  const serverOnlyPhotos =
+    serverPhotos.filter(
+      p => !localServerIds.has(
+        String(p.photoId || '')
+      )
+    );
+
+  const serverCount = Math.max(
+    Number(
+      draft?.serverPhotoCount ??
+      r.photoCount ??
+      0
+    ),
+    serverPhotos.length
+  );
+
+  const target =
+    Math.max(
+      0,
+      Number(r.evidenceRequired || 0)
+    );
+
+  const totalKnown =
+    Math.max(
+      serverCount,
+      serverCount + actualLocal.unsynced
+    );
+
+  const complete =
+    target === 0 ||
+    serverCount >= target;
+
+  const locked =
+    ['SUBMITTED','VERIFIED','REJECTED']
+      .includes(
+        String(
+          draft?.workflow ||
+          r.verifyStatus ||
+          ''
+        ).toUpperCase()
+      );
 
   panel.innerHTML = `
     <div class="divider"></div>
@@ -618,11 +836,11 @@ async function renderCapturePanel() {
       <b>Progress:</b> Server ${serverCount}/${target} • Lokal belum sync ${actualLocal.unsynced} • Total terdeteksi ${totalKnown}/${target}
     </div>
 
-    ${localPhotos.length ? `
+    ${(localPhotos.length || serverOnlyPhotos.length) ? `
       <div class="evidence-photo-section">
         <div class="section-head compact">
           <div>
-            <h3>Foto Evidence ${localPhotos.length}/${target || localPhotos.length}</h3>
+            <h3>Foto Evidence ${Math.max(serverCount, localPhotos.length)}/${target || Math.max(serverCount, localPhotos.length)}</h3>
             <div class="tiny muted">${locked ? 'Evidence sudah dikunci untuk perubahan.' : 'Cek foto sebelum Submit Verifikasi.'}</div>
           </div>
         </div>
@@ -632,9 +850,23 @@ async function renderCapturePanel() {
             .sort((a,b) => String(a.capturedAt || '').localeCompare(String(b.capturedAt || '')))
             .map((photo, index) => capturePhotoCardHtml(photo, index, locked))
             .join('')}
+          ${serverOnlyPhotos
+            .slice()
+            .sort((a,b) => Number(a.photoNo || 0) - Number(b.photoNo || 0))
+            .map((photo, index) => serverPhotoCardHtml(
+              photo,
+              localPhotos.length + index,
+              locked,
+              serverEvidenceId
+            ))
+            .join('')}
         </div>
       </div>
-    ` : ''}
+    ` : (
+      serverCount > 0
+        ? `<div class="status-box warning"><b>Foto sudah tersimpan di server (${serverCount}/${target})</b>, tetapi metadata preview belum berhasil dimuat. Gunakan Sync/refresh saat online.</div>`
+        : ''
+    )}
 
     <div class="toolbar" style="margin-top:12px">
       <button id="captureBtn" class="btn primary" ${!hasPermission('evidence.capture') || locked || (target > 0 && totalKnown >= target) ? 'disabled' : ''}>Ambil Foto + GPS</button>
@@ -654,6 +886,24 @@ async function renderCapturePanel() {
 
   panel.querySelectorAll('[data-delete-photo]').forEach(btn => {
     btn.addEventListener('click', () => deleteCapturePhoto(btn.dataset.deletePhoto));
+  });
+
+  panel.querySelectorAll('[data-view-server-photo]').forEach(btn => {
+    btn.addEventListener('click', () =>
+      openServerPhotoModal(
+        btn.dataset.evidenceId,
+        btn.dataset.viewServerPhoto
+      )
+    );
+  });
+
+  panel.querySelectorAll('[data-delete-server-photo]').forEach(btn => {
+    btn.addEventListener('click', () =>
+      deleteServerCapturePhoto(
+        btn.dataset.evidenceId,
+        btn.dataset.deleteServerPhoto
+      )
+    );
   });
 }
 
