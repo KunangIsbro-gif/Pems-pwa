@@ -139,7 +139,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-rev2-20260911');
   } catch (err) {
     console.warn('SW registration failed', err);
   }

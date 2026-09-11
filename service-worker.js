@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-consolidated-v5';
+const CACHE_NAME = 'pems-v15-consolidated-v6';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -40,6 +40,25 @@ self.addEventListener('fetch', event => {
           return response;
         })
         .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  const isAppShell =
+    /\.(?:js|css|webmanifest)$/.test(url.pathname) ||
+    url.pathname.endsWith('/config.js');
+
+  if (isAppShell) {
+    event.respondWith(
+      fetch(req)
+        .then(response => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(req))
     );
     return;
   }
