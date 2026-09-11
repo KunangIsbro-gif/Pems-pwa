@@ -67,6 +67,23 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
+
+  <div id="photoModal" class="photo-modal hidden" role="dialog" aria-modal="true" aria-label="Preview foto evidence">
+    <div class="photo-modal-card">
+      <div class="photo-modal-head">
+        <div>
+          <b>Preview Evidence</b>
+          <div class="tiny muted">Periksa foto dan metadata sebelum Submit Verifikasi.</div>
+        </div>
+        <button id="photoModalClose" type="button" class="btn ghost small">Tutup</button>
+      </div>
+      <div class="photo-modal-image-wrap">
+        <img id="photoModalImage" alt="Preview foto evidence">
+      </div>
+      <div id="photoModalMeta" class="photo-modal-meta"></div>
+    </div>
+  </div>
+
   <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden">
 
   <script src="./config.js"></script>

@@ -35,7 +35,9 @@ const state = {
   monitoring: null,
   syncing: false,
   cameraContext: null,
-  revisionTargetPmId: ''
+  revisionTargetPmId: '',
+  draftsPhotos: [],
+  photoPreviewUrls: new Map()
 };
 
 const el = {
@@ -60,7 +62,11 @@ const el = {
   retryBootBtn: document.getElementById('retryBootBtn'),
   logoutBtn: document.getElementById('logoutBtn'),
   toast: document.getElementById('toast'),
-  cameraInput: document.getElementById('cameraInput')
+  cameraInput: document.getElementById('cameraInput'),
+  photoModal: document.getElementById('photoModal'),
+  photoModalImage: document.getElementById('photoModalImage'),
+  photoModalMeta: document.getElementById('photoModalMeta'),
+  photoModalClose: document.getElementById('photoModalClose')
 };
 
 const NAV_META = {
@@ -110,6 +116,10 @@ function wireStaticEvents() {
   el.retryBootBtn.addEventListener('click', init);
   el.logoutBtn.addEventListener('click', logout);
   el.cameraInput.addEventListener('change', onCameraFileSelected);
+  el.photoModalClose?.addEventListener('click', closePhotoModal);
+  el.photoModal?.addEventListener('click', (event) => {
+    if (event.target === el.photoModal) closePhotoModal();
+  });
 }
 
 function setupNetworkListeners() {
@@ -594,28 +604,199 @@ async function renderCapturePanel() {
   const totalKnown = Math.max(serverCount, serverCount + actualLocal.unsynced);
   const complete = target === 0 || serverCount >= target;
 
+  const locked = ['SUBMITTED','VERIFIED','REJECTED'].includes(String(draft?.workflow || '').toUpperCase());
+
   panel.innerHTML = `
     <div class="divider"></div>
     <h3>Realisasi Evidence</h3>
     <div class="grid two">
-      <div class="field"><label>Quantity Realisasi</label><input id="qtyRealInput" class="input" type="number" step="any" value="${escapeAttr(draft?.qtyReal ?? '')}" placeholder="Opsional"></div>
+      <div class="field"><label>Quantity Realisasi</label><input id="qtyRealInput" class="input" type="number" step="any" value="${escapeAttr(draft?.qtyReal ?? '')}" placeholder="Opsional" ${locked ? 'disabled' : ''}></div>
       <div class="field"><label>Target Foto</label><input class="input" disabled value="${target} foto"></div>
     </div>
-    <div class="field" style="margin-top:10px"><label>Catatan Lapangan</label><textarea id="fieldNoteInput" class="textarea" placeholder="Kendala / kondisi khusus...">${escapeHtml(draft?.fieldNote || '')}</textarea></div>
+    <div class="field" style="margin-top:10px"><label>Catatan Lapangan</label><textarea id="fieldNoteInput" class="textarea" placeholder="Kendala / kondisi khusus..." ${locked ? 'disabled' : ''}>${escapeHtml(draft?.fieldNote || '')}</textarea></div>
     <div class="status-box ${complete ? 'success' : 'neutral'}">
       <b>Progress:</b> Server ${serverCount}/${target} • Lokal belum sync ${actualLocal.unsynced} • Total terdeteksi ${totalKnown}/${target}
     </div>
+
+    ${localPhotos.length ? `
+      <div class="evidence-photo-section">
+        <div class="section-head compact">
+          <div>
+            <h3>Foto Evidence ${localPhotos.length}/${target || localPhotos.length}</h3>
+            <div class="tiny muted">${locked ? 'Evidence sudah dikunci untuk perubahan.' : 'Cek foto sebelum Submit Verifikasi.'}</div>
+          </div>
+        </div>
+        <div class="photo-grid">
+          ${localPhotos
+            .slice()
+            .sort((a,b) => String(a.capturedAt || '').localeCompare(String(b.capturedAt || '')))
+            .map((photo, index) => capturePhotoCardHtml(photo, index, locked))
+            .join('')}
+        </div>
+      </div>
+    ` : ''}
+
     <div class="toolbar" style="margin-top:12px">
-      <button id="captureBtn" class="btn primary" ${!hasPermission('evidence.capture') || (target > 0 && totalKnown >= target) ? 'disabled' : ''}>Ambil Foto + GPS</button>
-      <button id="syncNowBtn" class="btn secondary" ${!navigator.onLine ? 'disabled' : ''}>Sync Queue</button>
-      <button id="submitEvidenceBtn" class="btn success" ${!draft?.serverEvidenceId || !complete || draft?.workflow === 'SUBMITTED' ? 'disabled' : ''}>Submit Verifikasi</button>
+      <button id="captureBtn" class="btn primary" ${!hasPermission('evidence.capture') || locked || (target > 0 && totalKnown >= target) ? 'disabled' : ''}>Ambil Foto + GPS</button>
+      <button id="syncNowBtn" class="btn secondary" ${!navigator.onLine || locked ? 'disabled' : ''}>Sync Queue</button>
+      <button id="submitEvidenceBtn" class="btn success" ${!draft?.serverEvidenceId || !complete || locked ? 'disabled' : ''}>Submit Verifikasi</button>
     </div>
-    <div id="captureHint" class="small muted">${navigator.onLine ? 'Online: foto tetap disimpan lokal dahulu, lalu auto-sync.' : 'Offline: foto aman di IndexedDB dan masuk queue.'}</div>
+    <div id="captureHint" class="small muted">${locked ? 'Evidence sudah SUBMITTED/terkunci. Perubahan berikutnya harus melalui Revision/Reopen.' : (navigator.onLine ? 'Online: foto tetap disimpan lokal dahulu, lalu auto-sync.' : 'Offline: foto aman di IndexedDB dan masuk queue.')}</div>
   `;
 
   document.getElementById('captureBtn')?.addEventListener('click', () => beginCapture());
   document.getElementById('syncNowBtn')?.addEventListener('click', runSyncQueue);
   document.getElementById('submitEvidenceBtn')?.addEventListener('click', submitCurrentEvidence);
+
+  panel.querySelectorAll('[data-view-photo]').forEach(btn => {
+    btn.addEventListener('click', () => openPhotoModal(btn.dataset.viewPhoto));
+  });
+
+  panel.querySelectorAll('[data-delete-photo]').forEach(btn => {
+    btn.addEventListener('click', () => deleteCapturePhoto(btn.dataset.deletePhoto));
+  });
+}
+
+
+function previewUrlForPhoto(photo) {
+  if (!photo?.blob) return '';
+  const key = photo.photoLocalId;
+  if (state.photoPreviewUrls.has(key)) return state.photoPreviewUrls.get(key);
+  const url = URL.createObjectURL(photo.blob);
+  state.photoPreviewUrls.set(key, url);
+  return url;
+}
+
+function capturePhotoCardHtml(photo, index, locked) {
+  const url = previewUrlForPhoto(photo);
+  const syncLabel = photo.state === 'SYNCED' ? 'SYNCED' : 'LOCAL / QUEUED';
+  const syncClass = photo.state === 'SYNCED' ? 'success' : 'warning';
+  const source = photo.gpsSource || '-';
+
+  return `
+    <div class="photo-card evidence-preview-card">
+      ${url
+        ? `<button type="button" class="photo-thumb-button" data-view-photo="${escapeAttr(photo.photoLocalId)}" aria-label="Lihat foto evidence">
+             <img src="${escapeAttr(url)}" alt="Evidence ${index + 1}">
+           </button>`
+        : `<div class="photo-placeholder">Preview tidak tersedia</div>`
+      }
+      <div class="photo-card-body">
+        <div class="photo-card-title">
+          <b>Foto ${index + 1}</b>
+          <span class="badge ${syncClass}">${syncLabel}</span>
+        </div>
+        <div class="tiny muted">${escapeHtml(photo.fileName || photo.photoLocalId)}</div>
+        <div class="photo-meta-grid">
+          <div><span>Ukuran</span><b>${escapeHtml(formatBytes(photo.fileSize || 0))}</b></div>
+          <div><span>GPS Accuracy</span><b>${escapeHtml(formatNumber(photo.gpsAccuracy))} m</b></div>
+          <div><span>Ke Titik Plan</span><b>${escapeHtml(formatNumber(photo.distanceToPlanM))} m</b></div>
+          <div><span>GPS Source</span><b>${escapeHtml(source)}</b></div>
+          <div class="full"><span>Waktu Capture</span><b>${escapeHtml(formatDate(photo.capturedAt))}</b></div>
+        </div>
+        <div class="toolbar compact">
+          ${url ? `<button type="button" class="btn outline small" data-view-photo="${escapeAttr(photo.photoLocalId)}">Lihat / Perbesar</button>` : ''}
+          ${!locked ? `<button type="button" class="btn danger small" data-delete-photo="${escapeAttr(photo.photoLocalId)}">${photo.state === 'SYNCED' ? 'Hapus / Ganti' : 'Hapus Lokal'}</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function openPhotoModal(photoLocalId) {
+  const photo = await idbGet(STORE_PHOTOS, photoLocalId);
+  if (!photo) {
+    toast('Foto lokal tidak ditemukan.', 'warning');
+    return;
+  }
+  const url = previewUrlForPhoto(photo);
+  if (!url) {
+    toast('Preview foto tidak tersedia di perangkat ini.', 'warning');
+    return;
+  }
+
+  el.photoModalImage.src = url;
+  el.photoModalMeta.innerHTML = `
+    <div><b>${escapeHtml(photo.fileName || photo.photoLocalId)}</b></div>
+    <div>GPS Accuracy: <b>${escapeHtml(formatNumber(photo.gpsAccuracy))} m</b></div>
+    <div>Jarak ke titik plan: <b>${escapeHtml(formatNumber(photo.distanceToPlanM))} m</b></div>
+    <div>GPS Source: <b>${escapeHtml(photo.gpsSource || '-')}</b></div>
+    <div>Captured: <b>${escapeHtml(formatDate(photo.capturedAt))}</b></div>
+    <div>Status: <b>${escapeHtml(photo.state || '-')}</b></div>
+  `;
+  el.photoModal.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+function closePhotoModal() {
+  el.photoModal?.classList.add('hidden');
+  if (el.photoModalImage) el.photoModalImage.src = '';
+  if (el.photoModalMeta) el.photoModalMeta.innerHTML = '';
+  document.body.classList.remove('modal-open');
+}
+
+async function deleteCapturePhoto(photoLocalId) {
+  const photo = await idbGet(STORE_PHOTOS, photoLocalId);
+  if (!photo) {
+    toast('Foto tidak ditemukan.', 'warning');
+    return;
+  }
+
+  const draft = await idbGet(STORE_DRAFTS, photo.draftId);
+  if (!draft) {
+    toast('Draft evidence tidak ditemukan.', 'danger');
+    return;
+  }
+
+  const workflow = String(draft.workflow || '').toUpperCase();
+  if (['SUBMITTED','VERIFIED','REJECTED'].includes(workflow)) {
+    toast('Evidence sudah dikunci. Gunakan workflow Revision/Reopen.', 'warning', 6000);
+    return;
+  }
+
+  const yes = window.confirm(
+    photo.state === 'SYNCED'
+      ? 'Foto ini sudah tersimpan di server. Hapus foto ini agar bisa ambil ulang?'
+      : 'Hapus foto lokal ini?'
+  );
+  if (!yes) return;
+
+  try {
+    if (photo.state === 'SYNCED' && photo.serverEvidenceId && photo.serverPhotoId) {
+      if (!navigator.onLine) {
+        throw new Error('Foto yang sudah tersinkron hanya dapat dihapus saat ONLINE.');
+      }
+      const result = await api(
+        `/evidence/${encodeURIComponent(photo.serverEvidenceId)}/photos/${encodeURIComponent(photo.serverPhotoId)}`,
+        { method: 'DELETE' }
+      );
+      draft.serverPhotoCount = Number(result.photoCount || 0);
+      draft.workflow = result.workflowStatus || (draft.serverPhotoCount > 0 ? 'SYNCED' : 'DRAFT_LOCAL');
+      draft.updatedAt = new Date().toISOString();
+      await idbPut(STORE_DRAFTS, draft);
+    }
+
+    const queueItems = await idbGetAll(STORE_QUEUE);
+    for (const q of queueItems) {
+      if (q.photoLocalId === photoLocalId) {
+        await idbDelete(STORE_QUEUE, q.queueId);
+      }
+    }
+
+    await idbDelete(STORE_PHOTOS, photoLocalId);
+
+    const oldUrl = state.photoPreviewUrls.get(photoLocalId);
+    if (oldUrl) {
+      URL.revokeObjectURL(oldUrl);
+      state.photoPreviewUrls.delete(photoLocalId);
+    }
+
+    await refreshLocalState();
+    toast('Foto dihapus. Silakan Ambil Foto + GPS untuk mengganti.', 'success', 5000);
+    await renderCapturePanel();
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+  }
 }
 
 function beginCapture() {
@@ -935,7 +1116,7 @@ function verificationCardHtml(ev) {
         <div><div class="tiny muted">Foto</div><b>${photos.length}/${Number(ev.requiredPhotoCount || 1)}</b></div>
       </div>
       ${ev.fieldNote ? `<div class="status-box neutral"><b>Catatan Lapangan:</b> ${escapeHtml(ev.fieldNote)}</div>` : ''}
-      <div class="photo-grid" style="margin-top:12px">${photos.map(p => `<div class="photo-card"><div class="small"><b>${escapeHtml(p.fileName || p.photoId)}</b></div><div class="tiny muted">GPS ${formatNumber(p.gpsAccuracy)} m • Ke titik ${formatNumber(p.distanceToPlanM)} m</div>${p.duplicateStatus === 'HASH_DUPLICATE' ? '<span class="badge danger" style="margin-top:6px">POTENSI DUPLIKAT</span>' : ''}${p.url ? `<a class="btn outline small" href="${escapeAttr(p.url)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;text-decoration:none">Lihat Foto Drive</a>` : ''}</div>`).join('')}</div>
+      <div class="photo-grid" style="margin-top:12px">${photos.map(p => `<div class="photo-card"><div class="small"><b>${escapeHtml(p.fileName || p.photoId)}</b></div><div class="tiny muted">GPS ${formatNumber(p.gpsAccuracy)} m • Ke titik ${formatNumber(p.distanceToPlanM)} m</div>${p.duplicateStatus === 'HASH_DUPLICATE' ? '<span class="badge danger" style="margin-top:6px">POTENSI DUPLIKAT</span>' : ''}${p.fileId ? `<a href="${escapeAttr(p.url || '#')}" target="_blank" rel="noopener" class="verifier-photo-link"><img src="${escapeAttr(`https://drive.google.com/thumbnail?id=${p.fileId}&sz=w1200`)}" alt="${escapeAttr(p.fileName || p.photoId)}" loading="lazy"></a>` : ''}${p.url ? `<a class="btn outline small" href="${escapeAttr(p.url)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;text-decoration:none">Lihat Foto Drive</a>` : ''}</div>`).join('')}</div>
       <div class="form-row" style="margin-top:14px">
         <div class="field"><label>Reason Code</label><select class="select" data-reason-for="${escapeAttr(ev.evidenceId)}"><option value="">-- pilih bila revision/reject --</option><option>FOTO_TIDAK_JELAS</option><option>GPS_TIDAK_SESUAI</option><option>MATERIAL_TIDAK_SESUAI</option><option>QTY_TIDAK_SESUAI</option><option>EVIDENCE_KURANG</option><option>LAINNYA</option></select></div>
         <div class="field"><label>Catatan</label><input class="input" data-note-for="${escapeAttr(ev.evidenceId)}" placeholder="Catatan verifier"></div>
@@ -1276,6 +1457,7 @@ function getDeviceId() {
 async function refreshLocalState() {
   state.drafts = await idbGetAll(STORE_DRAFTS);
   state.queue = await idbGetAll(STORE_QUEUE);
+  state.draftsPhotos = await idbGetAll(STORE_PHOTOS);
   updateQueueBadge();
 }
 
