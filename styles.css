@@ -155,3 +155,42 @@ body.modal-open{overflow:hidden}
   .photo-modal{padding:8px}
   .photo-modal-card{width:100%;border-radius:14px}
 }
+
+
+/* V15 Verifier authenticated gallery */
+.verifier-inline-preview{
+  width:100%;
+  min-height:180px;
+  margin-top:10px;
+  padding:0;
+  border:1px solid var(--line);
+  border-radius:12px;
+  overflow:hidden;
+  background:#0f172a;
+  cursor:zoom-in;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.verifier-inline-preview img{
+  display:block;
+  width:100%;
+  max-height:320px;
+  object-fit:contain;
+  background:#0f172a;
+}
+.verifier-photo-loading{
+  min-height:180px;
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+  color:#64748b;
+  background:#f8fafc;
+  font-size:12px;
+  text-align:center;
+}
+.danger-text{
+  color:#b91c1c;
+}

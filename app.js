@@ -38,7 +38,8 @@ const state = {
   revisionTargetPmId: '',
   draftsPhotos: [],
   photoPreviewUrls: new Map(),
-  serverPhotoCache: new Map()
+  serverPhotoCache: new Map(),
+  verifierPhotoObjectUrls: new Map()
 };
 
 const el = {
@@ -1350,6 +1351,15 @@ async function renderVerification() {
     `;
     document.getElementById('refreshVerification')?.addEventListener('click', renderVerification);
     el.content.querySelectorAll('[data-verify]').forEach(btn => btn.addEventListener('click', () => handleVerificationAction(btn)));
+    el.content.querySelectorAll('[data-verifier-photo-open]').forEach(btn => {
+      btn.addEventListener('click', () =>
+        openVerifierPhotoModal(
+          btn.dataset.evidenceId,
+          btn.dataset.photoId
+        )
+      );
+    });
+    hydrateVerifierPhotoPreviews();
   } catch (err) {
     el.content.innerHTML = `<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;
   }
@@ -1366,13 +1376,177 @@ function verificationCardHtml(ev) {
         <div><div class="tiny muted">Foto</div><b>${photos.length}/${Number(ev.requiredPhotoCount || 1)}</b></div>
       </div>
       ${ev.fieldNote ? `<div class="status-box neutral"><b>Catatan Lapangan:</b> ${escapeHtml(ev.fieldNote)}</div>` : ''}
-      <div class="photo-grid" style="margin-top:12px">${photos.map(p => `<div class="photo-card"><div class="small"><b>${escapeHtml(p.fileName || p.photoId)}</b></div><div class="tiny muted">GPS ${formatNumber(p.gpsAccuracy)} m • Ke titik ${formatNumber(p.distanceToPlanM)} m</div>${p.duplicateStatus === 'HASH_DUPLICATE' ? '<span class="badge danger" style="margin-top:6px">POTENSI DUPLIKAT</span>' : ''}${p.fileId ? `<a href="${escapeAttr(p.url || '#')}" target="_blank" rel="noopener" class="verifier-photo-link"><img src="${escapeAttr(`https://drive.google.com/thumbnail?id=${p.fileId}&sz=w1200`)}" alt="${escapeAttr(p.fileName || p.photoId)}" loading="lazy"></a>` : ''}${p.url ? `<a class="btn outline small" href="${escapeAttr(p.url)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;text-decoration:none">Lihat Foto Drive</a>` : ''}</div>`).join('')}</div>
+      <div class="photo-grid" style="margin-top:12px">${photos.map(p => `
+        <div class="photo-card verifier-photo-card">
+          <div class="small"><b>${escapeHtml(p.fileName || p.photoId)}</b></div>
+          <div class="tiny muted">GPS ${formatNumber(p.gpsAccuracy)} m • Ke titik ${formatNumber(p.distanceToPlanM)} m</div>
+          ${p.duplicateStatus === 'HASH_DUPLICATE' ? '<span class="badge danger" style="margin-top:6px">POTENSI DUPLIKAT</span>' : ''}
+          <button
+            type="button"
+            class="verifier-inline-preview"
+            data-verifier-photo-open="1"
+            data-evidence-id="${escapeAttr(ev.evidenceId)}"
+            data-photo-id="${escapeAttr(p.photoId)}"
+            aria-label="Lihat foto evidence">
+            <div class="verifier-photo-loading" data-verifier-photo-loading="${escapeAttr(ev.evidenceId)}|${escapeAttr(p.photoId)}">Memuat foto...</div>
+            <img
+              class="hidden"
+              data-verifier-photo-img="${escapeAttr(ev.evidenceId)}|${escapeAttr(p.photoId)}"
+              alt="${escapeAttr(p.fileName || p.photoId)}">
+          </button>
+          <div class="toolbar compact">
+            <button
+              type="button"
+              class="btn outline small"
+              data-verifier-photo-open="1"
+              data-evidence-id="${escapeAttr(ev.evidenceId)}"
+              data-photo-id="${escapeAttr(p.photoId)}">
+              Lihat / Perbesar
+            </button>
+            ${p.url ? `<a class="btn outline small" href="${escapeAttr(p.url)}" target="_blank" rel="noopener" style="text-decoration:none">Lihat Foto Drive</a>` : ''}
+          </div>
+        </div>
+      `).join('')}</div>
       <div class="form-row" style="margin-top:14px">
         <div class="field"><label>Reason Code</label><select class="select" data-reason-for="${escapeAttr(ev.evidenceId)}"><option value="">-- pilih bila revision/reject --</option><option>FOTO_TIDAK_JELAS</option><option>GPS_TIDAK_SESUAI</option><option>MATERIAL_TIDAK_SESUAI</option><option>QTY_TIDAK_SESUAI</option><option>EVIDENCE_KURANG</option><option>LAINNYA</option></select></div>
         <div class="field"><label>Catatan</label><input class="input" data-note-for="${escapeAttr(ev.evidenceId)}" placeholder="Catatan verifier"></div>
       </div>
       <div class="toolbar" style="margin-top:12px"><button class="btn success" data-verify="approve" data-id="${escapeAttr(ev.evidenceId)}">Approve</button><button class="btn warning" data-verify="revision" data-id="${escapeAttr(ev.evidenceId)}">Need Revision</button><button class="btn danger" data-verify="reject" data-id="${escapeAttr(ev.evidenceId)}">Reject</button></div>
     </div>`;
+}
+
+
+async function verifierPhotoObjectUrl(evidenceId, photoId) {
+  const key = `${evidenceId}|${photoId}`;
+
+  if (state.verifierPhotoObjectUrls.has(key)) {
+    return state.verifierPhotoObjectUrls.get(key);
+  }
+
+  const result = await api(
+    `/evidence/${encodeURIComponent(evidenceId)}/photos/${encodeURIComponent(photoId)}`
+  );
+
+  if (!result?.base64) {
+    throw new Error('Data preview foto kosong.');
+  }
+
+  const binary = atob(result.base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  const blob = new Blob(
+    [bytes],
+    {
+      type:
+        result.mimeType ||
+        'image/jpeg'
+    }
+  );
+
+  const url = URL.createObjectURL(blob);
+  state.verifierPhotoObjectUrls.set(key, url);
+
+  return url;
+}
+
+async function hydrateVerifierPhotoPreviews() {
+  const images =
+    el.content.querySelectorAll(
+      '[data-verifier-photo-img]'
+    );
+
+  for (const img of images) {
+    const key =
+      img.dataset.verifierPhotoImg || '';
+
+    const splitAt = key.indexOf('|');
+    if (splitAt < 1) continue;
+
+    const evidenceId =
+      key.slice(0, splitAt);
+
+    const photoId =
+      key.slice(splitAt + 1);
+
+    const loading =
+      el.content.querySelector(
+        `[data-verifier-photo-loading="${cssEscape(key)}"]`
+      );
+
+    try {
+      const url =
+        await verifierPhotoObjectUrl(
+          evidenceId,
+          photoId
+        );
+
+      img.src = url;
+      img.classList.remove('hidden');
+
+      if (loading) {
+        loading.classList.add('hidden');
+      }
+    }
+    catch (err) {
+      if (loading) {
+        loading.textContent =
+          'Preview gagal — gunakan Lihat Foto Drive';
+        loading.classList.add('danger-text');
+      }
+    }
+  }
+}
+
+async function openVerifierPhotoModal(
+  evidenceId,
+  photoId
+) {
+  const ev =
+    state.verificationQueue.find(
+      item =>
+        String(item.evidenceId) ===
+        String(evidenceId)
+    );
+
+  const photo =
+    ev?.photos?.find(
+      item =>
+        String(item.photoId) ===
+        String(photoId)
+    );
+
+  try {
+    const url =
+      await verifierPhotoObjectUrl(
+        evidenceId,
+        photoId
+      );
+
+    el.photoModalImage.src = url;
+
+    el.photoModalMeta.innerHTML = `
+      <div><b>${escapeHtml(photo?.fileName || photoId)}</b></div>
+      <div>GPS Accuracy: <b>${escapeHtml(formatNumber(photo?.gpsAccuracy))} m</b></div>
+      <div>Jarak ke titik plan: <b>${escapeHtml(formatNumber(photo?.distanceToPlanM))} m</b></div>
+      <div>GPS Source: <b>${escapeHtml(photo?.gpsSource || '-')}</b></div>
+      <div>Captured: <b>${escapeHtml(formatDate(photo?.capturedAt))}</b></div>
+      <div>Status: <b>${escapeHtml(photo?.status || 'SYNCED')}</b></div>
+    `;
+
+    el.photoModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+  }
+  catch (err) {
+    toast(
+      humanError(err),
+      'danger',
+      6000
+    );
+  }
 }
 
 async function handleVerificationAction(btn) {
