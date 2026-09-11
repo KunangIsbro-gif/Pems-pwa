@@ -2,389 +2,74 @@
 <html lang="id">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0f4c81">
-  <title>PEMS V14C-B2A Step 9B</title>
-  <link rel="manifest" href="./manifest.json?v=b2a-step9c">
-  <link rel="stylesheet" href="./styles.css?v=b2a-step9c">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="PEMS V15 - Project Evidence Management System">
+  <title>PEMS V15</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./styles.css">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <style>
-    .project-list { display:grid; gap:12px; margin-top:14px; }
-    .project-card {
-      border:1px solid #d6e2ee; border-radius:14px; padding:16px;
-      background:#fff;
-    }
-    .project-card.selected {
-      outline:2px solid #0f4c81;
-      background:#f5f9fd;
-    }
-    .project-id { font-weight:800; font-size:16px; color:#0f2740; }
-    .project-name { margin-top:6px; font-weight:700; }
-    .project-meta { margin-top:8px; font-size:13px; line-height:1.55; color:#475569; }
-    .project-actions { margin-top:12px; }
-    .select-btn {
-      border:0; border-radius:9px; padding:10px 14px; cursor:pointer;
-      font-weight:700; background:#0f4c81; color:white;
-    }
-    .selected-banner {
-      margin-top:12px; border:1px solid #0f4c81; border-radius:12px;
-      padding:12px; background:#eef6fd;
-    }
-      .material-card {
-      border:1px solid #d6e2ee;
-      border-radius:12px;
-      padding:14px;
-      background:#fff;
-    }
-    .material-title { font-weight:800; color:#0f2740; }
-    .material-meta { margin-top:7px; font-size:13px; line-height:1.55; color:#475569; }
-    .material-actions { margin-top:12px; }
-    .evidence-btn {
-      border:0;
-      border-radius:9px;
-      padding:10px 14px;
-      cursor:pointer;
-      font-weight:700;
-      background:#0f4c81;
-      color:white;
-    }
-    .material-card.draft-selected {
-      outline:2px solid #0f4c81;
-      background:#f5f9fd;
-    }
-    .point-card {
-      border:1px solid #d6e2ee;
-      border-radius:12px;
-      padding:14px;
-      background:#fff;
-    }
-    .point-card.selected {
-      outline:2px solid #0f4c81;
-      background:#f5f9fd;
-    }
-    .point-title { font-weight:800; color:#0f2740; }
-    .point-meta { margin-top:7px; font-size:13px; line-height:1.55; color:#475569; }
-    .point-btn {
-      margin-top:10px;
-      border:0;
-      border-radius:9px;
-      padding:10px 14px;
-      cursor:pointer;
-      font-weight:700;
-      background:#0f4c81;
-      color:white;
-    }
-    .requirement-card {
-      border:1px solid #d6e2ee;
-      border-radius:12px;
-      padding:14px;
-      background:#fff;
-    }
-    .requirement-card.required {
-      border-left:5px solid #0f4c81;
-    }
-    .requirement-card.optional {
-      border-left:5px solid #94a3b8;
-    }
-    .requirement-card.selected {
-      outline:2px solid #0f4c81;
-      background:#f5f9fd;
-    }
-    .requirement-title {
-      font-weight:800;
-      color:#0f2740;
-    }
-    .requirement-meta {
-      margin-top:7px;
-      font-size:13px;
-      line-height:1.55;
-      color:#475569;
-    }
-    .requirement-tag {
-      display:inline-block;
-      margin-top:8px;
-      padding:4px 8px;
-      border-radius:999px;
-      font-size:11px;
-      font-weight:800;
-      background:#eef6fd;
-      color:#0f4c81;
-    }
-    .photo-mini-card {
-      display:grid;
-      grid-template-columns:72px 1fr auto;
-      gap:10px;
-      align-items:center;
-      border:1px solid #d6e2ee;
-      border-radius:12px;
-      padding:10px;
-      background:#fff;
-    }
-    .photo-mini-card.active {
-      outline:2px solid #0f4c81;
-      background:#f5f9fd;
-    }
-    .photo-mini-card img {
-      width:72px;
-      height:72px;
-      object-fit:cover;
-      border-radius:8px;
-      border:1px solid #d6e2ee;
-    }
-    .photo-mini-meta {
-      font-size:12px;
-      line-height:1.45;
-      color:#475569;
-      overflow-wrap:anywhere;
-    }
-    .photo-mini-status {
-      font-size:11px;
-      font-weight:800;
-    }
-</style>
 </head>
 <body>
-  <main class="wrap">
-    <section class="card">
-      <div class="badge">PEMS V14C-B2A STEP 9C</div>
-      <h1>Offline Queue + Auto Sync</h1>
-      <p class="lead">
-        Target tahap ini: foto evidence yang dibuat saat <b>OFFLINE</b> masuk queue lokal. Saat internet kembali dan session proof masih valid, PEMS mengirim queue otomatis satu per satu sampai habis.
-      </p>
-
-      <div class="status-grid">
-        <div class="status-card">
-          <span>BROWSER</span>
-          <strong id="browserStatus">...</strong>
-        </div>
-        <div class="status-card">
-          <span>SERVER PROOF</span>
-          <strong id="proofStatus">BELUM ADA</strong>
-        </div>
-        <div class="status-card">
-          <span>PROJECT CACHE</span>
-          <strong id="projectStatus">BELUM ADA</strong>
-        </div>
-        <div class="status-card">
-          <span>MATERIAL CACHE</span>
-          <strong id="materialStatus">BELUM ADA</strong>
-        </div>
-        <div class="status-card">
-          <span>EVIDENCE DRAFT</span>
-          <strong id="evidenceDraftStatus">BELUM ADA</strong>
-        </div>
-        <div class="status-card">
-          <span>PHOTO LOCAL</span>
-          <strong id="photoLocalStatus">BELUM ADA</strong>
-        </div>
-        <div class="status-card">
-          <span>GPS QUALITY</span>
-          <strong id="gpsQualityStatus">BELUM ADA</strong>
-        </div>
-        <div class="status-card">
-          <span>POINT SESSION</span>
-          <strong id="pointSessionStatus">BELUM ADA</strong>
-        </div>
-        <div class="status-card">
-          <span>POINT REQUIREMENT</span>
-          <strong id="pointRequirementStatus">BELUM ADA</strong>
-        </div>
-        <div class="status-card">
-          <span>SYNC SERVER</span>
-          <strong id="syncServerStatus">BELUM</strong>
-        </div>
-        <div class="status-card">
-          <span>AUTO SYNC</span>
-          <strong id="autoSyncStatus">IDLE</strong>
+  <div id="app">
+    <aside id="sidebar" class="sidebar hidden">
+      <div class="brand-block">
+        <div class="brand-mark">P</div>
+        <div>
+          <div class="brand-title">PEMS</div>
+          <div class="brand-sub">V15 Consolidated</div>
         </div>
       </div>
-
-      <section id="projectResult" class="result muted">
-        Belum ada project di cache lokal.
-      </section>
-
-      <section class="panel">
-        <h2>1. Login Google</h2>
-        <div id="g_id_onload"
-          data-client_id="1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com"
-          data-callback="handleGoogleCredential"
-          data-auto_prompt="false"></div>
-        <div class="g_id_signin"
-          data-type="standard"
-          data-shape="rectangular"
-          data-theme="outline"
-          data-text="signin_with"
-          data-size="large"
-          data-logo_alignment="left"></div>
-      </section>
-
-      <section id="loginResult" class="result muted">Belum login.</section>
-
-      <section class="panel">
-        <h2>2. Verifikasi Server</h2>
-        <button id="verifyBtn" class="primary-btn" type="button" disabled>
-          VERIFIKASI GOOGLE DI SERVER
-        </button>
-      </section>
-
-      <section class="panel">
-        <h2>3. Ambil / Refresh Project</h2>
-        <p>
-          Saat online, server memvalidasi session dan membaca
-          <b>01_PROJECTS</b> secara read-only.
-        </p>
-        <button id="loadProjectsBtn" class="primary-btn" type="button" disabled>
-          AMBIL PROJECT KE PEMS
-        </button>
-      </section>
-
-      <section id="projectsPanel" class="panel" hidden>
-        <h2>Project Tersimpan</h2>
-        <div id="selectedProjectBanner"></div>
-        <div id="projectList" class="project-list"></div>
-      </section>
-
-      <section class="panel">
-        <h2>4. Ambil Material ke PEMS</h2>
-        <p>
-          Gunakan project yang sudah dipilih. Server memvalidasi session,
-          membaca material secara read-only, lalu mengembalikan datanya ke PEMS.
-        </p>
-        <button id="readMaterialsBtn" class="primary-btn" type="button" disabled>
-          AMBIL MATERIAL KE PEMS
-        </button>
-      </section>
-
-      <section id="materialsPanel" class="panel" hidden>
-        <h2>Material Project (Cache Referensi)</h2>
-        <div id="materialSummary" class="result okbox"></div>
-        <div id="materialList" class="project-list"></div>
-      </section>
-
-      <section id="evidenceDraftPanel" class="panel" hidden>
-        <h2>Draft Evidence Lokal</h2>
-        <div id="evidenceDraftResult" class="result okbox"></div>
-      </section>
-
-      <section id="photoPanel" class="panel">
-        <h2>Foto + GPS Lokal</h2>
-        <p>
-          Tambahkan foto satu per satu untuk draft evidence aktif. Setiap foto disimpan
-          di IndexedDB bersama GPS. Jumlah minimum mengikuti <b>Evidence Required</b>.
-        </p>
-
-        <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
-
-        <button id="choosePhotoBtn" class="primary-btn" type="button" disabled>
-          TAMBAH FOTO + AMBIL GPS
-        </button>
-
-        <button id="retryGpsBtn" class="primary-btn" type="button" hidden style="margin-left:8px;">
-          RETRY GPS FOTO AKTIF
-        </button>
-
-        <div id="photoCountSummary" class="result muted" style="margin-top:12px;">
-          Belum ada foto pada draft aktif.
-        </div>
-
-        <div id="photoList" class="project-list" style="margin-top:12px;"></div>
-
-        <div id="photoResult" class="result muted" style="margin-top:12px;">
-          Belum ada foto aktif.
-        </div>
-
-        <div id="photoPreviewWrap" hidden style="margin-top:12px;">
-          <img id="photoPreview" alt="Preview evidence"
-               style="max-width:100%;max-height:420px;border-radius:12px;border:1px solid #d6e2ee;">
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Point Session</h2>
-        <p>
-          Server akan membaca <b>06D_POINT_SESSIONS</b> untuk project terpilih.
-          Pilih satu titik agar draft evidence aktif memiliki Session ID. Untuk performa, PEMS hanya merender maksimal 30 titik sekaligus.
-        </p>
-        <button id="loadPointSessionsBtn" class="primary-btn" type="button" disabled>
-          AMBIL POINT SESSION KE PEMS
-        </button>
-      </section>
-
-      <section id="pointSessionsPanel" class="panel" hidden>
-        <h2>Titik Pekerjaan</h2>
-        <div id="pointSessionSummary" class="result okbox"></div>
-
-        <div style="margin:12px 0;">
-          <input
-            id="pointSessionSearch"
-            type="search"
-            placeholder="Cari Session ID / label / anchor..."
-            autocomplete="off"
-            style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;"
-          >
-          <div id="pointSessionRenderInfo" style="margin-top:7px;font-size:12px;color:#64748b;"></div>
-        </div>
-
-        <div id="pointSessionList" class="project-list"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Requirement Material Titik</h2>
-        <p>
-          Gunakan Point Session terpilih. Server membaca <b>06B_POINT_REQUIREMENTS</b>
-          secara read-only lalu hanya mengembalikan material yang valid untuk titik tersebut.
-        </p>
-        <button id="loadRequirementsBtn" class="primary-btn" type="button" disabled>
-          AMBIL REQUIREMENT TITIK
-        </button>
-      </section>
-
-      <section id="requirementsPanel" class="panel" hidden>
-        <h2>Material Valid untuk Evidence</h2>
-        <div id="requirementSummary" class="result okbox"></div>
-        <div id="requirementList" class="project-list"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Offline Queue + Auto Sync</h2>
-        <p>
-          <b>DEVICE MODE: DEVELOPMENT / LAPTOP</b><br>
-          Foto tetap disimpan lokal saat offline. Saat ONLINE, Auto Sync mengirim
-          satu foto per putaran. GPS &gt; 50 m masih boleh lewat hanya untuk test DEV.
-        </p>
-
-        <button id="autoSyncToggleBtn" class="primary-btn" type="button">
-          AUTO SYNC: ON
-        </button>
-
-        <button id="syncEvidenceBtn" class="primary-btn" type="button" disabled style="margin-left:8px;">
-          SYNC 1 FOTO MANUAL
-        </button>
-
-        <div id="queueSummary" class="result muted" style="margin-top:12px;">
-          Membaca queue lokal...
-        </div>
-
-        <div id="syncGateResult" class="result muted" style="margin-top:12px;">
-          Belum siap sync.
-        </div>
-
-        <div id="syncResultLocal" class="result muted" style="margin-top:12px;">
-          Belum ada hasil sync yang kembali ke PEMS.
-        </div>
-      </section>
-
-      <div class="passbox">
-        <strong>PASS STEP 9C</strong> bila saat OFFLINE ada foto masuk queue, lalu WiFi dinyalakan:
-        <strong>AUTO SYNC</strong> mengirim foto satu per satu, kembali otomatis ke PEMS,
-        dan queue turun sampai <strong>0</strong> tanpa membuat data ganda.
+      <nav id="sideNav" class="side-nav"></nav>
+      <div class="sidebar-footer">
+        <div id="sidebarUser" class="small muted"></div>
+        <button id="logoutBtn" class="btn ghost full">Keluar</button>
       </div>
-    </section>
-  </main>
+    </aside>
 
-  <script>
-    window.PEMS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby77F6sR0EyB8ZXN1f3RHGgaUpjjo439TIycgVmoFN-qXZQOInYXJVpaHh9oplHxqze5A/exec';
-  </script>
-  <script src="./app.js?v=b2a-step9c"></script>
+    <main id="mainShell" class="main-shell full-width">
+      <header id="topbar" class="topbar hidden">
+        <div>
+          <div id="pageTitle" class="page-title">Home</div>
+          <div id="pageSubtitle" class="page-subtitle">PEMS V15</div>
+        </div>
+        <div class="topbar-right">
+          <span id="netBadge" class="badge neutral">...</span>
+          <span id="queueBadge" class="badge warning">Queue 0</span>
+          <span id="roleBadge" class="badge info"></span>
+        </div>
+      </header>
+
+      <section id="loginView" class="login-view">
+        <div class="login-card">
+          <div class="brand-mark large">P</div>
+          <h1>PEMS V15</h1>
+          <p class="muted center">Project Evidence Management System</p>
+
+          <div id="gatewaySetup" class="setup-card hidden">
+            <h3>Hubungkan API Gateway</h3>
+            <p class="muted">Masukkan URL Worker satu kali. Setelah final deployment, URL ini dapat dikunci di konfigurasi aplikasi.</p>
+            <input id="apiBaseInput" class="input" placeholder="https://nama-worker.workers.dev/api/v15">
+            <button id="saveApiBaseBtn" class="btn secondary full">Simpan API Gateway</button>
+          </div>
+
+          <div id="loginMessage" class="status-box neutral">Memeriksa konfigurasi...</div>
+          <div id="googleButton" class="google-button-wrap"></div>
+          <button id="retryBootBtn" class="btn ghost full hidden">Coba Lagi</button>
+          <p class="tiny muted center">© 2026 PT Telkom Akses | Project Deployment Pontianak</p>
+        </div>
+      </section>
+
+      <section id="content" class="content hidden"></section>
+
+      <nav id="bottomNav" class="bottom-nav hidden"></nav>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden">
+
+  <script src="./config.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

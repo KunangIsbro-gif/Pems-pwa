@@ -1,3713 +1,1356 @@
-
-const browserEl = document.getElementById('browserStatus');
-const proofEl = document.getElementById('proofStatus');
-const projectStatusEl = document.getElementById('projectStatus');
-const projectResultEl = document.getElementById('projectResult');
-const loginResultEl = document.getElementById('loginResult');
-const verifyBtn = document.getElementById('verifyBtn');
-const loadProjectsBtn = document.getElementById('loadProjectsBtn');
-const readMaterialsBtn = document.getElementById('readMaterialsBtn');
-const materialStatusEl = document.getElementById('materialStatus');
-const materialsPanel = document.getElementById('materialsPanel');
-const materialSummaryEl = document.getElementById('materialSummary');
-const materialListEl = document.getElementById('materialList');
-const evidenceDraftStatusEl = document.getElementById('evidenceDraftStatus');
-const evidenceDraftPanel = document.getElementById('evidenceDraftPanel');
-const evidenceDraftResultEl = document.getElementById('evidenceDraftResult');
-const photoLocalStatusEl = document.getElementById('photoLocalStatus');
-const photoInput = document.getElementById('photoInput');
-const choosePhotoBtn = document.getElementById('choosePhotoBtn');
-const photoResultEl = document.getElementById('photoResult');
-const photoCountSummaryEl = document.getElementById('photoCountSummary');
-const photoListEl = document.getElementById('photoList');
-const photoPreviewWrap = document.getElementById('photoPreviewWrap');
-const photoPreview = document.getElementById('photoPreview');
-const gpsQualityStatusEl = document.getElementById('gpsQualityStatus');
-const retryGpsBtn = document.getElementById('retryGpsBtn');
-const pointSessionStatusEl = document.getElementById('pointSessionStatus');
-const loadPointSessionsBtn = document.getElementById('loadPointSessionsBtn');
-const pointSessionsPanel = document.getElementById('pointSessionsPanel');
-const pointSessionSummaryEl = document.getElementById('pointSessionSummary');
-const pointSessionListEl = document.getElementById('pointSessionList');
-const pointSessionSearchEl = document.getElementById('pointSessionSearch');
-const pointSessionRenderInfoEl = document.getElementById('pointSessionRenderInfo');
-const pointRequirementStatusEl = document.getElementById('pointRequirementStatus');
-const loadRequirementsBtn = document.getElementById('loadRequirementsBtn');
-const requirementsPanel = document.getElementById('requirementsPanel');
-const requirementSummaryEl = document.getElementById('requirementSummary');
-const requirementListEl = document.getElementById('requirementList');
-const syncServerStatusEl = document.getElementById('syncServerStatus');
-const syncEvidenceBtn = document.getElementById('syncEvidenceBtn');
-const syncGateResultEl = document.getElementById('syncGateResult');
-const syncResultLocalEl = document.getElementById('syncResultLocal');
-const autoSyncStatusEl = document.getElementById('autoSyncStatus');
-const autoSyncToggleBtn = document.getElementById('autoSyncToggleBtn');
-const queueSummaryEl = document.getElementById('queueSummary');
-const projectsPanel = document.getElementById('projectsPanel');
-const projectListEl = document.getElementById('projectList');
-const selectedProjectBanner = document.getElementById('selectedProjectBanner');
-
-const PROOF_KEY = 'PEMS_SERVER_PROOF_STEP3C';
-const PROJECTS_KEY = 'PEMS_PROJECTS_STEP5A';
-const SELECTED_PROJECT_KEY = 'PEMS_SELECTED_PROJECT_STEP5A';
-const MATERIALS_KEY = 'PEMS_MATERIALS_STEP7D';
-const EVIDENCE_DRAFTS_KEY = 'PEMS_EVIDENCE_DRAFTS_STEP7D';
-const POINT_SESSIONS_KEY = 'PEMS_POINT_SESSIONS_STEP8B';
-const SELECTED_POINT_SESSION_KEY = 'PEMS_SELECTED_POINT_SESSION_STEP8B';
-const POINT_REQUIREMENTS_KEY = 'PEMS_POINT_REQUIREMENTS_STEP9A';
-const AUTO_SYNC_ENABLED_KEY = 'PEMS_AUTO_SYNC_ENABLED_STEP9C';
-const AUTO_SYNC_ACTIVE_KEY = 'PEMS_AUTO_SYNC_ACTIVE_STEP9C';
-const AUTO_SYNC_LAST_PHOTO_KEY = 'PEMS_AUTO_SYNC_LAST_PHOTO_STEP9C';
-const PEMS_DEVICE_MODE = 'DEV';
-const DEV_LAST_GPS_KEY = 'PEMS_DEV_LAST_GPS_STEP9C';
-const DEV_FALLBACK_ACCURACY_M = 999;
-const PHOTO_UPLOAD_SAFE_BYTES = 5.5 * 1024 * 1024;
-const PHOTO_MAX_LONG_EDGE = 2560;
-const PHOTO_JPEG_QUALITY = 0.84;
-
-let currentGoogleCredential = '';
-let currentServerProof = '';
-let currentProjects = [];
-let currentMaterials = [];
-let currentEvidenceDraft = null;
-let currentLocalPhoto = null;
-let currentLocalPhotos = [];
-let currentPointSessions = [];
-let currentRequirements = [];
-
-const POINT_RENDER_LIMIT = 30;
-let pointSessionSearchTerm = '';
-let autoSyncBusy = false;
-let autoSyncUiToken = 0;
-
-const PHOTO_DB_NAME = 'PEMS_LOCAL_EVIDENCE_DB';
-const PHOTO_DB_VERSION = 1;
-const PHOTO_STORE = 'photos';
-
-if (localStorage.getItem(AUTO_SYNC_ENABLED_KEY) === null) {
-  localStorage.setItem(AUTO_SYNC_ENABLED_KEY, '1');
-}
-
-function getSelectedProjectId(){
-  return localStorage.getItem(SELECTED_PROJECT_KEY) || '';
-}
-
-function getSelectedPointSessionId(){
-  return localStorage.getItem(SELECTED_POINT_SESSION_KEY) || '';
-}
-
-function getSelectedPointSession(){
-  const sessionId = getSelectedPointSessionId();
-
-  return currentPointSessions.find(function(item){
-    return String(item.sessionId || '') === sessionId;
-  }) || null;
-}
-
-function refreshMaterialButton(){
-  const ready =
-    !!currentServerProof &&
-    !!getSelectedProjectId();
-
-  readMaterialsBtn.disabled = !ready;
-  loadPointSessionsBtn.disabled = !ready;
-
-  const requirementReady =
-    ready &&
-    !!getSelectedPointSessionId();
-
-  loadRequirementsBtn.disabled = !requirementReady;
-}
-
-function setConnectivity(){
-  const online = navigator.onLine;
-  browserEl.textContent = online ? 'ONLINE' : 'OFFLINE';
-  browserEl.className = online ? 'ok' : 'bad';
-
-  if (currentMaterials.length > 0) {
-    materialStatusEl.textContent = online ? 'CACHED' : 'CACHED OFFLINE';
-    materialStatusEl.className = 'ok';
-
-    const projectId = getSelectedProjectId();
-    if (projectId) {
-      renderMaterials(projectId);
-    }
-  }
-
-  if (currentRequirements.length > 0) {
-    pointRequirementStatusEl.textContent =
-      online ? 'CACHED' : 'CACHED OFFLINE';
-    pointRequirementStatusEl.className = 'ok';
-  }
-
-  refreshMaterialButton();
-
-  if (typeof refreshSyncGate === 'function') {
-    refreshSyncGate();
-  }
-
-  if (typeof refreshAutoSyncQueueUI === 'function') {
-    refreshAutoSyncQueueUI();
-  }
-}
-window.addEventListener('online', setConnectivity);
-window.addEventListener('offline', setConnectivity);
-
-window.addEventListener('online', function(){
-  setTimeout(function(){
-    runAutoSyncQueue('network_online');
-  }, 1200);
-});
-setConnectivity();
-
-function base64UrlDecodeUtf8(value){
-  try {
-    let b64 = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4) b64 += '=';
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  } catch (e) {
-    return '';
-  }
-}
-
-function readSignedPayload(token){
-  try {
-    const parts = String(token || '').split('.');
-    if (parts.length !== 2) return null;
-    return JSON.parse(base64UrlDecodeUtf8(parts[0]) || '{}');
-  } catch (e) {
-    return null;
-  }
-}
-
-function acceptProof(proof){
-  const payload = readSignedPayload(proof);
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  const validShape =
-    payload &&
-    payload.v === 'V14C-B2A-STEP3C' &&
-    typeof payload.email === 'string' &&
-    Number(payload.exp || 0) > nowSec;
-
-  if (!validShape) {
-    sessionStorage.removeItem(PROOF_KEY);
-    currentServerProof = '';
-    proofEl.textContent = 'INVALID / EXPIRED';
-    proofEl.className = 'bad';
-    loadProjectsBtn.disabled = true;
-    refreshMaterialButton();
-    refreshSyncGate();
-    return false;
-  }
-
-  currentServerProof = proof;
-  sessionStorage.setItem(PROOF_KEY, proof);
-  proofEl.textContent = 'RECEIVED';
-  proofEl.className = 'ok';
-  loadProjectsBtn.disabled = false;
-  refreshMaterialButton();
-  refreshSyncGate();
-
-  refreshAutoSyncQueueUI();
-
-  if (
-    navigator.onLine &&
-    isAutoSyncEnabled()
-  ) {
-    setTimeout(function(){
-      runAutoSyncQueue('proof_received');
-    }, 700);
-  }
-
-  return true;
-}
-
-function acceptProjectBundle(bundle){
-  const payload = readSignedPayload(bundle);
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  const validShape =
-    payload &&
-    payload.v === 'V14C-B2A-STEP4B' &&
-    payload.kind === 'PROJECT_LIST' &&
-    Array.isArray(payload.projects) &&
-    Number(payload.exp || 0) > nowSec;
-
-  if (!validShape) {
-    projectStatusEl.textContent = 'INVALID';
-    projectStatusEl.className = 'bad';
-    projectResultEl.className = 'result errbox';
-    projectResultEl.textContent = 'Project bundle tidak valid / expired.';
-    return false;
-  }
-
-  currentProjects = payload.projects;
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(currentProjects));
-
-  projectStatusEl.textContent = 'CACHED';
-  projectStatusEl.className = 'ok';
-
-  projectResultEl.className = 'result okbox';
-  projectResultEl.innerHTML =
-    '<strong>✓ PROJECT DATA LOADED & CACHED</strong><br>' +
-    'Total project ACTIVE: ' + escapeHtml(String(currentProjects.length)) + '<br>' +
-    'Email session: ' + escapeHtml(payload.email || '-') + '<br>' +
-    '<small>Project disimpan lokal agar tetap tersedia saat PEMS dibuka kembali offline.</small>';
-
-  renderProjects();
-  return true;
-}
-
-
-
-
-function openPhotoDb(){
-  return new Promise(function(resolve, reject){
-    const request = indexedDB.open(PHOTO_DB_NAME, PHOTO_DB_VERSION);
-
-    request.onupgradeneeded = function(event){
-      const db = event.target.result;
-
-      if (!db.objectStoreNames.contains(PHOTO_STORE)) {
-        const store = db.createObjectStore(
-          PHOTO_STORE,
-          { keyPath: 'photoLocalId' }
-        );
-
-        store.createIndex(
-          'evidenceDraftId',
-          'evidenceDraftId',
-          { unique: false }
-        );
-      }
-    };
-
-    request.onsuccess = function(){
-      resolve(request.result);
-    };
-
-    request.onerror = function(){
-      reject(request.error || new Error('IndexedDB gagal dibuka.'));
-    };
-  });
-}
-
-function putLocalPhoto(record){
-  return openPhotoDb().then(function(db){
-    return new Promise(function(resolve, reject){
-      const tx = db.transaction(PHOTO_STORE, 'readwrite');
-      const store = tx.objectStore(PHOTO_STORE);
-
-      store.put(record);
-
-      tx.oncomplete = function(){
-        db.close();
-        resolve(record);
-      };
-
-      tx.onerror = function(){
-        db.close();
-        reject(tx.error || new Error('Foto lokal gagal disimpan.'));
-      };
-    });
-  });
-}
-
-
-
-function getAllLocalPhotos(){
-  return openPhotoDb().then(function(db){
-    return new Promise(function(resolve, reject){
-      const tx = db.transaction(PHOTO_STORE, 'readonly');
-      const store = tx.objectStore(PHOTO_STORE);
-      const request = store.getAll();
-
-      request.onsuccess = function(){
-        const rows =
-          Array.isArray(request.result)
-            ? request.result
-            : [];
-
-        db.close();
-        resolve(rows);
-      };
-
-      request.onerror = function(){
-        db.close();
-        reject(
-          request.error ||
-          new Error('Queue foto lokal gagal dibaca.')
-        );
-      };
-    });
-  });
-}
-
-function isAutoSyncEnabled(){
-  return localStorage.getItem(AUTO_SYNC_ENABLED_KEY) !== '0';
-}
-
-function getProofRemainingSeconds(){
-  const proof =
-    currentServerProof ||
-    sessionStorage.getItem(PROOF_KEY) ||
-    '';
-
-  const payload = readSignedPayload(proof);
-
-  if (!payload) return 0;
-
-  return Math.max(
-    0,
-    Number(payload.exp || 0) -
-    Math.floor(Date.now() / 1000)
-  );
-}
-
-async function buildAutoSyncQueue(){
-  const photos = await getAllLocalPhotos();
-  const drafts = loadEvidenceDrafts();
-
-  const photoGroups = new Map();
-
-  photos
-    .filter(function(photo){
-      return (
-        photo &&
-        photo.status !== 'SYNCED' &&
-        photo.evidenceDraftId
-      );
-    })
-    .sort(function(a, b){
-      return String(a.createdAt || '')
-        .localeCompare(String(b.createdAt || ''));
-    })
-    .forEach(function(photo){
-      const key =
-        String(photo.evidenceDraftId || '');
-
-      if (!photoGroups.has(key)) {
-        photoGroups.set(key, []);
-      }
-
-      photoGroups.get(key).push(photo);
-    });
-
-  const entries = [];
-  let heldExtra = 0;
-  let orphan = 0;
-
-  drafts.forEach(function(draft){
-    if (
-      !draft ||
-      !draft.evidenceDraftId ||
-      draft.status === 'COMPLETE' ||
-      draft.status === 'SYNCED'
-    ) {
-      return;
-    }
-
-    const photosForDraft =
-      photoGroups.get(
-        String(draft.evidenceDraftId)
-      ) || [];
-
-    if (!photosForDraft.length) {
-      return;
-    }
-
-    if (
-      !draft.projectId ||
-      !draft.projectMaterialId ||
-      !draft.sessionId
-    ) {
-      orphan += photosForDraft.length;
-      return;
-    }
-
-    const required =
-      Math.max(
-        1,
-        Number(
-          draft.requiredPhotoCount ||
-          draft.evidenceRequired ||
-          1
-        )
-      );
-
-    const serverCount =
-      Math.max(
-        0,
-        Number(draft.serverPhotoCount || 0)
-      );
-
-    const remaining =
-      Math.max(
-        0,
-        required - serverCount
-      );
-
-    photosForDraft.forEach(
-      function(photo, index){
-        if (index < remaining) {
-          entries.push({
-            draft: draft,
-            photo: photo
-          });
-        } else {
-          heldExtra++;
-        }
-      }
-    );
-  });
-
-  // Foto yang tidak punya draft lokal.
-  photos.forEach(function(photo){
-    if (
-      photo &&
-      photo.status !== 'SYNCED' &&
-      photo.evidenceDraftId &&
-      !drafts.some(function(draft){
-        return (
-          draft &&
-          draft.evidenceDraftId ===
-            photo.evidenceDraftId
-        );
-      })
-    ) {
-      orphan++;
-    }
-  });
-
-  entries.sort(function(a, b){
-    return String(a.photo.createdAt || '')
-      .localeCompare(String(b.photo.createdAt || ''));
-  });
-
-  return {
-    entries: entries,
-    heldExtra: heldExtra,
-    orphan: orphan,
-    totalLocalUnsynced:
-      photos.filter(function(photo){
-        return photo && photo.status !== 'SYNCED';
-      }).length
-  };
-}
-
-async function refreshAutoSyncQueueUI(){
-  if (
-    !queueSummaryEl ||
-    !autoSyncStatusEl
-  ) {
-    return;
-  }
-
-  const token = ++autoSyncUiToken;
-
-  try {
-    const queue = await buildAutoSyncQueue();
-
-    if (token !== autoSyncUiToken) {
-      return;
-    }
-
-    const enabled = isAutoSyncEnabled();
-
-    autoSyncToggleBtn.textContent =
-      enabled
-        ? 'AUTO SYNC: ON'
-        : 'AUTO SYNC: OFF';
-
-    queueSummaryEl.className =
-      queue.entries.length > 0
-        ? 'result muted'
-        : 'result okbox';
-
-    queueSummaryEl.innerHTML =
-      '<strong>' +
-        (
-          queue.entries.length > 0
-            ? 'OFFLINE QUEUE READY'
-            : '✓ QUEUE KOSONG'
-        ) +
-      '</strong><br>' +
-      '<b>Menunggu sync:</b> ' +
-        escapeHtml(
-          String(queue.entries.length)
-        ) + '<br>' +
-      '<b>Total foto lokal belum SYNCED:</b> ' +
-        escapeHtml(
-          String(queue.totalLocalUnsynced)
-        ) + '<br>' +
-      '<b>Extra/Hold:</b> ' +
-        escapeHtml(
-          String(queue.heldExtra)
-        ) + '<br>' +
-      '<b>Orphan:</b> ' +
-        escapeHtml(
-          String(queue.orphan)
-        ) + '<br>' +
-      '<b>Auto Sync:</b> ' +
-        (enabled ? 'ON' : 'OFF') + '<br>' +
-      '<b>Upload Safe Size:</b> ≤ ' +
-        escapeHtml(
-          formatBytes(
-            PHOTO_UPLOAD_SAFE_BYTES
-          )
-        );
-
-    if (!enabled) {
-      autoSyncStatusEl.textContent = 'OFF';
-      autoSyncStatusEl.className = '';
-    }
-    else if (!navigator.onLine) {
-      autoSyncStatusEl.textContent = 'QUEUE OFFLINE';
-      autoSyncStatusEl.className = 'bad';
-    }
-    else if (queue.entries.length === 0) {
-      autoSyncStatusEl.textContent = 'IDLE';
-      autoSyncStatusEl.className = 'ok';
-    }
-  }
-  catch (error) {
-    queueSummaryEl.className = 'result errbox';
-    queueSummaryEl.textContent =
-      error && error.message
-        ? error.message
-        : 'Queue lokal gagal dibaca.';
-
-    autoSyncStatusEl.textContent = 'QUEUE ERROR';
-    autoSyncStatusEl.className = 'bad';
-  }
-}
-
-async function submitAutoSyncEntry(entry){
-  if (
-    !entry ||
-    !entry.draft ||
-    !entry.photo
-  ) {
-    return false;
-  }
-
-  const draft = entry.draft;
-  let photo = entry.photo;
-
-  autoSyncBusy = true;
-
-  currentEvidenceDraft = draft;
-  currentLocalPhoto = photo;
-
-  autoSyncStatusEl.textContent = 'SENDING';
-  autoSyncStatusEl.className = '';
-  syncServerStatusEl.textContent = 'AUTO SENDING';
-  syncServerStatusEl.className = '';
-
-  queueSummaryEl.className = 'result muted';
-  queueSummaryEl.innerHTML =
-    '<strong>AUTO SYNC BERJALAN</strong><br>' +
-    '<b>Evidence Draft:</b> ' +
-      escapeHtml(draft.evidenceDraftId || '-') +
-      '<br>' +
-    '<b>Photo Local:</b> ' +
-      escapeHtml(photo.photoLocalId || '-') +
-      '<br>' +
-    'Menyiapkan foto...';
-
-  try {
-    photo =
-      await ensurePhotoSyncSafe(
-        photo
-      );
-
-    currentLocalPhoto = photo;
-
-    const base64 =
-      await blobToBase64Payload(
-        photo.blob
-      );
-
-    sessionStorage.setItem(
-      AUTO_SYNC_ACTIVE_KEY,
-      '1'
-    );
-
-    sessionStorage.setItem(
-      AUTO_SYNC_LAST_PHOTO_KEY,
-      photo.photoLocalId || ''
-    );
-
-    submitHiddenPost(
-      {
-        action: 'sync_local_capture',
-        proof: currentServerProof,
-        project_id: draft.projectId,
-        project_material_id:
-          draft.projectMaterialId,
-        session_id: draft.sessionId,
-        evidence_draft_id:
-          draft.evidenceDraftId,
-        photo_local_id:
-          photo.photoLocalId,
-        latitude:
-          photo.latitude,
-        longitude:
-          photo.longitude,
-        gps_accuracy:
-          photo.accuracy,
-        captured_at:
-          photo.capturedAt ||
-          photo.createdAt ||
-          '',
-        file_name:
-          photo.fileName ||
-          'evidence.jpg',
-        mime_type:
-          photo.fileType ||
-          'image/jpeg',
-        base64: base64,
-        auto_sync: '1'
-      },
-      '_self'
-    );
-
-    return true;
-  }
-  catch (error) {
-    autoSyncBusy = false;
-    sessionStorage.removeItem(
-      AUTO_SYNC_ACTIVE_KEY
-    );
-
-    autoSyncStatusEl.textContent = 'FAILED';
-    autoSyncStatusEl.className = 'bad';
-
-    queueSummaryEl.className = 'result errbox';
-    queueSummaryEl.textContent =
-      error && error.message
-        ? error.message
-        : 'Auto Sync gagal menyiapkan foto.';
-
-    return false;
-  }
-}
-
-async function runAutoSyncQueue(reason){
-  if (autoSyncBusy) {
-    return;
-  }
-
-  await refreshAutoSyncQueueUI();
-
-  if (!isAutoSyncEnabled()) {
-    return;
-  }
-
-  if (!navigator.onLine) {
-    autoSyncStatusEl.textContent = 'QUEUE OFFLINE';
-    autoSyncStatusEl.className = 'bad';
-    return;
-  }
-
-  const queue = await buildAutoSyncQueue();
-
-  if (!queue.entries.length) {
-    sessionStorage.removeItem(
-      AUTO_SYNC_ACTIVE_KEY
-    );
-    sessionStorage.removeItem(
-      AUTO_SYNC_LAST_PHOTO_KEY
-    );
-
-    autoSyncStatusEl.textContent = 'QUEUE CLEAR';
-    autoSyncStatusEl.className = 'ok';
-
-    await refreshAutoSyncQueueUI();
-    return;
-  }
-
-  const remainingProof =
-    getProofRemainingSeconds();
-
-  // Jangan mulai putaran baru jika proof tinggal sebentar.
-  // User cukup Verify sekali lagi; queue lokal tetap aman.
-  if (remainingProof < 45) {
-    autoSyncStatusEl.textContent = 'WAIT VERIFY';
-    autoSyncStatusEl.className = 'bad';
-
-    queueSummaryEl.className = 'result muted';
-    queueSummaryEl.innerHTML =
-      '<strong>QUEUE MENUNGGU SESSION</strong><br>' +
-      '<b>Pending:</b> ' +
-        escapeHtml(
-          String(queue.entries.length)
-        ) + ' foto<br>' +
-      'Session proof tidak ada / hampir expired. Login + Verifikasi Server sekali lagi.';
-
-    return;
-  }
-
-  currentServerProof =
-    currentServerProof ||
-    sessionStorage.getItem(PROOF_KEY) ||
-    '';
-
-  const entry =
-    queue.entries[0];
-
-  autoSyncStatusEl.textContent =
-    'SYNC 1 / ' +
-    String(queue.entries.length);
-  autoSyncStatusEl.className = '';
-
-  await submitAutoSyncEntry(entry);
-}
-
-function updateLocalPhotoRecord(photoLocalId, patch){
-  return openPhotoDb().then(function(db){
-    return new Promise(function(resolve, reject){
-      const tx = db.transaction(PHOTO_STORE, 'readwrite');
-      const store = tx.objectStore(PHOTO_STORE);
-      const getReq = store.get(photoLocalId);
-
-      getReq.onsuccess = function(){
-        const current = getReq.result;
-
-        if (!current) {
-          db.close();
-          reject(new Error('Photo Local ID tidak ditemukan.'));
-          return;
-        }
-
-        const updated = Object.assign({}, current, patch || {});
-        store.put(updated);
-
-        tx.oncomplete = function(){
-          db.close();
-          resolve(updated);
-        };
-      };
-
-      getReq.onerror = function(){
-        db.close();
-        reject(getReq.error || new Error('Foto lokal gagal dibaca.'));
-      };
-
-      tx.onerror = function(){
-        db.close();
-        reject(tx.error || new Error('Foto lokal gagal diperbarui.'));
-      };
-    });
-  });
-}
-
-function getLatestPhotoByEvidenceDraftId(evidenceDraftId){
-  return openPhotoDb().then(function(db){
-    return new Promise(function(resolve, reject){
-      const tx = db.transaction(PHOTO_STORE, 'readonly');
-      const store = tx.objectStore(PHOTO_STORE);
-      const index = store.index('evidenceDraftId');
-      const request = index.getAll(evidenceDraftId);
-
-      request.onsuccess = function(){
-        const rows = Array.isArray(request.result)
-          ? request.result
-          : [];
-
-        rows.sort(function(a, b){
-          return String(b.createdAt || '')
-            .localeCompare(String(a.createdAt || ''));
-        });
-
-        db.close();
-        resolve(rows[0] || null);
-      };
-
-      request.onerror = function(){
-        db.close();
-        reject(request.error || new Error('Foto lokal gagal dibaca.'));
-      };
-    });
-  });
-}
-
-
-function getAllPhotosByEvidenceDraftId(evidenceDraftId){
-  return openPhotoDb().then(function(db){
-    return new Promise(function(resolve, reject){
-      const tx = db.transaction(PHOTO_STORE, 'readonly');
-      const store = tx.objectStore(PHOTO_STORE);
-      const index = store.index('evidenceDraftId');
-      const request = index.getAll(evidenceDraftId);
-
-      request.onsuccess = function(){
-        const rows = Array.isArray(request.result)
-          ? request.result
-          : [];
-
-        rows.sort(function(a, b){
-          return String(a.createdAt || '')
-            .localeCompare(String(b.createdAt || ''));
-        });
-
-        db.close();
-        resolve(rows);
-      };
-
-      request.onerror = function(){
-        db.close();
-        reject(
-          request.error ||
-          new Error('Daftar foto lokal gagal dibaca.')
-        );
-      };
-    });
-  });
-}
-
-function getRequiredPhotoCount(){
-  if (!currentEvidenceDraft) return 1;
-
-  return Math.max(
-    1,
-    Math.floor(
-      Number(
-        currentEvidenceDraft.requiredPhotoCount ||
-        currentEvidenceDraft.evidenceRequired ||
-        1
-      )
-    )
-  );
-}
-
-function getUnsyncedLocalPhotos(){
-  return currentLocalPhotos.filter(function(item){
-    return item && item.status !== 'SYNCED';
-  });
-}
-
-function getSyncedLocalPhotos(){
-  return currentLocalPhotos.filter(function(item){
-    return item && item.status === 'SYNCED';
-  });
-}
-
-function makeLocalPhotoId(){
-  const stamp = Date.now().toString(36).toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return 'PHOTO-LOCAL-' + stamp + '-' + rand;
-}
-
-
-function saveDevLastGps(gps){
-  if (
-    PEMS_DEVICE_MODE !== 'DEV' ||
-    !gps ||
-    !Number.isFinite(Number(gps.latitude)) ||
-    !Number.isFinite(Number(gps.longitude))
-  ) {
-    return;
-  }
-
-  localStorage.setItem(
-    DEV_LAST_GPS_KEY,
-    JSON.stringify({
-      latitude: Number(gps.latitude),
-      longitude: Number(gps.longitude),
-      accuracy: Number(gps.accuracy || 0),
-      capturedAt:
-        gps.capturedAt ||
-        new Date().toISOString(),
-      cachedAt:
-        new Date().toISOString(),
-      source:
-        gps.source || 'LIVE_GPS'
-    })
-  );
-}
-
-function readDevLastGps(){
-  if (PEMS_DEVICE_MODE !== 'DEV') {
-    return null;
-  }
-
-  try {
-    const raw =
-      JSON.parse(
-        localStorage.getItem(
-          DEV_LAST_GPS_KEY
-        ) || 'null'
-      );
-
-    if (
-      raw &&
-      Number.isFinite(Number(raw.latitude)) &&
-      Number.isFinite(Number(raw.longitude))
-    ) {
-      return raw;
-    }
-  } catch (e) {}
-
-  return null;
-}
-
-async function findLatestGpsFromLocalPhotos(){
-  if (PEMS_DEVICE_MODE !== 'DEV') {
-    return null;
-  }
-
-  try {
-    const photos =
-      await getAllLocalPhotos();
-
-    const candidates =
-      photos
-        .filter(function(item){
-          return (
-            item &&
-            Number.isFinite(Number(item.latitude)) &&
-            Number.isFinite(Number(item.longitude))
-          );
-        })
-        .sort(function(a, b){
-          return String(
-            b.capturedAt ||
-            b.createdAt ||
-            ''
-          ).localeCompare(
-            String(
-              a.capturedAt ||
-              a.createdAt ||
-              ''
-            )
-          );
-        });
-
-    if (!candidates.length) {
-      return null;
-    }
-
-    const latest =
-      candidates[0];
-
-    return {
-      latitude:
-        Number(latest.latitude),
-      longitude:
-        Number(latest.longitude),
-      accuracy:
-        Number(latest.accuracy || 0),
-      capturedAt:
-        latest.capturedAt ||
-        latest.createdAt ||
-        '',
-      cachedAt:
-        new Date().toISOString(),
-      source:
-        'LOCAL_PHOTO_HISTORY'
-    };
-  }
-  catch (e) {
-    return null;
-  }
-}
-
-async function getDevGpsFallback(reason){
-  if (
-    PEMS_DEVICE_MODE !== 'DEV' ||
-    navigator.onLine
-  ) {
-    return null;
-  }
-
-  let cached =
-    readDevLastGps();
-
-  if (!cached) {
-    cached =
-      await findLatestGpsFromLocalPhotos();
-
-    if (cached) {
-      saveDevLastGps(cached);
-    }
-  }
-
-  if (!cached) {
-    return null;
-  }
-
-  return {
-    latitude:
-      Number(cached.latitude),
-    longitude:
-      Number(cached.longitude),
-
-    // Sengaja dibikin sangat buruk agar tidak pernah
-    // dianggap GPS valid lapangan.
-    accuracy:
-      Math.max(
-        DEV_FALLBACK_ACCURACY_M,
-        Number(cached.accuracy || 0)
-      ),
-
-    capturedAt:
-      new Date().toISOString(),
-
-    gpsSource:
-      'DEV_CACHED_GPS',
-
-    cachedGpsAt:
-      cached.capturedAt ||
-      cached.cachedAt ||
-      '',
-
-    fallbackReason:
-      reason || 'OFFLINE_GPS_UNAVAILABLE'
-  };
-}
-
-async function getGpsPosition(){
-  if (!navigator.geolocation) {
-    const fallback =
-      await getDevGpsFallback(
-        'GEOLOCATION_NOT_SUPPORTED'
-      );
-
-    if (fallback) {
-      return fallback;
-    }
-
-    throw new Error(
-      'Browser tidak mendukung GPS/geolocation.'
-    );
-  }
-
-  try {
-    const gps =
-      await new Promise(function(resolve, reject){
-        navigator.geolocation.getCurrentPosition(
-          function(position){
-            resolve({
-              latitude:
-                position.coords.latitude,
-              longitude:
-                position.coords.longitude,
-              accuracy:
-                position.coords.accuracy,
-              capturedAt:
-                new Date().toISOString(),
-              gpsSource:
-                'LIVE_GPS'
-            });
-          },
-          function(error){
-            let message =
-              'GPS gagal diperoleh.';
-
-            if (error && error.code === 1) {
-              message =
-                'Izin lokasi ditolak.';
-            }
-            else if (
-              error &&
-              error.code === 2
-            ) {
-              message =
-                'Lokasi tidak tersedia.';
-            }
-            else if (
-              error &&
-              error.code === 3
-            ) {
-              message =
-                'Permintaan GPS timeout.';
-            }
-
-            const err =
-              new Error(message);
-
-            err.gpsCode =
-              error && error.code
-                ? error.code
-                : 0;
-
-            reject(err);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 12000,
-            maximumAge: 0
-          }
-        );
-      });
-
-    saveDevLastGps(gps);
-    return gps;
-  }
-  catch (error) {
-    // DEV/LAPTOP only:
-    // saat offline dan browser gagal memperoleh lokasi,
-    // gunakan posisi terakhir sebagai placeholder test.
-    const fallback =
-      await getDevGpsFallback(
-        error && error.message
-          ? error.message
-          : 'GPS_FAILED'
-      );
-
-    if (fallback) {
-      return fallback;
-    }
-
-    throw error;
-  }
-}
-
-
-function classifyGpsAccuracy(accuracy){
-  const value = Number(accuracy);
-
-  if (!Number.isFinite(value)) {
-    return {
-      code: 'UNKNOWN',
-      label: 'UNKNOWN',
-      syncAllowed: false
-    };
-  }
-
-  if (value <= 20) {
-    return {
-      code: 'GOOD',
-      label: 'GOOD',
-      syncAllowed: true
-    };
-  }
-
-  if (value <= 50) {
-    return {
-      code: 'WARNING',
-      label: 'WARNING',
-      syncAllowed: true
-    };
-  }
-
-  return {
-    code: 'RETRY',
-    label: 'RETRY GPS',
-    syncAllowed: false
-  };
-}
-
-function renderGpsQuality(record){
-  if (!record) {
-    gpsQualityStatusEl.textContent = 'BELUM ADA';
-    gpsQualityStatusEl.className = '';
-    retryGpsBtn.hidden = true;
-    return;
-  }
-
-  const quality = classifyGpsAccuracy(record.accuracy);
-
-  gpsQualityStatusEl.textContent = quality.label;
-  gpsQualityStatusEl.className =
-    quality.code === 'RETRY' ? 'bad' : 'ok';
-
-  retryGpsBtn.hidden = quality.code !== 'RETRY';
-}
-
-async function retryGpsForCurrentPhoto(){
-  if (!currentLocalPhoto) {
-    alert('Belum ada foto lokal.');
-    return;
-  }
-
-  gpsQualityStatusEl.textContent = 'CHECKING';
-  gpsQualityStatusEl.className = '';
-  retryGpsBtn.disabled = true;
-
-  try {
-    const gps = await getGpsPosition();
-
-    const updated = Object.assign({}, currentLocalPhoto, {
-      latitude: gps.latitude,
-      longitude: gps.longitude,
-      accuracy: gps.accuracy,
-      capturedAt: gps.capturedAt,
-      gpsSource:
-        gps.gpsSource || 'LIVE_GPS',
-      cachedGpsAt:
-        gps.cachedGpsAt || '',
-      gpsFallbackReason:
-        gps.fallbackReason || '',
-      gpsRetriedAt:
-        new Date().toISOString()
-    });
-
-    await putLocalPhoto(updated);
-
-    currentLocalPhotos =
-      currentLocalPhotos.map(function(item){
-        return item.photoLocalId === updated.photoLocalId
-          ? updated
-          : item;
-      });
-
-    renderLocalPhoto(updated);
-  } catch (error) {
-    gpsQualityStatusEl.textContent = 'RETRY FAILED';
-    gpsQualityStatusEl.className = 'bad';
-    photoResultEl.className = 'result errbox';
-    photoResultEl.textContent =
-      error && error.message
-        ? error.message
-        : 'Retry GPS gagal.';
-  } finally {
-    retryGpsBtn.disabled = false;
-  }
-}
-
-function formatBytes(bytes){
-  const n = Number(bytes || 0);
-
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  return (n / (1024 * 1024)).toFixed(2) + ' MB';
-}
-
-function renderLocalPhoto(record){
-  currentLocalPhoto = record || null;
-
-  if (!record) {
-    photoLocalStatusEl.textContent =
-      currentLocalPhotos.length > 0 ? 'READY' : 'BELUM ADA';
-    photoLocalStatusEl.className =
-      currentLocalPhotos.length > 0 ? 'ok' : '';
-
-    photoResultEl.className = 'result muted';
-    photoResultEl.textContent = 'Belum ada foto aktif.';
-    photoPreviewWrap.hidden = true;
-    photoPreview.removeAttribute('src');
-    renderGpsQuality(null);
-    refreshPhotoGallery();
-    refreshSyncGate();
-    return;
-  }
-
-  const unsyncedCount = getUnsyncedLocalPhotos().length;
-
-  photoLocalStatusEl.textContent =
-    unsyncedCount > 0
-      ? 'READY'
-      : (
-          currentEvidenceDraft &&
-          currentEvidenceDraft.status === 'COMPLETE'
-            ? 'COMPLETE'
-            : 'SYNCED'
-        );
-  photoLocalStatusEl.className = 'ok';
-
-  const gpsQuality = classifyGpsAccuracy(record.accuracy);
-  renderGpsQuality(record);
-
-  photoResultEl.className =
-    gpsQuality.code === 'RETRY' &&
-    record.status !== 'SYNCED'
-      ? 'result errbox'
-      : 'result okbox';
-
-  photoResultEl.innerHTML =
-    '<strong>✓ FOTO AKTIF</strong><br>' +
-    '<b>Photo Local ID:</b> ' +
-      escapeHtml(record.photoLocalId || '-') + '<br>' +
-    '<b>File:</b> ' +
-      escapeHtml(record.fileName || '-') + '<br>' +
-    '<b>Size:</b> ' +
-      escapeHtml(formatBytes(record.fileSize || 0)) + '<br>' +
-    (
-      record.originalFileSize &&
-      Number(record.originalFileSize) !==
-        Number(record.fileSize || 0)
-        ? (
-            '<b>Original Size:</b> ' +
-            escapeHtml(
-              formatBytes(
-                record.originalFileSize
-              )
-            ) +
-            '<br><b>Photo Optimize:</b> YES<br>'
-          )
-        : ''
-    ) +
-    '<b>GPS Accuracy:</b> ' +
-      escapeHtml(String(record.accuracy ?? '-')) + ' m<br>' +
-    '<b>GPS Quality:</b> ' +
-      escapeHtml(gpsQuality.label) + '<br>' +
-    '<b>GPS Source:</b> ' +
-      escapeHtml(record.gpsSource || 'LIVE_GPS') + '<br>' +
-    (
-      record.gpsSource === 'DEV_CACHED_GPS'
-        ? (
-            '<b>DEV Warning:</b> Cached GPS hanya untuk test laptop; bukan koordinat capture aktual.<br>'
-          )
-        : ''
-    ) +
-    '<b>Status:</b> ' +
-      escapeHtml(record.status || 'PHOTO_LOCAL_READY') +
-    (
-      record.status === 'SYNCED'
-        ? (
-            '<br><b>Photo ID Server:</b> ' +
-            escapeHtml(record.photoId || '-') +
-            '<br><small>Foto ini sudah tersinkron ke server.</small>'
-          )
-        : '<br><small>Foto ini masih lokal dan siap disinkronkan.</small>'
-    );
-
-  if (record.blob) {
-    const objectUrl = URL.createObjectURL(record.blob);
-    photoPreview.src = objectUrl;
-    photoPreviewWrap.hidden = false;
-  } else {
-    photoPreviewWrap.hidden = true;
-  }
-
-  refreshPhotoGallery();
-  refreshSyncGate();
-}
-
-function restoreLocalPhoto(){
-  if (
-    !currentEvidenceDraft ||
-    !currentEvidenceDraft.evidenceDraftId
-  ) {
-    currentLocalPhotos = [];
-    renderLocalPhoto(null);
-    return;
-  }
-
-  getAllPhotosByEvidenceDraftId(
-    currentEvidenceDraft.evidenceDraftId
-  )
-    .then(function(rows){
-      currentLocalPhotos = rows;
-
-      const firstUnsynced =
-        rows.find(function(item){
-          return item.status !== 'SYNCED';
-        });
-
-      const active =
-        firstUnsynced ||
-        rows[rows.length - 1] ||
-        null;
-
-      renderLocalPhoto(active);
-    })
-    .catch(function(){
-      currentLocalPhotos = [];
-      renderLocalPhoto(null);
-    });
-}
-
-
-function refreshPhotoGallery(){
-  if (!photoCountSummaryEl || !photoListEl) return;
-
-  const required = getRequiredPhotoCount();
-  const localCount = currentLocalPhotos.length;
-  const syncedLocalCount = getSyncedLocalPhotos().length;
-
-  const serverCount =
-    currentEvidenceDraft
-      ? Number(currentEvidenceDraft.serverPhotoCount || 0)
-      : 0;
-
-  const effectiveServerCount =
-    Math.max(serverCount, syncedLocalCount);
-
-  const complete =
-    !!currentEvidenceDraft &&
-    currentEvidenceDraft.status === 'COMPLETE';
-
-  photoCountSummaryEl.className =
-    complete ? 'result okbox' : 'result muted';
-
-  photoCountSummaryEl.innerHTML =
-    '<strong>' +
-      (complete
-        ? '✓ EVIDENCE PHOTO COMPLETE'
-        : 'EVIDENCE PHOTO PROGRESS') +
-    '</strong><br>' +
-    '<b>Target:</b> ' + escapeHtml(String(required)) + ' foto<br>' +
-    '<b>Foto lokal:</b> ' + escapeHtml(String(localCount)) + '<br>' +
-    '<b>Foto server:</b> ' +
-      escapeHtml(String(effectiveServerCount)) + ' / ' +
-      escapeHtml(String(required)) + '<br>' +
-    '<b>Status:</b> ' +
-      (complete ? 'COMPLETE' : 'BELUM LENGKAP');
-
-  photoListEl.innerHTML = '';
-
-  currentLocalPhotos.forEach(function(item, index){
-    const card = document.createElement('div');
-
-    const active =
-      currentLocalPhoto &&
-      currentLocalPhoto.photoLocalId === item.photoLocalId;
-
-    card.className =
-      'photo-mini-card' + (active ? ' active' : '');
-
-    let preview = '<div></div>';
-
-    if (item.blob) {
-      const objectUrl = URL.createObjectURL(item.blob);
-      preview =
-        '<img src="' + objectUrl + '" alt="Foto ' +
-        escapeHtml(String(index + 1)) + '">';
-    }
-
-    card.innerHTML =
-      preview +
-      '<div class="photo-mini-meta">' +
-        '<b>Foto ' + escapeHtml(String(index + 1)) + '</b><br>' +
-        escapeHtml(item.fileName || '-') + '<br>' +
-        'GPS ' + escapeHtml(String(item.accuracy ?? '-')) + ' m<br>' +
-        escapeHtml(item.gpsSource || 'LIVE_GPS') + '<br>' +
-        '<span class="photo-mini-status">' +
-          escapeHtml(item.status || 'PHOTO_LOCAL_READY') +
-        '</span>' +
-      '</div>' +
-      '<button class="point-btn photo-open-btn" type="button">LIHAT</button>';
-
-    card
-      .querySelector('.photo-open-btn')
-      .addEventListener('click', function(){
-        renderLocalPhoto(item);
-      });
-
-    photoListEl.appendChild(card);
-  });
-
-  choosePhotoBtn.disabled =
-    !currentEvidenceDraft || complete;
-}
-
-function loadEvidenceDrafts(){
-  try {
-    const drafts = JSON.parse(
-      localStorage.getItem(EVIDENCE_DRAFTS_KEY) || '[]'
-    );
-    return Array.isArray(drafts) ? drafts : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function saveEvidenceDrafts(drafts){
-  localStorage.setItem(
-    EVIDENCE_DRAFTS_KEY,
-    JSON.stringify(Array.isArray(drafts) ? drafts : [])
-  );
-}
-
-function makeLocalEvidenceDraftId(){
-  const stamp = Date.now().toString(36).toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return 'EVI-LOCAL-' + stamp + '-' + rand;
-}
-
-function createOrReuseEvidenceDraft(material){
-  const projectId = getSelectedProjectId();
-
-  if (!projectId || !material || !material.projectMaterialId) {
-    alert('Project / material belum valid.');
-    return;
-  }
-
-  const drafts = loadEvidenceDrafts();
-
-  let draft = drafts.find(function(item){
-    return (
-      item &&
-      item.projectId === projectId &&
-      item.projectMaterialId === material.projectMaterialId &&
-      item.status === 'DRAFT_LOCAL'
-    );
-  });
-
-  if (!draft) {
-    draft = {
-      evidenceDraftId: makeLocalEvidenceDraftId(),
-      projectId: projectId,
-      projectMaterialId: material.projectMaterialId,
-      materialId: material.materialId || '',
-      designator: material.designator || '',
-      materialName: material.materialName || '',
-      category: material.category || '',
-      qtyPlan:
-        material.qtyPlan === null || material.qtyPlan === undefined
-          ? ''
-          : material.qtyPlan,
-      unit: material.unit || '',
-      status: 'DRAFT_LOCAL',
-      createdAt: new Date().toISOString()
-    };
-
-    drafts.push(draft);
-    saveEvidenceDrafts(drafts);
-  }
-
-  currentEvidenceDraft = draft;
-  renderEvidenceDraft();
-  renderMaterials(projectId);
-}
-
-function renderEvidenceDraft(){
-  if (!currentEvidenceDraft) {
-    evidenceDraftStatusEl.textContent = 'BELUM ADA';
-    evidenceDraftStatusEl.className = '';
-    evidenceDraftPanel.hidden = true;
-    choosePhotoBtn.disabled = true;
-    currentLocalPhotos = [];
-    renderLocalPhoto(null);
-    return;
-  }
-
-  const status =
-    String(currentEvidenceDraft.status || 'DRAFT_LOCAL');
-
-  let label = 'DRAFT LOCAL';
-
-  if (status === 'PARTIAL_SYNC') {
-    label = 'PARTIAL';
-  } else if (status === 'COMPLETE') {
-    label = 'COMPLETE';
-  } else if (status === 'SYNCED') {
-    label = 'SYNCED';
-  }
-
-  evidenceDraftStatusEl.textContent = label;
-  evidenceDraftStatusEl.className = 'ok';
-  evidenceDraftPanel.hidden = false;
-
-  const required =
-    Math.max(
-      1,
-      Number(
-        currentEvidenceDraft.requiredPhotoCount ||
-        currentEvidenceDraft.evidenceRequired ||
-        1
-      )
-    );
-
-  evidenceDraftResultEl.innerHTML =
-    '<strong>✓ EVIDENCE DRAFT</strong><br>' +
-    '<b>Evidence Draft ID:</b> ' +
-      escapeHtml(currentEvidenceDraft.evidenceDraftId || '-') + '<br>' +
-    '<b>Project:</b> ' +
-      escapeHtml(currentEvidenceDraft.projectId || '-') + '<br>' +
-    '<b>Project Material ID:</b> ' +
-      escapeHtml(currentEvidenceDraft.projectMaterialId || '-') + '<br>' +
-    '<b>Designator:</b> ' +
-      escapeHtml(currentEvidenceDraft.designator || '-') + '<br>' +
-    '<b>Requirement:</b> ' +
-      escapeHtml(currentEvidenceDraft.requirementCode || '-') + '<br>' +
-    '<b>Evidence Required:</b> ' +
-      escapeHtml(String(required)) + ' foto<br>' +
-    '<b>Point Session ID:</b> ' +
-      escapeHtml(currentEvidenceDraft.sessionId || '-') + '<br>' +
-    '<b>Status:</b> ' +
-      escapeHtml(status) +
-    (
-      currentEvidenceDraft.evidenceItemId
-        ? (
-            '<br><b>Evidence Item ID:</b> ' +
-            escapeHtml(currentEvidenceDraft.evidenceItemId)
-          )
-        : ''
-    ) +
-    (
-      currentEvidenceDraft.serverPhotoCount !== undefined
-        ? (
-            '<br><b>Server Photo:</b> ' +
-            escapeHtml(
-              String(currentEvidenceDraft.serverPhotoCount || 0)
-            ) +
-            ' / ' +
-            escapeHtml(String(required))
-          )
-        : ''
-    );
-
-  choosePhotoBtn.disabled = status === 'COMPLETE';
-
-  restoreLocalPhoto();
-  refreshSyncGate();
-}
-
-function restoreEvidenceDraft(){
-  const projectId = getSelectedProjectId();
-  if (!projectId) return;
-
-  const drafts = loadEvidenceDrafts();
-
-  const draft = drafts
-    .filter(function(item){
-      return (
-        item &&
-        item.projectId === projectId
-      );
-    })
-    .sort(function(a, b){
-      const aTime = String(a.syncedAt || a.createdAt || '');
-      const bTime = String(b.syncedAt || b.createdAt || '');
-      return bTime.localeCompare(aTime);
-    })[0];
-
-  if (draft) {
-    currentEvidenceDraft = draft;
-    renderEvidenceDraft();
-  }
-}
-
-function acceptMaterialBundle(bundle){
-  const payload = readSignedPayload(bundle);
-  const nowSec = Math.floor(Date.now() / 1000);
-  const selectedProjectId = getSelectedProjectId();
-
-  const validShape =
-    payload &&
-    payload.v === 'V14C-B2A-STEP6B' &&
-    payload.kind === 'PROJECT_MATERIAL_LIST' &&
-    typeof payload.projectId === 'string' &&
-    payload.projectId === selectedProjectId &&
-    Array.isArray(payload.materials) &&
-    Number(payload.exp || 0) > nowSec;
-
-  if (!validShape) {
-    materialStatusEl.textContent = 'INVALID';
-    materialStatusEl.className = 'bad';
-    materialsPanel.hidden = true;
-    return false;
-  }
-
-  currentMaterials = payload.materials;
-
-  // Step 6C: material disimpan persistently agar tersedia saat offline.
-  localStorage.setItem(
-    MATERIALS_KEY,
-    JSON.stringify({
-      projectId: payload.projectId,
-      materials: currentMaterials,
-      cachedAt: Date.now()
-    })
-  );
-
-  materialStatusEl.textContent = 'CACHED';
-  materialStatusEl.className = 'ok';
-
-  renderMaterials(payload.projectId);
-  return true;
-}
-
-function renderMaterials(projectId){
-  materialsPanel.hidden = false;
-  materialListEl.innerHTML = '';
-
-  materialSummaryEl.innerHTML =
-    '<strong>✓ ' +
-      (navigator.onLine ? 'MATERIAL DATA READY' : 'MATERIAL CACHE READY') +
-    '</strong><br>' +
-    'Project: ' + escapeHtml(projectId || '-') + '<br>' +
-    'Total material project: ' + escapeHtml(String(currentMaterials.length)) + '<br>' +
-    '<small>Cache ini hanya referensi. Mulai STEP 9C, pemilihan material evidence dilakukan dari Requirement Material Titik.</small>';
-
-  currentMaterials.forEach(function(item, index){
-    const card = document.createElement('div');
-
-    card.className = 'material-card';
-
-    card.innerHTML =
-      '<div class="material-title">' +
-        escapeHtml(String(index + 1)) + '. ' +
-        escapeHtml(item.designator || '-') +
-      '</div>' +
-      '<div class="material-meta">' +
-        '<b>Material:</b> ' + escapeHtml(item.materialName || '-') + '<br>' +
-        '<b>Category:</b> ' + escapeHtml(item.category || '-') + '<br>' +
-        '<b>Qty Plan:</b> ' +
-          escapeHtml(
-            String(
-              item.qtyPlan === null || item.qtyPlan === undefined
-                ? ''
-                : item.qtyPlan
-            )
-          ) +
-          ' ' + escapeHtml(item.unit || '') + '<br>' +
-        '<b>Project Material ID:</b> ' +
-          escapeHtml(item.projectMaterialId || '-') +
-      '</div>';
-
-    materialListEl.appendChild(card);
-  });
-}
-function restoreMaterialCache(){
-  try {
-    const stored = JSON.parse(
-      localStorage.getItem(MATERIALS_KEY) || 'null'
-    );
-
-    if (
-      stored &&
-      stored.projectId === getSelectedProjectId() &&
-      Array.isArray(stored.materials)
-    ) {
-      currentMaterials = stored.materials;
-      materialStatusEl.textContent =
-        navigator.onLine ? 'CACHED' : 'CACHED OFFLINE';
-      materialStatusEl.className = 'ok';
-      renderMaterials(stored.projectId);
-    }
-  } catch (e) {}
-}
-
-
-function updateEvidenceDraftPointSession(pointSession){
-  if (
-    !currentEvidenceDraft ||
-    !pointSession ||
-    currentEvidenceDraft.status !== 'DRAFT_LOCAL'
-  ) {
-    return;
-  }
-
-  const drafts = loadEvidenceDrafts();
-  const index = drafts.findIndex(function(item){
-    return (
-      item &&
-      item.evidenceDraftId === currentEvidenceDraft.evidenceDraftId
-    );
-  });
-
-  currentEvidenceDraft = Object.assign(
-    {},
-    currentEvidenceDraft,
-    {
-      sessionId: pointSession.sessionId || '',
-      anchorPointId: pointSession.anchorPointId || '',
-      anchorLabel: pointSession.anchorLabel || '',
-      anchorRole: pointSession.anchorRole || '',
-      latPlan: pointSession.latPlan ?? '',
-      longPlan: pointSession.longPlan ?? '',
-      pointVerifyStatus: pointSession.verifyStatus || 'DRAFT',
-      pointSessionSelectedAt: new Date().toISOString()
-    }
-  );
-
-  if (index >= 0) {
-    drafts[index] = currentEvidenceDraft;
-    saveEvidenceDrafts(drafts);
-  }
-
-  renderEvidenceDraft();
-}
-
-
-function clearRequirementView(){
-  currentRequirements = [];
-  pointRequirementStatusEl.textContent = 'BELUM ADA';
-  pointRequirementStatusEl.className = '';
-  requirementsPanel.hidden = true;
-  requirementListEl.innerHTML = '';
-}
-
-function createDraftFromRequirement(requirement){
-  const projectId = getSelectedProjectId();
-  const sessionId = getSelectedPointSessionId();
-  const pointSession = getSelectedPointSession();
-
-  if (
-    !projectId ||
-    !sessionId ||
-    !pointSession ||
-    !requirement ||
-    !requirement.projectMaterialId ||
-    requirement.canSelect === false
-  ) {
-    alert('Requirement / Point Session belum valid.');
-    return;
-  }
-
-  const drafts = loadEvidenceDrafts();
-
-  let draft = drafts.find(function(item){
-    return (
-      item &&
-      item.projectId === projectId &&
-      item.projectMaterialId === requirement.projectMaterialId &&
-      item.sessionId === sessionId &&
-      (
-        item.status === 'DRAFT_LOCAL' ||
-        item.status === 'PARTIAL_SYNC' ||
-        item.status === 'COMPLETE' ||
-        item.status === 'SYNCED'
-      )
-    );
-  });
-
-  if (!draft) {
-    draft = {
-      evidenceDraftId: makeLocalEvidenceDraftId(),
-      projectId: projectId,
-      projectMaterialId: requirement.projectMaterialId,
-      materialId: requirement.materialId || '',
-      designator: requirement.designator || '',
-      materialName: requirement.materialName || '',
-      category: requirement.category || '',
-      qtyPlan:
-        requirement.qtyPlan === null ||
-        requirement.qtyPlan === undefined
-          ? ''
-          : requirement.qtyPlan,
-      unit: requirement.unit || '',
-      requirementId: requirement.requirementId || '',
-      requirementCode: requirement.requirementCode || 'MATERIAL',
-      evidenceRequired:
-        Math.max(1, Number(requirement.evidenceRequired || 1)),
-      requiredPhotoCount:
-        Math.max(1, Number(requirement.evidenceRequired || 1)),
-      required: requirement.required === true,
-      sessionId: sessionId,
-      anchorPointId: pointSession.anchorPointId || '',
-      anchorLabel: pointSession.anchorLabel || '',
-      anchorRole: pointSession.anchorRole || '',
-      latPlan: pointSession.latPlan ?? '',
-      longPlan: pointSession.longPlan ?? '',
-      pointVerifyStatus: pointSession.verifyStatus || 'DRAFT',
-      pointSessionSelectedAt: new Date().toISOString(),
-      status: 'DRAFT_LOCAL',
-      createdAt: new Date().toISOString()
-    };
-
-    drafts.push(draft);
-    saveEvidenceDrafts(drafts);
-  }
-
-  currentEvidenceDraft = draft;
-  currentLocalPhoto = null;
-  currentLocalPhotos = [];
-
-  renderEvidenceDraft();
-  renderRequirements();
-  refreshSyncGate();
-}
-
-function acceptRequirementBundle(bundle){
-  const payload = readSignedPayload(bundle);
-  const nowSec = Math.floor(Date.now() / 1000);
-  const projectId = getSelectedProjectId();
-  const sessionId = getSelectedPointSessionId();
-
-  const validShape =
-    payload &&
-    payload.v === 'V14C-B2A-STEP9A' &&
-    payload.kind === 'POINT_REQUIREMENT_LIST' &&
-    payload.projectId === projectId &&
-    payload.sessionId === sessionId &&
-    Array.isArray(payload.requirements) &&
-    Number(payload.exp || 0) > nowSec;
-
-  if (!validShape) {
-    pointRequirementStatusEl.textContent = 'INVALID';
-    pointRequirementStatusEl.className = 'bad';
-    requirementsPanel.hidden = true;
-    return false;
-  }
-
-  currentRequirements = payload.requirements;
-
-  localStorage.setItem(
-    POINT_REQUIREMENTS_KEY,
-    JSON.stringify({
-      projectId: payload.projectId,
-      sessionId: payload.sessionId,
-      anchorPointId: payload.anchorPointId || '',
-      anchorLabel: payload.anchorLabel || '',
-      anchorRole: payload.anchorRole || '',
-      totalRequirements: Number(payload.totalRequirements || 0),
-      requiredCount: Number(payload.requiredCount || 0),
-      optionalCount: Number(payload.optionalCount || 0),
-      requirements: currentRequirements,
-      cachedAt: Date.now()
-    })
-  );
-
-  pointRequirementStatusEl.textContent = 'LOADED';
-  pointRequirementStatusEl.className = 'ok';
-
-  renderRequirements({
-    projectId: payload.projectId,
-    sessionId: payload.sessionId,
-    anchorLabel: payload.anchorLabel || '',
-    totalRequirements: Number(payload.totalRequirements || 0),
-    requiredCount: Number(payload.requiredCount || 0),
-    optionalCount: Number(payload.optionalCount || 0)
-  });
-
-  return true;
-}
-
-function renderRequirements(meta){
-  const projectId = getSelectedProjectId();
-  const sessionId = getSelectedPointSessionId();
-
-  if (!projectId || !sessionId) {
-    requirementsPanel.hidden = true;
-    return;
-  }
-
-  let stored = null;
-
-  if (!meta) {
-    try {
-      const raw = JSON.parse(
-        localStorage.getItem(POINT_REQUIREMENTS_KEY) || 'null'
-      );
-
-      if (
-        raw &&
-        raw.projectId === projectId &&
-        raw.sessionId === sessionId
-      ) {
-        stored = raw;
-      }
-    } catch (e) {}
-  }
-
-  const info = meta || stored || {
-    projectId: projectId,
-    sessionId: sessionId,
-    totalRequirements: currentRequirements.length,
-    requiredCount: currentRequirements.filter(function(item){
-      return item.required === true;
-    }).length,
-    optionalCount: currentRequirements.filter(function(item){
-      return item.required !== true;
-    }).length
-  };
-
-  requirementsPanel.hidden = false;
-  requirementListEl.innerHTML = '';
-
-  requirementSummaryEl.innerHTML =
-    '<strong>✓ POINT REQUIREMENT DATA LOADED</strong><br>' +
-    '<b>Project:</b> ' + escapeHtml(projectId) + '<br>' +
-    '<b>Point Session:</b> ' + escapeHtml(sessionId) + '<br>' +
-    '<b>Anchor:</b> ' + escapeHtml(info.anchorLabel || '-') + '<br>' +
-    '<b>Total:</b> ' + escapeHtml(String(currentRequirements.length)) + '<br>' +
-    '<b>Required:</b> ' + escapeHtml(String(info.requiredCount || 0)) + '<br>' +
-    '<b>Optional:</b> ' + escapeHtml(String(info.optionalCount || 0));
-
-  if (!currentRequirements.length) {
-    requirementListEl.innerHTML =
-      '<div class="result errbox">Tidak ada material requirement aktif untuk Point Session ini.</div>';
-    return;
-  }
-
-  const allDrafts = loadEvidenceDrafts();
-
-  currentRequirements.forEach(function(item, index){
-    const card = document.createElement('div');
-
-    const matchingDrafts =
-      allDrafts
-        .filter(function(draft){
-          return (
-            draft &&
-            draft.projectId === projectId &&
-            draft.sessionId === sessionId &&
-            draft.projectMaterialId === item.projectMaterialId
-          );
-        })
-        .sort(function(a, b){
-          const aTime =
-            String(a.syncedAt || a.createdAt || '');
-          const bTime =
-            String(b.syncedAt || b.createdAt || '');
-
-          return bTime.localeCompare(aTime);
-        });
-
-    const requirementDraft =
-      matchingDrafts[0] || null;
-
-    const complete =
-      !!requirementDraft &&
-      (
-        requirementDraft.status === 'COMPLETE' ||
-        requirementDraft.status === 'SYNCED'
-      );
-
-    const partial =
-      !!requirementDraft &&
-      requirementDraft.status === 'PARTIAL_SYNC';
-
-    const selected =
-      currentEvidenceDraft &&
-      currentEvidenceDraft.sessionId === sessionId &&
-      currentEvidenceDraft.projectMaterialId === item.projectMaterialId;
-
-    card.className =
-      'requirement-card ' +
-      (item.required === true ? 'required' : 'optional') +
-      (selected ? ' selected' : '');
-
-    const requiredText =
-      item.required === true ? 'WAJIB' : 'OPTIONAL';
-
-    const buttonDisabled =
-      item.canSelect === false ||
-      !item.projectMaterialId;
-
-    let progressHtml = '';
-
-    if (requirementDraft) {
-      const requiredCount =
-        Math.max(
-          1,
-          Number(
-            requirementDraft.requiredPhotoCount ||
-            requirementDraft.evidenceRequired ||
-            item.evidenceRequired ||
-            1
-          )
-        );
-
-      const serverCount =
-        Number(
-          requirementDraft.serverPhotoCount ||
-          (
-            complete
-              ? requiredCount
-              : 0
-          )
-        );
-
-      progressHtml =
-        '<br><b>Evidence Progress:</b> ' +
-        escapeHtml(String(serverCount)) +
-        ' / ' +
-        escapeHtml(String(requiredCount)) +
-        (
-          requirementDraft.evidenceItemId
-            ? (
-                '<br><b>Evidence Item ID:</b> ' +
-                escapeHtml(requirementDraft.evidenceItemId)
-              )
-            : ''
-        );
-    }
-
-    let buttonText =
-      'PILIH MATERIAL EVIDENCE';
-
-    if (complete) {
-      buttonText = 'EVIDENCE COMPLETE';
-    }
-    else if (selected) {
-      buttonText = partial
-        ? 'EVIDENCE PARTIAL'
-        : 'MATERIAL EVIDENCE TERPILIH';
-    }
-    else if (partial) {
-      buttonText = 'LANJUTKAN EVIDENCE';
-    }
-
-    card.innerHTML =
-      '<div class="requirement-title">' +
-        escapeHtml(String(index + 1)) + '. ' +
-        escapeHtml(item.designator || item.projectMaterialId || '-') +
-      '</div>' +
-      '<div class="requirement-meta">' +
-        '<b>Material:</b> ' + escapeHtml(item.materialName || '-') + '<br>' +
-        '<b>Project Material ID:</b> ' + escapeHtml(item.projectMaterialId || '-') + '<br>' +
-        '<b>Requirement:</b> ' + escapeHtml(item.requirementCode || '-') + '<br>' +
-        '<b>Evidence Required:</b> ' + escapeHtml(String(item.evidenceRequired ?? 0)) + '<br>' +
-        '<b>Verify Status:</b> ' + escapeHtml(item.verifyStatus || 'DRAFT') + '<br>' +
-        '<b>Point ID:</b> ' + escapeHtml(item.pointId || '-') +
-        progressHtml +
-      '</div>' +
-      '<span class="requirement-tag">' + requiredText + '</span><br>' +
-      '<button class="point-btn requirement-select-btn" type="button"' +
-        (buttonDisabled ? ' disabled' : '') +
-      '>' +
-        buttonText +
-      '</button>';
-
-    const btn = card.querySelector('.requirement-select-btn');
-
-    if (!buttonDisabled) {
-      btn.addEventListener('click', function(){
-        createDraftFromRequirement(item);
-      });
-    }
-
-    requirementListEl.appendChild(card);
-  });
-}
-
-function restoreRequirementCache(){
-  try {
-    const stored = JSON.parse(
-      localStorage.getItem(POINT_REQUIREMENTS_KEY) || 'null'
-    );
-
-    if (
-      stored &&
-      stored.projectId === getSelectedProjectId() &&
-      stored.sessionId === getSelectedPointSessionId() &&
-      Array.isArray(stored.requirements)
-    ) {
-      currentRequirements = stored.requirements;
-
-      pointRequirementStatusEl.textContent =
-        navigator.onLine ? 'CACHED' : 'CACHED OFFLINE';
-      pointRequirementStatusEl.className = 'ok';
-
-      renderRequirements(stored);
-      return true;
-    }
-  } catch (e) {}
-
-  return false;
-}
-
-function acceptPointSessionBundle(bundle){
-  const payload = readSignedPayload(bundle);
-  const nowSec = Math.floor(Date.now() / 1000);
-  const selectedProjectId = getSelectedProjectId();
-
-  const validShape =
-    payload &&
-    payload.v === 'V14C-B2A-STEP8A' &&
-    payload.kind === 'POINT_SESSION_LIST' &&
-    payload.projectId === selectedProjectId &&
-    Array.isArray(payload.pointSessions) &&
-    Number(payload.exp || 0) > nowSec;
-
-  if (!validShape) {
-    pointSessionStatusEl.textContent = 'INVALID';
-    pointSessionStatusEl.className = 'bad';
-    pointSessionsPanel.hidden = true;
-    return false;
-  }
-
-  currentPointSessions = payload.pointSessions;
-
-  localStorage.setItem(
-    POINT_SESSIONS_KEY,
-    JSON.stringify({
-      projectId: payload.projectId,
-      pointSessions: currentPointSessions,
-      cachedAt: Date.now()
-    })
-  );
-
-  pointSessionStatusEl.textContent = 'LOADED';
-  pointSessionStatusEl.className = 'ok';
-  renderPointSessions(payload.projectId);
-  restoreRequirementCache();
-  refreshMaterialButton();
-
-  return true;
-}
-
-function renderPointSessions(projectId){
-  pointSessionsPanel.hidden = false;
-  pointSessionListEl.innerHTML = '';
-
-  const selectedSessionId =
-    localStorage.getItem(SELECTED_POINT_SESSION_KEY) || '';
-
-  const normalizedSearch =
-    String(pointSessionSearchTerm || '')
-      .trim()
-      .toLowerCase();
-
-  let filtered = currentPointSessions;
-
-  if (normalizedSearch) {
-    filtered = currentPointSessions.filter(function(item){
-      const haystack = [
-        item.sessionId,
-        item.anchorPointId,
-        item.anchorLabel,
-        item.anchorRole,
-        item.pointId,
-        item.verifyStatus
-      ]
-        .join(' ')
-        .toLowerCase();
-
-      return haystack.indexOf(normalizedSearch) !== -1;
-    });
-  }
-
-  // Selected point selalu diprioritaskan supaya tidak "hilang"
-  // walaupun berada di luar 30 hasil pertama.
-  let visible = filtered.slice(0, POINT_RENDER_LIMIT);
-
-  if (selectedSessionId) {
-    const selectedItem = currentPointSessions.find(function(item){
-      return String(item.sessionId || '') === selectedSessionId;
-    });
-
-    const alreadyVisible = visible.some(function(item){
-      return String(item.sessionId || '') === selectedSessionId;
-    });
-
-    if (selectedItem && !alreadyVisible) {
-      visible = [selectedItem].concat(
-        visible.slice(0, Math.max(0, POINT_RENDER_LIMIT - 1))
-      );
-    }
-  }
-
-  pointSessionSummaryEl.innerHTML =
-    '<strong>✓ POINT SESSION DATA LOADED</strong><br>' +
-    'Project: ' + escapeHtml(projectId || '-') + '<br>' +
-    'Total point session: ' +
-      escapeHtml(String(currentPointSessions.length));
-
-  pointSessionRenderInfoEl.textContent =
-    'Tampil ' +
-    visible.length +
-    ' dari ' +
-    filtered.length +
-    ' hasil' +
-    (normalizedSearch ? ' pencarian' : '') +
-    '. Total cache: ' +
-    currentPointSessions.length +
-    '.';
-
-  visible.forEach(function(item, visibleIndex){
-    const card = document.createElement('div');
-    const selected =
-      selectedSessionId === String(item.sessionId || '');
-
-    card.className =
-      'point-card' + (selected ? ' selected' : '');
-
-    const memberCount =
-      Array.isArray(item.members) ? item.members.length : 0;
-
-    card.innerHTML =
-      '<div class="point-title">' +
-        escapeHtml(String(visibleIndex + 1)) + '. ' +
-        escapeHtml(item.anchorLabel || item.sessionId || '-') +
-      '</div>' +
-      '<div class="point-meta">' +
-        '<b>Session ID:</b> ' +
-          escapeHtml(item.sessionId || '-') + '<br>' +
-        '<b>Anchor Point:</b> ' +
-          escapeHtml(item.anchorPointId || '-') + '<br>' +
-        '<b>Role:</b> ' +
-          escapeHtml(item.anchorRole || '-') + '<br>' +
-        '<b>Lat Plan:</b> ' +
-          escapeHtml(String(item.latPlan ?? '-')) + '<br>' +
-        '<b>Long Plan:</b> ' +
-          escapeHtml(String(item.longPlan ?? '-')) + '<br>' +
-        '<b>Verify Status:</b> ' +
-          escapeHtml(item.verifyStatus || 'DRAFT') + '<br>' +
-        '<b>Members:</b> ' +
-          escapeHtml(String(memberCount)) +
-      '</div>' +
-      '<button class="point-btn" type="button">' +
-        (selected
-          ? 'POINT SESSION TERPILIH'
-          : 'PILIH POINT SESSION') +
-      '</button>';
-
-    card.querySelector('.point-btn').addEventListener(
-      'click',
-      function(){
-        const oldSessionId = getSelectedPointSessionId();
-
-        localStorage.setItem(
-          SELECTED_POINT_SESSION_KEY,
-          item.sessionId || ''
-        );
-
-        if (oldSessionId !== String(item.sessionId || '')) {
-          clearRequirementView();
-        }
-
-        renderPointSessions(projectId);
-        restoreRequirementCache();
-        refreshMaterialButton();
-        refreshSyncGate();
-      }
-    );
-
-    pointSessionListEl.appendChild(card);
-  });
-
-  if (!visible.length) {
-    pointSessionListEl.innerHTML =
-      '<div class="result muted">Point Session tidak ditemukan.</div>';
-  }
-}
-function restorePointSessions(){
-  try {
-    const stored = JSON.parse(
-      localStorage.getItem(POINT_SESSIONS_KEY) || 'null'
-    );
-
-    if (
-      stored &&
-      stored.projectId === getSelectedProjectId() &&
-      Array.isArray(stored.pointSessions)
-    ) {
-      currentPointSessions = stored.pointSessions;
-
-      pointSessionStatusEl.textContent =
-        navigator.onLine ? 'CACHED' : 'CACHED OFFLINE';
-      pointSessionStatusEl.className = 'ok';
-
-      renderPointSessions(stored.projectId);
-    }
-  } catch (e) {}
-}
-
-
-function refreshSyncGate(){
-  const hasProof = !!currentServerProof;
-
-  const hasDraft =
-    !!currentEvidenceDraft &&
-    !!currentEvidenceDraft.evidenceDraftId &&
-    !!currentEvidenceDraft.projectId &&
-    !!currentEvidenceDraft.projectMaterialId &&
-    !!currentEvidenceDraft.sessionId;
-
-  const selectedPointSessionId =
-    localStorage.getItem(SELECTED_POINT_SESSION_KEY) || '';
-
-  const hasPointSession =
-    !!selectedPointSessionId &&
-    currentPointSessions.some(function(item){
-      return String(item.sessionId || '') === selectedPointSessionId;
-    }) &&
-    (
-      !currentEvidenceDraft ||
-      String(currentEvidenceDraft.sessionId || '') === selectedPointSessionId
-    );
-
-  const complete =
-    !!currentEvidenceDraft &&
-    currentEvidenceDraft.status === 'COMPLETE';
-
-  const unsyncedPhotos = getUnsyncedLocalPhotos();
-  const nextPhoto = unsyncedPhotos[0] || null;
-
-  const hasPhoto =
-    !!nextPhoto &&
-    !!nextPhoto.photoLocalId &&
-    !!nextPhoto.blob;
-
-  const hasGps =
-    hasPhoto &&
-    Number.isFinite(Number(nextPhoto.latitude)) &&
-    Number.isFinite(Number(nextPhoto.longitude)) &&
-    Number.isFinite(Number(nextPhoto.accuracy));
-
-  const ready =
-    navigator.onLine &&
-    hasProof &&
-    hasDraft &&
-    hasPointSession &&
-    hasPhoto &&
-    hasGps &&
-    !complete;
-
-  syncEvidenceBtn.disabled = !ready;
-
-  if (!navigator.onLine) {
-    syncServerStatusEl.textContent = 'OFFLINE';
-    syncServerStatusEl.className = 'bad';
-    syncGateResultEl.className = 'result errbox';
-    syncGateResultEl.textContent =
-      'Offline. Foto tetap aman lokal; sync menunggu online.';
-    return;
-  }
-
-  if (complete) {
-    const required = getRequiredPhotoCount();
-    const count =
-      Number(currentEvidenceDraft.serverPhotoCount || required);
-
-    syncServerStatusEl.textContent = 'COMPLETE';
-    syncServerStatusEl.className = 'ok';
-
-    syncGateResultEl.className = 'result okbox';
-    syncGateResultEl.innerHTML =
-      '<strong>✓ EVIDENCE COMPLETE</strong><br>' +
-      '<b>Evidence Item ID:</b> ' +
-        escapeHtml(currentEvidenceDraft.evidenceItemId || '-') + '<br>' +
-      '<b>Foto Server:</b> ' +
-        escapeHtml(String(count)) + ' / ' +
-        escapeHtml(String(required));
-    return;
-  }
-
-  if (!hasProof) {
-    syncServerStatusEl.textContent = 'WAIT PROOF';
-    syncServerStatusEl.className = '';
-    syncGateResultEl.className = 'result muted';
-    syncGateResultEl.textContent = 'Login + verifikasi server dulu.';
-    return;
-  }
-
-  if (!hasDraft) {
-    syncServerStatusEl.textContent = 'WAIT DRAFT';
-    syncServerStatusEl.className = '';
-    syncGateResultEl.className = 'result muted';
-    syncGateResultEl.textContent =
-      'Pilih material evidence dari Requirement Material Titik.';
-    return;
-  }
-
-  if (!hasPointSession) {
-    syncServerStatusEl.textContent = 'WAIT POINT';
-    syncServerStatusEl.className = '';
-    syncGateResultEl.className = 'result muted';
-    syncGateResultEl.textContent =
-      'Point Session belum valid / belum dipilih.';
-    return;
-  }
-
-  if (!hasPhoto || !hasGps) {
-    const required = getRequiredPhotoCount();
-    const count =
-      Number(currentEvidenceDraft.serverPhotoCount || 0);
-
-    syncServerStatusEl.textContent = 'WAIT PHOTO';
-    syncServerStatusEl.className = '';
-    syncGateResultEl.className = 'result muted';
-    syncGateResultEl.innerHTML =
-      'Belum ada foto lokal yang menunggu sync.<br>' +
-      '<b>Progress server:</b> ' +
-      escapeHtml(String(count)) + ' / ' +
-      escapeHtml(String(required));
-    return;
-  }
-
-  currentLocalPhoto = nextPhoto;
-
-  const gpsQuality =
-    classifyGpsAccuracy(nextPhoto.accuracy);
-
-  syncServerStatusEl.textContent = 'READY';
-  syncServerStatusEl.className = 'ok';
-
-  syncGateResultEl.className =
-    gpsQuality.code === 'RETRY'
-      ? 'result errbox'
-      : 'result okbox';
-
-  syncGateResultEl.innerHTML =
-    '<strong>✓ FOTO BERIKUTNYA SIAP SYNC</strong><br>' +
-    '<b>Photo Local:</b> ' +
-      escapeHtml(nextPhoto.photoLocalId || '-') + '<br>' +
-    '<b>GPS:</b> ' +
-      escapeHtml(String(nextPhoto.accuracy ?? '-')) +
-      ' m — ' +
-      escapeHtml(gpsQuality.label) + '<br>' +
-    '<b>Queue lokal:</b> ' +
-      escapeHtml(String(unsyncedPhotos.length)) +
-      ' foto belum sync<br>' +
-    '<b>DEV Sync:</b> ALLOWED FOR TEST ONLY';
-}
-
-
-function replaceExtensionWithJpg(fileName){
-  const name =
-    String(fileName || 'evidence.jpg');
-
-  return /\.[^.]+$/.test(name)
-    ? name.replace(/\.[^.]+$/, '.jpg')
-    : name + '.jpg';
-}
-
-function canvasToJpegBlob(canvas, quality){
-  return new Promise(function(resolve, reject){
-    canvas.toBlob(
-      function(blob){
-        if (blob) {
-          resolve(blob);
-        } else {
-          reject(
-            new Error('Kompresi foto gagal.')
-          );
-        }
-      },
-      'image/jpeg',
-      quality
-    );
-  });
-}
-
-async function decodeImageForCanvas(blob){
-  if ('createImageBitmap' in window) {
-    try {
-      const bitmap =
-        await createImageBitmap(blob);
-
-      return {
-        image: bitmap,
-        width: bitmap.width,
-        height: bitmap.height,
-        cleanup: function(){
-          try {
-            bitmap.close();
-          } catch (e) {}
-        }
-      };
-    } catch (e) {}
-  }
-
-  return new Promise(function(resolve, reject){
-    const img = new Image();
-    const url = URL.createObjectURL(blob);
-
-    img.onload = function(){
-      resolve({
-        image: img,
-        width: img.naturalWidth || img.width,
-        height: img.naturalHeight || img.height,
-        cleanup: function(){
-          URL.revokeObjectURL(url);
-        }
-      });
-    };
-
-    img.onerror = function(){
-      URL.revokeObjectURL(url);
-      reject(
-        new Error(
-          'Format foto tidak dapat diproses browser.'
-        )
-      );
-    };
-
-    img.src = url;
-  });
-}
-
-async function optimizeEvidencePhotoBlob(
-  blob,
-  fileName,
-  mimeType
-){
-  if (!blob) {
-    throw new Error('Blob foto kosong.');
-  }
-
-  const originalBytes =
-    Number(blob.size || 0);
-
-  const originalType =
-    String(
-      mimeType ||
-      blob.type ||
-      'image/jpeg'
-    ).toLowerCase();
-
-  // JPEG/WebP kecil tidak perlu disentuh.
-  if (
-    originalBytes <= PHOTO_UPLOAD_SAFE_BYTES &&
-    (
-      originalType === 'image/jpeg' ||
-      originalType === 'image/jpg' ||
-      originalType === 'image/webp'
-    )
-  ) {
-    return {
-      blob: blob,
-      fileName:
-        String(fileName || 'evidence.jpg'),
-      fileType:
-        blob.type ||
-        mimeType ||
-        'image/jpeg',
-      originalBytes:
-        originalBytes,
-      optimizedBytes:
-        originalBytes,
-      optimized: false
-    };
-  }
-
-  const decoded =
-    await decodeImageForCanvas(blob);
-
-  try {
-    let width =
-      Number(decoded.width || 0);
-
-    let height =
-      Number(decoded.height || 0);
-
-    if (!width || !height) {
-      throw new Error(
-        'Dimensi foto tidak valid.'
-      );
-    }
-
-    const longEdge =
-      Math.max(width, height);
-
-    let scale =
-      longEdge > PHOTO_MAX_LONG_EDGE
-        ? PHOTO_MAX_LONG_EDGE / longEdge
-        : 1;
-
-    let targetWidth =
-      Math.max(
-        1,
-        Math.round(width * scale)
-      );
-
-    let targetHeight =
-      Math.max(
-        1,
-        Math.round(height * scale)
-      );
-
-    let quality =
-      PHOTO_JPEG_QUALITY;
-
-    let outputBlob = null;
-
-    // Maksimal 5 iterasi agar output aman untuk transport Apps Script.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const canvas =
-        document.createElement('canvas');
-
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-
-      const ctx =
-        canvas.getContext('2d', {
-          alpha: false
-        });
-
-      if (!ctx) {
-        throw new Error(
-          'Canvas browser tidak tersedia.'
-        );
-      }
-
-      // Background putih agar PNG transparan aman saat menjadi JPEG.
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(
-        0,
-        0,
-        targetWidth,
-        targetHeight
-      );
-
-      ctx.drawImage(
-        decoded.image,
-        0,
-        0,
-        targetWidth,
-        targetHeight
-      );
-
-      outputBlob =
-        await canvasToJpegBlob(
-          canvas,
-          quality
-        );
-
-      if (
-        outputBlob.size <=
-        PHOTO_UPLOAD_SAFE_BYTES
-      ) {
-        break;
-      }
-
-      quality =
-        Math.max(
-          0.58,
-          quality - 0.08
-        );
-
-      targetWidth =
-        Math.max(
-          1,
-          Math.round(
-            targetWidth * 0.86
-          )
-        );
-
-      targetHeight =
-        Math.max(
-          1,
-          Math.round(
-            targetHeight * 0.86
-          )
-        );
-    }
-
-    if (!outputBlob) {
-      throw new Error(
-        'Kompresi foto tidak menghasilkan file.'
-      );
-    }
-
-    if (
-      outputBlob.size >
-      PHOTO_UPLOAD_SAFE_BYTES
-    ) {
-      throw new Error(
-        'Foto masih terlalu besar setelah optimasi: ' +
-        formatBytes(outputBlob.size) +
-        '. Gunakan foto dengan resolusi lebih kecil.'
-      );
-    }
-
-    return {
-      blob: outputBlob,
-      fileName:
-        replaceExtensionWithJpg(
-          fileName
-        ),
-      fileType: 'image/jpeg',
-      originalBytes:
-        originalBytes,
-      optimizedBytes:
-        outputBlob.size,
-      optimized: true
-    };
-  }
-  finally {
-    decoded.cleanup();
-  }
-}
-
-async function ensurePhotoSyncSafe(record){
-  if (
-    !record ||
-    !record.blob
-  ) {
-    throw new Error(
-      'Foto lokal tidak memiliki blob.'
-    );
-  }
-
-  if (
-    Number(record.blob.size || 0) <=
-      PHOTO_UPLOAD_SAFE_BYTES &&
-    (
-      String(
-        record.fileType ||
-        record.blob.type ||
-        ''
-      ).toLowerCase() ===
-        'image/jpeg' ||
-      String(
-        record.fileType ||
-        record.blob.type ||
-        ''
-      ).toLowerCase() ===
-        'image/jpg' ||
-      String(
-        record.fileType ||
-        record.blob.type ||
-        ''
-      ).toLowerCase() ===
-        'image/webp'
-    )
-  ) {
-    return record;
-  }
-
-  photoLocalStatusEl.textContent =
-    'OPTIMIZING';
-
-  const optimized =
-    await optimizeEvidencePhotoBlob(
-      record.blob,
-      record.fileName,
-      record.fileType
-    );
-
-  const updated =
-    Object.assign(
-      {},
-      record,
-      {
-        blob: optimized.blob,
-        fileName:
-          optimized.fileName,
-        fileType:
-          optimized.fileType,
-        fileSize:
-          optimized.optimizedBytes,
-        originalFileSize:
-          Number(
-            record.originalFileSize ||
-            optimized.originalBytes
-          ),
-        photoOptimized:
-          optimized.optimized === true,
-        optimizedAt:
-          optimized.optimized
-            ? new Date().toISOString()
-            : (
-                record.optimizedAt ||
-                ''
-              )
-      }
-    );
-
-  await putLocalPhoto(updated);
-
-  currentLocalPhotos =
-    currentLocalPhotos.map(function(item){
-      return (
-        item.photoLocalId ===
-        updated.photoLocalId
-      )
-        ? updated
-        : item;
-    });
-
-  if (
-    currentLocalPhoto &&
-    currentLocalPhoto.photoLocalId ===
-      updated.photoLocalId
-  ) {
-    currentLocalPhoto = updated;
-  }
-
-  return updated;
-}
-
-function blobToBase64Payload(blob){
-  return new Promise(function(resolve, reject){
-    const reader = new FileReader();
-
-    reader.onload = function(){
-      const result = String(reader.result || '');
-      const comma = result.indexOf(',');
-
-      resolve(
-        comma >= 0
-          ? result.slice(comma + 1)
-          : result
-      );
-    };
-
-    reader.onerror = function(){
-      reject(
-        reader.error ||
-        new Error('Foto gagal dikonversi ke base64.')
-      );
-    };
-
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function syncCurrentEvidence(){
-  refreshSyncGate();
-
-  if (syncEvidenceBtn.disabled) {
-    alert('Data belum siap untuk sync.');
-    return;
-  }
-
-  const nextPhoto =
-    getUnsyncedLocalPhotos()[0] || null;
-
-  if (!nextPhoto) {
-    alert('Tidak ada foto lokal yang menunggu sync.');
-    return;
-  }
-
-  currentLocalPhoto = nextPhoto;
-
-  syncEvidenceBtn.disabled = true;
-  syncServerStatusEl.textContent = 'PREPARING';
-  syncServerStatusEl.className = '';
-  syncGateResultEl.className = 'result muted';
-  syncGateResultEl.textContent =
-    'Menyiapkan foto untuk dikirim ke server...';
-
-  try {
-    currentLocalPhoto =
-      await ensurePhotoSyncSafe(
-        currentLocalPhoto
-      );
-
-    const base64 =
-      await blobToBase64Payload(
-        currentLocalPhoto.blob
-      );
-
-    syncServerStatusEl.textContent = 'SENDING';
-
-    submitHiddenPost(
-      {
-        action: 'sync_local_capture',
-        proof: currentServerProof,
-        project_id:
-          currentEvidenceDraft.projectId,
-        project_material_id:
-          currentEvidenceDraft.projectMaterialId,
-        session_id:
-          currentEvidenceDraft.sessionId,
-        evidence_draft_id:
-          currentEvidenceDraft.evidenceDraftId,
-        photo_local_id:
-          currentLocalPhoto.photoLocalId,
-        latitude:
-          currentLocalPhoto.latitude,
-        longitude:
-          currentLocalPhoto.longitude,
-        gps_accuracy:
-          currentLocalPhoto.accuracy,
-        captured_at:
-          currentLocalPhoto.capturedAt ||
-          currentLocalPhoto.createdAt ||
-          '',
-        file_name:
-          currentLocalPhoto.fileName ||
-          'evidence.jpg',
-        mime_type:
-          currentLocalPhoto.fileType ||
-          'image/jpeg',
-        base64: base64
-      },
-      '_self'
-    );
-
-  } catch (error) {
-    syncServerStatusEl.textContent = 'FAILED';
-    syncServerStatusEl.className = 'bad';
-    syncGateResultEl.className = 'result errbox';
-    syncGateResultEl.textContent =
-      error && error.message
-        ? error.message
-        : 'Gagal menyiapkan data sync.';
-
-    refreshSyncGate();
-  }
-}
-
-
-async function acceptSyncResultBundle(bundle){
-  const payload = readSignedPayload(bundle);
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  const validShape =
-    payload &&
-    payload.v === 'V14C-B2A-STEP9C' &&
-    payload.kind === 'SYNC_RESULT' &&
-    payload.success === true &&
-    Number(payload.exp || 0) > nowSec &&
-    payload.evidenceDraftId &&
-    payload.photoLocalId &&
-    payload.evidenceItemId &&
-    payload.photoId &&
-    payload.refreshedProof;
-
-  if (!validShape) {
-    syncServerStatusEl.textContent = 'RESULT INVALID';
-    syncServerStatusEl.className = 'bad';
-    syncResultLocalEl.className = 'result errbox';
-    syncResultLocalEl.textContent =
-      'Sync result tidak valid / expired.';
-    return false;
-  }
-
-  // Fresh proof from the sync response replaces the previous
-  // proof before any async work or next queue iteration.
-  acceptProof(payload.refreshedProof);
-
-  const required =
-    Math.max(1, Number(payload.requiredPhotoCount || 1));
-
-  const count =
-    Math.max(0, Number(payload.photoCount || 0));
-
-  const complete =
-    payload.evidenceComplete === true ||
-    count >= required;
-
-  const drafts = loadEvidenceDrafts();
-
-  const draftIndex =
-    drafts.findIndex(function(item){
-      return (
-        item &&
-        item.evidenceDraftId === payload.evidenceDraftId
-      );
-    });
-
-  if (draftIndex >= 0) {
-    drafts[draftIndex] = Object.assign(
-      {},
-      drafts[draftIndex],
-      {
-        status:
-          complete ? 'COMPLETE' : 'PARTIAL_SYNC',
-        evidenceItemId: payload.evidenceItemId,
-        photoId: payload.photoId,
-        lastPhotoId: payload.photoId,
-        serverPhotoCount: count,
-        requiredPhotoCount: required,
-        evidenceComplete: complete,
-        syncMessage: payload.message || '',
-        alreadySynced: payload.alreadySynced === true,
-        gpsPolicy: payload.gpsPolicy || '',
-        gpsBypass: payload.gpsBypass === true,
-        syncedAt: new Date().toISOString()
-      }
-    );
-
-    saveEvidenceDrafts(drafts);
-    currentEvidenceDraft = drafts[draftIndex];
-  }
-
-  try {
-    const updatedPhoto =
-      await updateLocalPhotoRecord(
-        payload.photoLocalId,
-        {
-          status: 'SYNCED',
-          evidenceItemId: payload.evidenceItemId,
-          photoId: payload.photoId,
-          serverFileName: payload.fileName || '',
-          alreadySynced: payload.alreadySynced === true,
-          syncedAt: new Date().toISOString()
-        }
-      );
-
-    currentLocalPhotos =
-      currentLocalPhotos.map(function(item){
-        return item.photoLocalId === updatedPhoto.photoLocalId
-          ? updatedPhoto
-          : item;
-      });
-
-    currentLocalPhoto =
-      getUnsyncedLocalPhotos()[0] ||
-      updatedPhoto;
-
-  } catch (e) {}
-
-  syncServerStatusEl.textContent =
-    complete ? 'COMPLETE' : 'PARTIAL';
-  syncServerStatusEl.className =
-    complete ? 'ok' : '';
-
-  syncResultLocalEl.className =
-    complete ? 'result okbox' : 'result muted';
-
-  syncResultLocalEl.innerHTML =
-    '<strong>' +
-      (
-        complete
-          ? '✓ EVIDENCE COMPLETE'
-          : '✓ FOTO SYNCED · EVIDENCE BELUM LENGKAP'
-      ) +
-    '</strong><br>' +
-    '<b>Evidence Item ID:</b> ' +
-      escapeHtml(payload.evidenceItemId) + '<br>' +
-    '<b>Photo ID:</b> ' +
-      escapeHtml(payload.photoId) + '<br>' +
-    '<b>Evidence Photos:</b> ' +
-      escapeHtml(String(count)) + ' / ' +
-      escapeHtml(String(required)) + '<br>' +
-    '<b>Status:</b> ' +
-      (complete ? 'COMPLETE' : 'PARTIAL') + '<br>' +
-    '<b>Already Synced:</b> ' +
-      (payload.alreadySynced ? 'YES' : 'NO');
-
-  renderEvidenceDraft();
-
-  autoSyncBusy = false;
-
-  refreshAutoSyncQueueUI();
-
-  if (
-    sessionStorage.getItem(
-      AUTO_SYNC_ACTIVE_KEY
-    ) === '1' &&
-    isAutoSyncEnabled()
-  ) {
-    setTimeout(function(){
-      runAutoSyncQueue('after_sync_result');
-    }, 900);
-  }
-
-  return true;
-}
-
-function restoreSyncedResult(){
-  if (!currentEvidenceDraft) return;
-
-  const status =
-    String(currentEvidenceDraft.status || '');
-
-  if (
-    (status === 'COMPLETE' ||
-     status === 'PARTIAL_SYNC' ||
-     status === 'SYNCED') &&
-    currentEvidenceDraft.evidenceItemId
-  ) {
-    const required =
-      Math.max(
-        1,
-        Number(
-          currentEvidenceDraft.requiredPhotoCount ||
-          currentEvidenceDraft.evidenceRequired ||
-          1
-        )
-      );
-
-    const count =
-      Number(
-        currentEvidenceDraft.serverPhotoCount ||
-        (
-          status === 'SYNCED'
-            ? required
-            : 0
-        )
-      );
-
-    const complete =
-      status === 'COMPLETE' ||
-      status === 'SYNCED';
-
-    syncServerStatusEl.textContent =
-      complete ? 'COMPLETE' : 'PARTIAL';
-    syncServerStatusEl.className =
-      complete ? 'ok' : '';
-
-    syncResultLocalEl.className =
-      complete ? 'result okbox' : 'result muted';
-
-    syncResultLocalEl.innerHTML =
-      '<strong>' +
-        (complete ? '✓ EVIDENCE COMPLETE' : 'EVIDENCE PARTIAL') +
-      '</strong><br>' +
-      '<b>Evidence Item ID:</b> ' +
-        escapeHtml(currentEvidenceDraft.evidenceItemId) + '<br>' +
-      '<b>Foto Server:</b> ' +
-        escapeHtml(String(count)) + ' / ' +
-        escapeHtml(String(required)) + '<br>' +
-      '<b>Status:</b> ' +
-        (complete ? 'COMPLETE' : 'PARTIAL');
-  }
-}
-
-function processHashHandoffs(){
-  const hash = String(location.hash || '');
-
-  if (hash.startsWith('#pems_auth=')) {
-    const proof = decodeURIComponent(hash.slice('#pems_auth='.length));
-    acceptProof(proof);
-    history.replaceState(null, '', location.pathname + location.search);
-    return;
-  }
-
-  if (hash.startsWith('#pems_projects=')) {
-    const bundle = decodeURIComponent(hash.slice('#pems_projects='.length));
-    acceptProjectBundle(bundle);
-
-    const storedProof = sessionStorage.getItem(PROOF_KEY);
-    if (storedProof) {
-      acceptProof(storedProof);
-    }
-
-    history.replaceState(null, '', location.pathname + location.search);
-    return;
-  }
-
-  if (hash.startsWith('#pems_materials=')) {
-    const bundle = decodeURIComponent(hash.slice('#pems_materials='.length));
-    acceptMaterialBundle(bundle);
-
-    const storedProof = sessionStorage.getItem(PROOF_KEY);
-    if (storedProof) {
-      acceptProof(storedProof);
-    }
-
-    history.replaceState(null, '', location.pathname + location.search);
-    return;
-  }
-
-  if (hash.startsWith('#pems_points=')) {
-    const bundle = decodeURIComponent(hash.slice('#pems_points='.length));
-    acceptPointSessionBundle(bundle);
-
-    const storedProof = sessionStorage.getItem(PROOF_KEY);
-    if (storedProof) {
-      acceptProof(storedProof);
-    }
-
-    history.replaceState(null, '', location.pathname + location.search);
-    return;
-  }
-
-  if (hash.startsWith('#pems_requirements=')) {
-    const bundle = decodeURIComponent(
-      hash.slice('#pems_requirements='.length)
-    );
-
-    acceptRequirementBundle(bundle);
-
-    const storedProof = sessionStorage.getItem(PROOF_KEY);
-    if (storedProof) {
-      acceptProof(storedProof);
-    }
-
-    history.replaceState(null, '', location.pathname + location.search);
-    return;
-  }
-
-  if (hash.startsWith('#pems_sync_result=')) {
-    const bundle = decodeURIComponent(
-      hash.slice('#pems_sync_result='.length)
-    );
-
-    acceptSyncResultBundle(bundle);
-
-    // acceptSyncResultBundle already stores the refreshed proof.
-    history.replaceState(null, '', location.pathname + location.search);
-  }
-}
-processHashHandoffs();
-
-if (!currentServerProof) {
-  const storedProof = sessionStorage.getItem(PROOF_KEY);
-  if (storedProof) acceptProof(storedProof);
-}
-
-if (currentProjects.length === 0) {
-  try {
-    const cached = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]');
-    if (Array.isArray(cached) && cached.length) {
-      currentProjects = cached;
-      projectStatusEl.textContent = navigator.onLine ? 'CACHED' : 'CACHED OFFLINE';
-      projectStatusEl.className = 'ok';
-      projectResultEl.className = 'result okbox';
-      projectResultEl.innerHTML =
-        '<strong>✓ PROJECT CACHE READY</strong><br>' +
-        'Total project tersimpan: ' + escapeHtml(String(currentProjects.length)) + '<br>' +
-        '<small>Data project dibaca dari cache lokal perangkat.</small>';
-      renderProjects();
-    }
-  } catch (e) {}
-}
-
-restoreMaterialCache();
-restoreEvidenceDraft();
-restorePointSessions();
-restoreRequirementCache();
-restoreSyncedResult();
-
-function decodeJwtPayload(token) {
-  try {
-    const parts = String(token || '').split('.');
-    if (parts.length !== 3) return null;
-    return JSON.parse(base64UrlDecodeUtf8(parts[1]) || '{}');
-  } catch (e) {
-    return null;
-  }
-}
-
-window.handleGoogleCredential = function(response) {
-  const credential = response && response.credential ? response.credential : '';
-  const claims = decodeJwtPayload(credential);
-
-  if (!credential || !claims) {
-    currentGoogleCredential = '';
-    verifyBtn.disabled = true;
-    loginResultEl.className = 'result errbox';
-    loginResultEl.textContent = 'Login Google gagal.';
-    return;
-  }
-
-  currentGoogleCredential = credential;
-  verifyBtn.disabled = false;
-
-  loginResultEl.className = 'result okbox';
-  loginResultEl.innerHTML =
-    '<strong>✓ LOGIN OK</strong><br>' +
-    'Nama: ' + escapeHtml(claims.name || '-') + '<br>' +
-    'Email: ' + escapeHtml(claims.email || '-') + '<br>' +
-    '<small>Setelah verifikasi, otorisasi memakai SERVER PROOF. Login Google tidak perlu tetap tampil aktif.</small>';
+const CFG = window.PEMS_CONFIG || {};
+const APP_VERSION = CFG.APP_VERSION || 'V15.0.0-CONSOLIDATED';
+const GOOGLE_CLIENT_ID = CFG.GOOGLE_CLIENT_ID || '';
+const API_BASE_KEY = 'PEMS_V15_API_BASE';
+const SESSION_KEY = 'PEMS_V15_SESSION';
+const SESSION_EXP_KEY = 'PEMS_V15_SESSION_EXP';
+const DEVICE_KEY = 'PEMS_V15_DEVICE_ID';
+const LAST_GPS_KEY = 'PEMS_V15_LAST_GPS';
+const SELECTED_PROJECT_KEY = 'PEMS_V15_SELECTED_PROJECT';
+
+const DB_NAME = 'PEMS_V15_DB';
+const DB_VERSION = 1;
+const STORE_CACHE = 'cache';
+const STORE_DRAFTS = 'drafts';
+const STORE_PHOTOS = 'photos';
+const STORE_QUEUE = 'queue';
+
+const state = {
+  apiBase: '',
+  sessionToken: '',
+  sessionExpiresAt: '',
+  user: null,
+  bootstrap: null,
+  config: {},
+  currentPage: 'home',
+  selectedProjectId: '',
+  workspace: null,
+  selectedSession: null,
+  requirements: null,
+  selectedRequirement: null,
+  drafts: [],
+  queue: [],
+  revisions: [],
+  verificationQueue: [],
+  monitoring: null,
+  syncing: false,
+  cameraContext: null,
+  revisionTargetPmId: ''
 };
 
-verifyBtn.addEventListener('click', function(){
-  if (!currentGoogleCredential) {
-    alert('Login Google dulu.');
+const el = {
+  sidebar: document.getElementById('sidebar'),
+  mainShell: document.getElementById('mainShell'),
+  sideNav: document.getElementById('sideNav'),
+  bottomNav: document.getElementById('bottomNav'),
+  sidebarUser: document.getElementById('sidebarUser'),
+  topbar: document.getElementById('topbar'),
+  pageTitle: document.getElementById('pageTitle'),
+  pageSubtitle: document.getElementById('pageSubtitle'),
+  netBadge: document.getElementById('netBadge'),
+  queueBadge: document.getElementById('queueBadge'),
+  roleBadge: document.getElementById('roleBadge'),
+  loginView: document.getElementById('loginView'),
+  content: document.getElementById('content'),
+  loginMessage: document.getElementById('loginMessage'),
+  googleButton: document.getElementById('googleButton'),
+  gatewaySetup: document.getElementById('gatewaySetup'),
+  apiBaseInput: document.getElementById('apiBaseInput'),
+  saveApiBaseBtn: document.getElementById('saveApiBaseBtn'),
+  retryBootBtn: document.getElementById('retryBootBtn'),
+  logoutBtn: document.getElementById('logoutBtn'),
+  toast: document.getElementById('toast'),
+  cameraInput: document.getElementById('cameraInput')
+};
+
+const NAV_META = {
+  home: ['Home', 'Ringkasan pekerjaan dan status sistem'],
+  pekerjaan: ['Pekerjaan', 'Project → Point → Requirement → Evidence'],
+  evidence: ['Evidence', 'Draft lokal, queue, sync, dan submit'],
+  verifikasi: ['Verifikasi', 'Periksa realisasi yang SUBMITTED'],
+  monitoring: ['Monitoring', 'Progress dan exception yang perlu tindakan'],
+  admin: ['Admin', 'User, assignment, dan konfigurasi'],
+  output: ['Output Center', 'KML/KMZ, Word, PDF, dan report'],
+  audit: ['Audit Log', 'Riwayat perubahan penting'],
+  settings: ['Settings', 'Status aplikasi dan konfigurasi perangkat']
+};
+
+const NAV_LABEL = {
+  home: 'Home', pekerjaan: 'Pekerjaan', evidence: 'Evidence', verifikasi: 'Verifikasi',
+  monitoring: 'Monitoring', admin: 'Admin', output: 'Output', audit: 'Audit', settings: 'Settings'
+};
+
+init();
+
+async function init() {
+  wireStaticEvents();
+  setupNetworkListeners();
+  registerServiceWorker();
+  await openDb();
+  state.apiBase = resolveApiBase();
+  await refreshLocalState();
+  updateNetworkUi();
+
+  if (!state.apiBase) {
+    showGatewaySetup();
     return;
   }
 
-  submitHiddenPost(
-    {
-      action: 'verify_google',
-      credential: currentGoogleCredential
-    },
-    '_self'
-  );
-});
-
-loadProjectsBtn.addEventListener('click', function(){
-  if (!currentServerProof) {
-    alert('Session proof belum ada / sudah expired. Login ulang dulu.');
-    return;
+  restoreSession();
+  if (sessionIsUsable()) {
+    const booted = await bootAuthenticated();
+    if (booted) return;
   }
 
-  submitHiddenPost(
-    {
-      action: 'read_projects_handoff',
-      proof: currentServerProof
-    },
-    '_self'
-  );
-});
+  showLogin('Login Google sekali untuk masuk ke PEMS V15.');
+}
 
-readMaterialsBtn.addEventListener('click', function(){
-  const projectId = getSelectedProjectId();
+function wireStaticEvents() {
+  el.saveApiBaseBtn.addEventListener('click', saveApiBaseFromInput);
+  el.retryBootBtn.addEventListener('click', init);
+  el.logoutBtn.addEventListener('click', logout);
+  el.cameraInput.addEventListener('change', onCameraFileSelected);
+}
 
-  if (!currentServerProof) {
-    alert('Session proof belum ada / sudah expired. Login ulang dulu.');
-    return;
-  }
-
-  if (!projectId) {
-    alert('Pilih project dulu.');
-    return;
-  }
-
-  submitHiddenPost(
-    {
-      action: 'read_project_materials_handoff',
-      proof: currentServerProof,
-      project_id: projectId
-    },
-    '_self'
-  );
-});
-
-function renderProjects(){
-  projectsPanel.hidden = false;
-  projectListEl.innerHTML = '';
-
-  const selectedId = localStorage.getItem(SELECTED_PROJECT_KEY) || '';
-
-  currentProjects.forEach(function(project){
-    const card = document.createElement('div');
-    card.className =
-      'project-card' +
-      (selectedId === project.projectId ? ' selected' : '');
-
-    card.innerHTML =
-      '<div class="project-id">' + escapeHtml(project.projectId || '-') + '</div>' +
-      '<div class="project-name">' + escapeHtml(project.projectName || '-') + '</div>' +
-      '<div class="project-meta">' +
-        '<b>Stakeholder:</b> ' + escapeHtml(project.stakeholder || '-') + '<br>' +
-        '<b>LOP / Ring:</b> ' + escapeHtml(project.lopRing || '-') + '<br>' +
-        '<b>Status:</b> ' + escapeHtml(project.statusProject || '-') +
-      '</div>' +
-      '<div class="project-actions">' +
-        '<button class="select-btn" type="button">PILIH PROJECT</button>' +
-      '</div>';
-
-    card.querySelector('.select-btn').addEventListener('click', function(){
-      localStorage.setItem(SELECTED_PROJECT_KEY, project.projectId || '');
-      renderProjects();
-      renderSelectedProject(project);
-      refreshMaterialButton();
-    });
-
-    projectListEl.appendChild(card);
+function setupNetworkListeners() {
+  window.addEventListener('online', async () => {
+    updateNetworkUi();
+    toast('Koneksi kembali online. Memeriksa queue...', 'success');
+    await runSyncQueue();
   });
-
-  if (selectedId) {
-    const selected = currentProjects.find(p => p.projectId === selectedId);
-    if (selected) renderSelectedProject(selected);
-  }
-
-  refreshMaterialButton();
-}
-
-function renderSelectedProject(project){
-  selectedProjectBanner.innerHTML =
-    '<div class="selected-banner">' +
-      '<strong>✓ PROJECT TERPILIH</strong><br>' +
-      escapeHtml(project.projectId || '-') + ' — ' +
-      escapeHtml(project.projectName || '-') +
-    '</div>';
-}
-
-function submitHiddenPost(fields, target){
-  const bridgeUrl = String(window.PEMS_BRIDGE_URL || '').trim();
-
-  const form = document.createElement('form');
-  form.method = 'POST';
-  form.action = bridgeUrl;
-  form.target = target || '_blank';
-  form.style.display = 'none';
-
-  Object.keys(fields || {}).forEach(function(key){
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = key;
-    input.value = String(fields[key] || '');
-    form.appendChild(input);
+  window.addEventListener('offline', () => {
+    updateNetworkUi();
+    toast('Offline. Foto tetap disimpan di perangkat.', 'warning');
   });
-
-  document.body.appendChild(form);
-  form.submit();
-  form.remove();
 }
 
-function escapeHtml(value){
-  return String(value || '').replace(/[&<>"']/g, ch => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
-  }[ch]));
-}
-
-
-choosePhotoBtn.addEventListener('click', function(){
-  if (!currentEvidenceDraft) {
-    alert('Buat / pilih draft evidence dulu.');
-    return;
-  }
-
-  photoInput.value = '';
-  photoInput.click();
-});
-
-photoInput.addEventListener('change', async function(){
-  const file =
-    photoInput.files && photoInput.files[0]
-      ? photoInput.files[0]
-      : null;
-
-  if (!file) {
-    return;
-  }
-
-  if (!currentEvidenceDraft) {
-    alert('Draft evidence belum aktif.');
-    return;
-  }
-
-  photoLocalStatusEl.textContent = 'PROCESSING';
-  photoLocalStatusEl.className = '';
-  photoResultEl.className = 'result muted';
-  photoResultEl.textContent =
-    navigator.onLine
-      ? 'Mengambil GPS dan menyimpan foto lokal...'
-      : 'OFFLINE: mencoba GPS perangkat. Jika timeout pada DEV/LAPTOP, PEMS akan memakai DEV CACHED GPS.';
-
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
   try {
-    const gps = await getGpsPosition();
+    await navigator.serviceWorker.register('./service-worker.js');
+  } catch (err) {
+    console.warn('SW registration failed', err);
+  }
+}
 
-    photoLocalStatusEl.textContent =
-      'OPTIMIZING';
+function resolveApiBase() {
+  const hardcoded = String(CFG.API_BASE || '').trim().replace(/\/$/, '');
+  if (hardcoded) return hardcoded;
+  return String(localStorage.getItem(API_BASE_KEY) || '').trim().replace(/\/$/, '');
+}
 
-    photoResultEl.textContent =
-      'GPS sudah didapat. Mengoptimalkan ukuran foto untuk penyimpanan lokal + sync...';
+function showGatewaySetup() {
+  el.gatewaySetup.classList.remove('hidden');
+  el.apiBaseInput.value = localStorage.getItem(API_BASE_KEY) || '';
+  el.loginMessage.className = 'status-box warning';
+  el.loginMessage.textContent = 'API Gateway V15 belum dihubungkan.';
+  el.googleButton.innerHTML = '';
+  el.retryBootBtn.classList.add('hidden');
+}
 
-    const optimized =
-      await optimizeEvidencePhotoBlob(
-        file,
-        file.name || 'evidence.jpg',
-        file.type || 'image/jpeg'
-      );
+async function saveApiBaseFromInput() {
+  const value = String(el.apiBaseInput.value || '').trim().replace(/\/$/, '');
+  if (!/^https:\/\//i.test(value)) {
+    toast('Gunakan URL HTTPS API Gateway.', 'danger');
+    return;
+  }
+  localStorage.setItem(API_BASE_KEY, value);
+  state.apiBase = value;
+  el.gatewaySetup.classList.add('hidden');
+  showLogin('Gateway tersimpan. Login Google untuk melanjutkan.');
+}
 
-    const record = {
-      photoLocalId: makeLocalPhotoId(),
-      evidenceDraftId: currentEvidenceDraft.evidenceDraftId,
-      projectId: currentEvidenceDraft.projectId,
-      projectMaterialId: currentEvidenceDraft.projectMaterialId,
-      fileName: optimized.fileName,
-      fileType: optimized.fileType,
-      fileSize: optimized.optimizedBytes,
-      originalFileSize: optimized.originalBytes,
-      photoOptimized: optimized.optimized === true,
-      optimizedAt:
-        optimized.optimized
-          ? new Date().toISOString()
-          : '',
-      blob: optimized.blob,
-      latitude: gps.latitude,
-      longitude: gps.longitude,
-      accuracy: gps.accuracy,
-      capturedAt: gps.capturedAt,
-      gpsSource:
-        gps.gpsSource || 'LIVE_GPS',
-      cachedGpsAt:
-        gps.cachedGpsAt || '',
-      gpsFallbackReason:
-        gps.fallbackReason || '',
-      createdAt: new Date().toISOString(),
-      status: 'PHOTO_LOCAL_READY'
-    };
+function restoreSession() {
+  state.sessionToken = localStorage.getItem(SESSION_KEY) || '';
+  state.sessionExpiresAt = localStorage.getItem(SESSION_EXP_KEY) || '';
+}
 
-    await putLocalPhoto(record);
-    currentLocalPhotos.push(record);
-    currentLocalPhoto = record;
-    renderLocalPhoto(record);
+function sessionIsUsable() {
+  if (!state.sessionToken || !state.sessionExpiresAt) return false;
+  const exp = new Date(state.sessionExpiresAt).getTime();
+  return Number.isFinite(exp) && exp > Date.now() + 30_000;
+}
 
-    await refreshAutoSyncQueueUI();
+function saveSession(token, expiresAt) {
+  state.sessionToken = token;
+  state.sessionExpiresAt = expiresAt;
+  localStorage.setItem(SESSION_KEY, token);
+  localStorage.setItem(SESSION_EXP_KEY, expiresAt);
+}
 
-    if (
-      navigator.onLine &&
-      isAutoSyncEnabled()
-    ) {
-      setTimeout(function(){
-        runAutoSyncQueue('photo_added');
-      }, 700);
+function clearSession() {
+  state.sessionToken = '';
+  state.sessionExpiresAt = '';
+  state.user = null;
+  state.bootstrap = null;
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(SESSION_EXP_KEY);
+}
+
+function logout() {
+  clearSession();
+  hideAppShell();
+  showLogin('Session ditutup. Login kembali bila diperlukan.');
+}
+
+function showLogin(message) {
+  hideAppShell();
+  el.loginView.classList.remove('hidden');
+  el.loginMessage.className = 'status-box neutral';
+  el.loginMessage.textContent = message || 'Login diperlukan.';
+  el.retryBootBtn.classList.add('hidden');
+  if (!state.apiBase) {
+    showGatewaySetup();
+    return;
+  }
+  renderGoogleButtonWhenReady();
+}
+
+function renderGoogleButtonWhenReady() {
+  let attempts = 0;
+  const timer = setInterval(() => {
+    attempts += 1;
+    if (window.google?.accounts?.id) {
+      clearInterval(timer);
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCredential,
+        auto_select: false,
+        cancel_on_tap_outside: false
+      });
+      el.googleButton.innerHTML = '';
+      window.google.accounts.id.renderButton(el.googleButton, {
+        theme: 'outline', size: 'large', shape: 'pill', text: 'signin_with', width: 310
+      });
+      return;
+    }
+    if (attempts > 40) {
+      clearInterval(timer);
+      el.loginMessage.className = 'status-box danger';
+      el.loginMessage.textContent = 'Google Login gagal dimuat. Pastikan internet aktif lalu coba lagi.';
+      el.retryBootBtn.classList.remove('hidden');
+    }
+  }, 250);
+}
+
+async function handleGoogleCredential(response) {
+  try {
+    el.loginMessage.className = 'status-box neutral';
+    el.loginMessage.textContent = 'Memverifikasi akun dan role PEMS...';
+    const result = await apiRaw('/auth/google', {
+      method: 'POST',
+      auth: false,
+      body: { credential: response.credential }
+    });
+    const token = result?.data?.sessionToken;
+    const expiresAt = result?.data?.expiresAt;
+    if (!token || !expiresAt) throw new Error('Session token tidak diterima dari gateway.');
+    saveSession(token, expiresAt);
+    await bootAuthenticated();
+  } catch (err) {
+    el.loginMessage.className = 'status-box danger';
+    el.loginMessage.textContent = humanError(err);
+  }
+}
+
+async function bootAuthenticated() {
+  try {
+    let boot;
+    if (navigator.onLine) {
+      boot = await api('/bootstrap');
+      await cachePut('bootstrap', boot);
+    } else {
+      boot = await cacheGet('bootstrap');
+      if (!boot) throw new Error('Belum ada bootstrap offline. Login/boot sekali saat online.');
     }
 
-  } catch (error) {
-    photoLocalStatusEl.textContent = 'GPS / SAVE FAILED';
-    photoLocalStatusEl.className = 'bad';
-    photoResultEl.className = 'result errbox';
-    photoResultEl.textContent =
-      error && error.message
-        ? error.message
-        : 'Foto lokal gagal diproses.';
+    state.bootstrap = boot;
+    state.user = boot.user;
+    state.config = boot.config || {};
+    state.selectedProjectId = localStorage.getItem(SELECTED_PROJECT_KEY) || '';
+    if (state.selectedProjectId && !(boot.projects || []).some(p => p.projectId === state.selectedProjectId)) {
+      state.selectedProjectId = '';
+      localStorage.removeItem(SELECTED_PROJECT_KEY);
+    }
+
+    await refreshLocalState();
+    showAppShell();
+    renderNavigation();
+    navigate('home');
+    if (navigator.onLine) runSyncQueue();
+    return true;
+  } catch (err) {
+    if (isAuthError(err)) clearSession();
+    showLogin(humanError(err));
+    el.retryBootBtn.classList.remove('hidden');
+    return false;
   }
-});
-
-
-
-loadPointSessionsBtn.addEventListener('click', function(){
-  const projectId = getSelectedProjectId();
-
-  if (!currentServerProof) {
-    alert('Session proof belum ada / sudah expired. Login ulang dulu.');
-    return;
-  }
-
-  if (!projectId) {
-    alert('Pilih project dulu.');
-    return;
-  }
-
-  submitHiddenPost(
-    {
-      action: 'read_point_sessions_handoff',
-      proof: currentServerProof,
-      project_id: projectId
-    },
-    '_self'
-  );
-});
-
-
-
-loadRequirementsBtn.addEventListener('click', function(){
-  const projectId = getSelectedProjectId();
-  const sessionId = getSelectedPointSessionId();
-
-  if (!currentServerProof) {
-    alert('Session proof belum ada / sudah expired. Login ulang dulu.');
-    return;
-  }
-
-  if (!projectId) {
-    alert('Pilih project dulu.');
-    return;
-  }
-
-  if (!sessionId) {
-    alert('Pilih Point Session dulu.');
-    return;
-  }
-
-  submitHiddenPost(
-    {
-      action: 'read_point_requirements_handoff',
-      proof: currentServerProof,
-      project_id: projectId,
-      session_id: sessionId
-    },
-    '_self'
-  );
-});
-
-pointSessionSearchEl.addEventListener('input', function(){
-  pointSessionSearchTerm = String(pointSessionSearchEl.value || '');
-
-  if (currentPointSessions.length) {
-    renderPointSessions(getSelectedProjectId());
-  }
-});
-
-autoSyncToggleBtn.addEventListener('click', function(){
-  const nextEnabled =
-    !isAutoSyncEnabled();
-
-  localStorage.setItem(
-    AUTO_SYNC_ENABLED_KEY,
-    nextEnabled ? '1' : '0'
-  );
-
-  if (!nextEnabled) {
-    sessionStorage.removeItem(
-      AUTO_SYNC_ACTIVE_KEY
-    );
-  }
-
-  refreshAutoSyncQueueUI();
-
-  if (
-    nextEnabled &&
-    navigator.onLine
-  ) {
-    setTimeout(function(){
-      runAutoSyncQueue('toggle_on');
-    }, 400);
-  }
-});
-
-syncEvidenceBtn.addEventListener('click', function(){
-  syncCurrentEvidence();
-});
-
-retryGpsBtn.addEventListener('click', function(){
-  retryGpsForCurrentPhoto();
-});
-
-refreshMaterialButton();
-
-refreshSyncGate();
-
-refreshAutoSyncQueueUI();
-
-if (
-  navigator.onLine &&
-  isAutoSyncEnabled()
-) {
-  setTimeout(function(){
-    runAutoSyncQueue('boot');
-  }, 1200);
 }
+
+function showAppShell() {
+  el.loginView.classList.add('hidden');
+  el.sidebar.classList.remove('hidden');
+  el.mainShell.classList.remove('full-width');
+  el.topbar.classList.remove('hidden');
+  el.content.classList.remove('hidden');
+  el.bottomNav.classList.remove('hidden');
+  el.roleBadge.textContent = roleLabel(state.user?.role);
+  el.sidebarUser.innerHTML = `${escapeHtml(state.user?.fullName || state.user?.email || '')}<br><span class="muted">${escapeHtml(roleLabel(state.user?.role))}</span>`;
+  updateNetworkUi();
+  updateQueueBadge();
+}
+
+function hideAppShell() {
+  el.sidebar.classList.add('hidden');
+  el.mainShell.classList.add('full-width');
+  el.topbar.classList.add('hidden');
+  el.content.classList.add('hidden');
+  el.bottomNav.classList.add('hidden');
+}
+
+function renderNavigation() {
+  const menus = state.bootstrap?.roleMenus || ['home', 'settings'];
+  const render = (container) => {
+    container.innerHTML = menus.map(key => `<button class="nav-btn" data-nav="${escapeAttr(key)}">${escapeHtml(NAV_LABEL[key] || key)}</button>`).join('');
+    container.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => navigate(btn.dataset.nav)));
+  };
+  render(el.sideNav);
+  render(el.bottomNav);
+}
+
+async function navigate(page) {
+  const menus = state.bootstrap?.roleMenus || [];
+  if (!menus.includes(page)) page = 'home';
+  state.currentPage = page;
+  const meta = NAV_META[page] || [page, ''];
+  el.pageTitle.textContent = meta[0];
+  el.pageSubtitle.textContent = meta[1];
+  document.querySelectorAll('[data-nav]').forEach(btn => btn.classList.toggle('active', btn.dataset.nav === page));
+  el.content.innerHTML = '<div class="empty">Memuat...</div>';
+
+  if (page === 'home') return renderHome();
+  if (page === 'pekerjaan') return renderWork();
+  if (page === 'evidence') return renderEvidence();
+  if (page === 'verifikasi') return renderVerification();
+  if (page === 'monitoring') return renderMonitoring();
+  if (page === 'admin') return renderAdmin();
+  if (page === 'output') return renderOutput();
+  if (page === 'audit') return renderAudit();
+  if (page === 'settings') return renderSettings();
+}
+
+async function renderHome() {
+  await refreshLocalState();
+  let monitoring = state.monitoring;
+  if (navigator.onLine && sessionIsUsable()) {
+    try {
+      monitoring = await api('/monitoring');
+      state.monitoring = monitoring;
+      await cachePut('monitoring', monitoring);
+    } catch {}
+  } else if (!monitoring) {
+    monitoring = await cacheGet('monitoring');
+  }
+  if (navigator.onLine && hasPermission('evidence.revise')) {
+    try {
+      const rev = await api('/evidence/revisions');
+      state.revisions = rev.revisions || [];
+      await cachePut('revisions', state.revisions);
+    } catch {}
+  } else if (!state.revisions.length) {
+    state.revisions = await cacheGet('revisions') || [];
+  }
+
+  const projects = state.bootstrap?.projects || [];
+  const q = state.queue;
+  const pending = q.filter(x => x.state === 'WAITING' || x.state === 'SYNCING').length;
+  const failed = q.filter(x => x.state === 'FAILED').length;
+  const m = monitoring || { evidenceTotal: 0, waitingVerification: 0, needRevision: 0, verified: 0 };
+
+  el.content.innerHTML = `
+    ${state.config.GPS_POLICY === 'DEV' ? '<div class="warning-strip"><b>DEV MODE:</b> GPS fallback laptop masih diizinkan. Ubah GPS_POLICY ke FIELD sebelum pilot tim lapangan.</div>' : ''}
+    <div class="grid kpi">
+      ${kpi('Project', projects.length)}
+      ${kpi('Queue Lokal', pending, failed ? `${failed} gagal` : 'siap')}
+      ${kpi('Need Revision', m.needRevision || 0)}
+      ${kpi('Verified', m.verified || 0)}
+    </div>
+    <div class="grid two" style="margin-top:16px">
+      <div class="card">
+        <div class="section-head"><h2>Mulai / Lanjut Pekerjaan</h2><span class="badge ${navigator.onLine ? 'success' : 'warning'}">${navigator.onLine ? 'ONLINE' : 'OFFLINE'}</span></div>
+        <p class="muted">Tidak ada lagi tombol Ambil Project/Material/Point satu-satu. Pilih project, lalu PEMS menyiapkan workspace otomatis.</p>
+        <div class="field"><label>Project</label>${projectSelectHtml(projects, state.selectedProjectId, 'homeProjectSelect')}</div>
+        <button id="continueWorkBtn" class="btn primary full" style="margin-top:12px" ${projects.length ? '' : 'disabled'}>Lanjut Pekerjaan</button>
+      </div>
+      <div class="card">
+        <h2>Status Sistem</h2>
+        <div class="list">
+          ${statusRow('Koneksi', navigator.onLine ? 'Online' : 'Offline', navigator.onLine ? 'success' : 'warning')}
+          ${statusRow('Session', sessionIsUsable() ? 'Aktif' : 'Login diperlukan', sessionIsUsable() ? 'success' : 'danger')}
+          ${statusRow('Auto Sync', truthyConfig('AUTO_SYNC', true) ? 'Aktif' : 'Nonaktif', truthyConfig('AUTO_SYNC', true) ? 'success' : 'neutral')}
+          ${statusRow('Role', roleLabel(state.user?.role), 'info')}
+        </div>
+      </div>
+    </div>
+    ${state.revisions.length ? `
+      <div class="card" style="margin-top:16px">
+        <div class="section-head"><h2>Perlu Perbaikan</h2><span class="badge warning">${state.revisions.length}</span></div>
+        <div class="list">${state.revisions.slice(0,10).map(ev => `
+          <div class="list-item"><div><div class="item-title">${escapeHtml(ev.itemLabel || ev.designator || ev.evidenceId)}</div><div class="item-sub">${escapeHtml(ev.projectId)} • ${escapeHtml(ev.sessionId || '-')}<br>${escapeHtml(ev.revisionReason || 'Perlu revisi evidence')}</div></div><button class="btn warning small" data-start-revision="${escapeAttr(ev.evidenceId)}">Buat Revisi</button></div>`).join('')}</div>
+      </div>` : ''}
+  `;
+
+  document.getElementById('homeProjectSelect')?.addEventListener('change', e => selectProject(e.target.value, false));
+  document.getElementById('continueWorkBtn')?.addEventListener('click', async () => {
+    const select = document.getElementById('homeProjectSelect');
+    if (select?.value) await selectProject(select.value, true);
+    navigate('pekerjaan');
+  });
+  el.content.querySelectorAll('[data-start-revision]').forEach(btn => {
+    btn.addEventListener('click', () => startRevision(btn.dataset.startRevision));
+  });
+}
+
+async function startRevision(evidenceId) {
+  const ev = state.revisions.find(x => x.evidenceId === evidenceId);
+  if (!ev) return;
+  try {
+    state.selectedProjectId = ev.projectId;
+    localStorage.setItem(SELECTED_PROJECT_KEY, ev.projectId);
+    await loadWorkspace(ev.projectId);
+    state.selectedSession = (state.workspace?.pointSessions || []).find(s => s.sessionId === ev.sessionId) || null;
+    if (!state.selectedSession) throw new Error('Point Session revisi tidak ditemukan di assignment saat ini.');
+    state.requirements = await loadRequirements(ev.projectId, ev.sessionId);
+    state.selectedRequirement = (state.requirements?.requirements || []).find(r => r.projectMaterialId === ev.projectMaterialId) || null;
+    if (!state.selectedRequirement) throw new Error('Material requirement revisi tidak ditemukan.');
+    state.revisionTargetPmId = ev.projectMaterialId;
+
+    const draft = {
+      draftId: `LED-${crypto.randomUUID?.() || uid()}`,
+      projectId: ev.projectId,
+      sessionId: ev.sessionId,
+      anchorLabel: state.selectedSession.anchorLabel,
+      projectMaterialId: ev.projectMaterialId,
+      materialId: state.selectedRequirement.materialId,
+      designator: state.selectedRequirement.designator || ev.designator,
+      materialName: state.selectedRequirement.materialName || '',
+      requirementCode: state.selectedRequirement.requirementCode,
+      requiredPhotoCount: Math.max(1, Number(state.selectedRequirement.evidenceRequired || ev.requiredPhotoCount || 1)),
+      qtyPlan: state.selectedRequirement.qtyPlan,
+      qtyReal: ev.qtyReal || '',
+      fieldNote: '',
+      serverEvidenceId: '',
+      serverPhotoCount: 0,
+      workflow: 'DRAFT_LOCAL',
+      parentEvidenceId: ev.evidenceId,
+      revisionReason: ev.revisionReason || 'NEED_REVISION',
+      assignmentId: assignmentForCurrentPoint()?.assignmentId || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await idbPut(STORE_DRAFTS, draft);
+    await refreshLocalState();
+    await navigate('pekerjaan');
+    toast('Draft revisi dibuat. Ambil foto perbaikan tanpa mengubah evidence lama.', 'success', 5000);
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+  }
+}
+
+async function renderWork() {
+  const projects = state.bootstrap?.projects || [];
+  if (!projects.length) {
+    el.content.innerHTML = '<div class="empty">Belum ada project yang dapat diakses. Admin perlu cek role/assignment.</div>';
+    return;
+  }
+
+  if (!state.selectedProjectId) {
+    state.selectedProjectId = projects[0].projectId;
+    localStorage.setItem(SELECTED_PROJECT_KEY, state.selectedProjectId);
+  }
+
+  await loadWorkspace(state.selectedProjectId);
+  const workspace = state.workspace;
+  if (!workspace) {
+    el.content.innerHTML = '<div class="empty">Workspace project belum tersedia offline. Buka project ini sekali saat online.</div>';
+    return;
+  }
+
+  const sessions = workspace.pointSessions || [];
+  el.content.innerHTML = `
+    <div class="toolbar">
+      <div class="grow">${projectSelectHtml(projects, state.selectedProjectId, 'workProjectSelect')}</div>
+      <span class="badge info">${escapeHtml(workspace.project?.stakeholder || '-')}</span>
+      <span class="badge neutral">${sessions.length} Point Session</span>
+    </div>
+    <div class="split-layout">
+      <div class="card">
+        <div class="section-head"><h2>Pilih Titik</h2><span class="tiny muted">otomatis dari workspace</span></div>
+        <input id="sessionSearch" class="input" placeholder="Cari PS-000001 / label / role...">
+        <div id="sessionList" class="list" style="margin-top:12px"></div>
+      </div>
+      <div id="workRight" class="card sticky-card">
+        <div class="empty">Pilih satu titik. Requirement material akan dimuat otomatis.</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('workProjectSelect').addEventListener('change', async e => {
+    await selectProject(e.target.value, true);
+    state.selectedSession = null;
+    state.requirements = null;
+    state.selectedRequirement = null;
+    renderWork();
+  });
+  const search = document.getElementById('sessionSearch');
+  search.addEventListener('input', () => renderSessionList(search.value));
+  renderSessionList('');
+  if (state.selectedSession && sessions.some(s => s.sessionId === state.selectedSession.sessionId)) {
+    await selectSession(state.selectedSession.sessionId);
+  }
+}
+
+function renderSessionList(filter) {
+  const container = document.getElementById('sessionList');
+  if (!container || !state.workspace) return;
+  const q = String(filter || '').toLowerCase().trim();
+  const sessions = (state.workspace.pointSessions || []).filter(s => {
+    const text = [s.sessionId, s.anchorLabel, s.anchorRole, s.anchorPointId].join(' ').toLowerCase();
+    return !q || text.includes(q);
+  }).slice(0, 60);
+
+  container.innerHTML = sessions.length ? sessions.map(s => `
+    <div class="list-item clickable session-card ${state.selectedSession?.sessionId === s.sessionId ? 'selected' : ''}" data-session="${escapeAttr(s.sessionId)}">
+      <div><div class="item-title">${escapeHtml(s.anchorLabel || s.sessionId)}</div><div class="item-sub">${escapeHtml(s.sessionId)} • ${escapeHtml(s.anchorRole || '-')}<br>Plan GPS: ${formatCoord(s.latPlan)}, ${formatCoord(s.longPlan)}</div></div>
+      <span class="badge ${s.verifyStatus === 'VERIFIED' ? 'success' : s.verifyStatus === 'IN_PROGRESS' ? 'warning' : 'neutral'}">${escapeHtml(s.verifyStatus || 'DRAFT')}</span>
+    </div>
+  `).join('') : '<div class="empty">Titik tidak ditemukan.</div>';
+  container.querySelectorAll('[data-session]').forEach(node => node.addEventListener('click', () => selectSession(node.dataset.session)));
+}
+
+async function selectSession(sessionId) {
+  state.selectedSession = (state.workspace?.pointSessions || []).find(s => s.sessionId === sessionId) || null;
+  const revisionPmId = state.revisionTargetPmId || '';
+  state.selectedRequirement = null;
+  renderSessionList(document.getElementById('sessionSearch')?.value || '');
+  const right = document.getElementById('workRight');
+  if (!right || !state.selectedSession) return;
+  right.innerHTML = '<div class="empty">Memuat requirement titik...</div>';
+
+  try {
+    state.requirements = await loadRequirements(state.selectedProjectId, sessionId);
+    if (revisionPmId) {
+      state.selectedRequirement = (state.requirements?.requirements || []).find(r => r.projectMaterialId === revisionPmId) || null;
+      state.revisionTargetPmId = '';
+    }
+    renderRequirementsPanel();
+  } catch (err) {
+    right.innerHTML = `<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;
+  }
+}
+
+function renderRequirementsPanel() {
+  const right = document.getElementById('workRight');
+  if (!right || !state.requirements || !state.selectedSession) return;
+  const reqs = state.requirements.requirements || [];
+  right.innerHTML = `
+    <div class="section-head"><div><h2>${escapeHtml(state.selectedSession.anchorLabel || state.selectedSession.sessionId)}</h2><div class="small muted">${escapeHtml(state.selectedSession.sessionId)} • ${escapeHtml(state.selectedSession.anchorRole || '-')}</div></div><span class="badge info">${reqs.length} material valid</span></div>
+    ${state.requirements.warnings?.length ? `<div class="warning-strip">${escapeHtml(state.requirements.warnings.map(w => w.message || w.code).join(' • '))}</div>` : ''}
+    <div id="requirementList" class="list"></div>
+    <div id="capturePanel" style="margin-top:16px"></div>
+  `;
+
+  const list = document.getElementById('requirementList');
+  list.innerHTML = reqs.length ? reqs.map(r => {
+    const target = Number(r.evidenceRequired || 0);
+    const serverCount = Number(r.photoCount || 0);
+    const complete = target > 0 && serverCount >= target;
+    return `
+      <div class="list-item clickable material-card ${state.selectedRequirement?.projectMaterialId === r.projectMaterialId ? 'selected' : ''}" data-pm="${escapeAttr(r.projectMaterialId)}">
+        <div><div class="item-title">${escapeHtml(r.designator || r.materialName || r.projectMaterialId)}</div><div class="item-sub">${escapeHtml(r.materialName || '')}<br>${escapeHtml(r.requirementCode || 'MATERIAL')} • ${r.required ? 'WAJIB' : 'OPSIONAL'} • Evidence ${serverCount}/${target}</div></div>
+        <span class="badge ${complete ? 'success' : r.required ? 'warning' : 'neutral'}">${complete ? 'COMPLETE' : r.required ? 'BELUM' : 'OPSIONAL'}</span>
+      </div>`;
+  }).join('') : '<div class="empty">Tidak ada material valid pada titik ini.</div>';
+  list.querySelectorAll('[data-pm]').forEach(node => node.addEventListener('click', () => selectRequirement(node.dataset.pm)));
+  if (state.selectedRequirement) renderCapturePanel();
+}
+
+async function selectRequirement(projectMaterialId) {
+  state.selectedRequirement = (state.requirements?.requirements || []).find(r => r.projectMaterialId === projectMaterialId) || null;
+  renderRequirementsPanel();
+  await renderCapturePanel();
+}
+
+async function renderCapturePanel() {
+  const panel = document.getElementById('capturePanel');
+  if (!panel || !state.selectedRequirement || !state.selectedSession) return;
+  await refreshLocalState();
+  const r = state.selectedRequirement;
+  const draft = findCurrentDraft();
+  const localPhotos = draft ? state.draftsPhotos?.filter?.(p => p.draftId === draft.draftId) || [] : [];
+  const actualLocal = await photoCountForDraft(draft?.draftId);
+  const serverCount = Number(draft?.serverPhotoCount ?? r.photoCount ?? 0);
+  const target = Math.max(0, Number(r.evidenceRequired || 0));
+  const totalKnown = Math.max(serverCount, serverCount + actualLocal.unsynced);
+  const complete = target === 0 || serverCount >= target;
+
+  panel.innerHTML = `
+    <div class="divider"></div>
+    <h3>Realisasi Evidence</h3>
+    <div class="grid two">
+      <div class="field"><label>Quantity Realisasi</label><input id="qtyRealInput" class="input" type="number" step="any" value="${escapeAttr(draft?.qtyReal ?? '')}" placeholder="Opsional"></div>
+      <div class="field"><label>Target Foto</label><input class="input" disabled value="${target} foto"></div>
+    </div>
+    <div class="field" style="margin-top:10px"><label>Catatan Lapangan</label><textarea id="fieldNoteInput" class="textarea" placeholder="Kendala / kondisi khusus...">${escapeHtml(draft?.fieldNote || '')}</textarea></div>
+    <div class="status-box ${complete ? 'success' : 'neutral'}">
+      <b>Progress:</b> Server ${serverCount}/${target} • Lokal belum sync ${actualLocal.unsynced} • Total terdeteksi ${totalKnown}/${target}
+    </div>
+    <div class="toolbar" style="margin-top:12px">
+      <button id="captureBtn" class="btn primary" ${!hasPermission('evidence.capture') || (target > 0 && totalKnown >= target) ? 'disabled' : ''}>Ambil Foto + GPS</button>
+      <button id="syncNowBtn" class="btn secondary" ${!navigator.onLine ? 'disabled' : ''}>Sync Queue</button>
+      <button id="submitEvidenceBtn" class="btn success" ${!draft?.serverEvidenceId || !complete || draft?.workflow === 'SUBMITTED' ? 'disabled' : ''}>Submit Verifikasi</button>
+    </div>
+    <div id="captureHint" class="small muted">${navigator.onLine ? 'Online: foto tetap disimpan lokal dahulu, lalu auto-sync.' : 'Offline: foto aman di IndexedDB dan masuk queue.'}</div>
+  `;
+
+  document.getElementById('captureBtn')?.addEventListener('click', () => beginCapture());
+  document.getElementById('syncNowBtn')?.addEventListener('click', runSyncQueue);
+  document.getElementById('submitEvidenceBtn')?.addEventListener('click', submitCurrentEvidence);
+}
+
+function beginCapture() {
+  if (!state.selectedRequirement || !state.selectedSession) return;
+  state.cameraContext = {
+    qtyReal: document.getElementById('qtyRealInput')?.value || '',
+    fieldNote: document.getElementById('fieldNoteInput')?.value || ''
+  };
+  el.cameraInput.value = '';
+  el.cameraInput.click();
+}
+
+async function onCameraFileSelected(event) {
+  const file = event.target.files?.[0];
+  if (!file || !state.selectedRequirement || !state.selectedSession) return;
+  try {
+    toast('Membaca GPS...', 'warning');
+    const gps = await getGpsForCapture();
+    const pointDistance = distanceToSelectedPlan(gps.latitude, gps.longitude);
+
+    const blockGps = Number(configNumber('GPS_FIELD_BLOCK_M', 50));
+    const gpsPolicy = String(state.config.GPS_POLICY || 'DEV').toUpperCase();
+    if (gpsPolicy === 'FIELD' && gps.accuracy > blockGps) {
+      throw new Error(`GPS accuracy ${Math.round(gps.accuracy)} m > batas FIELD ${blockGps} m. Ulangi GPS.`);
+    }
+
+    toast('Mengoptimalkan foto...', 'warning');
+    const optimized = await optimizePhoto(file);
+    const hash = await sha256Blob(optimized.blob);
+    const draft = await getOrCreateCurrentDraft(state.cameraContext || {});
+    const photoLocalId = `LPH-${crypto.randomUUID?.() || uid()}`;
+    const photo = {
+      photoLocalId,
+      draftId: draft.draftId,
+      blob: optimized.blob,
+      fileName: optimized.fileName,
+      mimeType: optimized.blob.type || 'image/jpeg',
+      fileSize: optimized.blob.size,
+      originalFileSize: file.size,
+      photoHash: hash,
+      latitude: gps.latitude,
+      longitude: gps.longitude,
+      gpsAccuracy: gps.accuracy,
+      gpsSource: gps.source,
+      distanceToPlanM: Number.isFinite(pointDistance) ? Math.round(pointDistance * 10) / 10 : null,
+      capturedAt: new Date().toISOString(),
+      state: 'LOCAL',
+      serverPhotoId: ''
+    };
+    await idbPut(STORE_PHOTOS, photo);
+    const queueItem = {
+      queueId: `QUE-${photoLocalId}`,
+      photoLocalId,
+      draftId: draft.draftId,
+      state: 'WAITING',
+      attempts: 0,
+      lastError: '',
+      createdAt: new Date().toISOString()
+    };
+    await idbPut(STORE_QUEUE, queueItem);
+    await refreshLocalState();
+    updateQueueBadge();
+    toast(`Foto tersimpan lokal. GPS ${Math.round(gps.accuracy)} m${Number.isFinite(pointDistance) ? ` • ke titik ${Math.round(pointDistance)} m` : ''}.`, 'success');
+    await renderCapturePanel();
+    if (navigator.onLine && truthyConfig('AUTO_SYNC', true)) runSyncQueue();
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+  }
+}
+
+async function getOrCreateCurrentDraft(ctx) {
+  const existing = findCurrentDraft();
+  if (existing && !['SUBMITTED','VERIFIED','REJECTED'].includes(existing.workflow)) {
+    existing.qtyReal = ctx.qtyReal;
+    existing.fieldNote = ctx.fieldNote;
+    existing.updatedAt = new Date().toISOString();
+    await idbPut(STORE_DRAFTS, existing);
+    return existing;
+  }
+
+  const r = state.selectedRequirement;
+  const draft = {
+    draftId: `LED-${crypto.randomUUID?.() || uid()}`,
+    projectId: state.selectedProjectId,
+    sessionId: state.selectedSession.sessionId,
+    anchorLabel: state.selectedSession.anchorLabel,
+    projectMaterialId: r.projectMaterialId,
+    materialId: r.materialId,
+    designator: r.designator,
+    materialName: r.materialName,
+    requirementCode: r.requirementCode,
+    requiredPhotoCount: Math.max(0, Number(r.evidenceRequired || 0)),
+    qtyPlan: r.qtyPlan,
+    qtyReal: ctx.qtyReal,
+    fieldNote: ctx.fieldNote,
+    serverEvidenceId: '',
+    serverPhotoCount: Number(r.photoCount || 0),
+    workflow: 'DRAFT_LOCAL',
+    parentEvidenceId: '',
+    revisionReason: '',
+    assignmentId: assignmentForCurrentPoint()?.assignmentId || '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  await idbPut(STORE_DRAFTS, draft);
+  await refreshLocalState();
+  return draft;
+}
+
+function findCurrentDraft() {
+  if (!state.selectedRequirement || !state.selectedSession) return null;
+  return state.drafts
+    .filter(d => d.projectId === state.selectedProjectId && d.sessionId === state.selectedSession.sessionId && d.projectMaterialId === state.selectedRequirement.projectMaterialId)
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] || null;
+}
+
+function assignmentForCurrentPoint() {
+  const assignments = state.bootstrap?.assignments || [];
+  const exact = assignments.find(a => a.projectId === state.selectedProjectId && String(a.scopeType).toUpperCase() === 'POINT' && a.scopeValue === state.selectedSession?.sessionId);
+  return exact || assignments.find(a => a.projectId === state.selectedProjectId && String(a.scopeType).toUpperCase() === 'PROJECT') || null;
+}
+
+async function submitCurrentEvidence() {
+  const draft = findCurrentDraft();
+  if (!draft?.serverEvidenceId) {
+    toast('Evidence belum tersimpan di server.', 'warning');
+    return;
+  }
+  try {
+    const result = await api(`/evidence/${encodeURIComponent(draft.serverEvidenceId)}/submit`, {
+      method: 'POST', body: { fieldNote: draft.fieldNote || '' }
+    });
+    draft.workflow = result.workflowStatus || 'SUBMITTED';
+    draft.updatedAt = new Date().toISOString();
+    await idbPut(STORE_DRAFTS, draft);
+    await refreshLocalState();
+    toast('Evidence SUBMITTED ke tim verifikasi.', 'success');
+    await renderCapturePanel();
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+  }
+}
+
+async function runSyncQueue() {
+  if (state.syncing || !navigator.onLine || !sessionIsUsable()) {
+    updateQueueBadge();
+    return;
+  }
+  state.syncing = true;
+  updateQueueBadge();
+  try {
+    let items = (await idbGetAll(STORE_QUEUE)).filter(q => q.state === 'WAITING' || q.state === 'FAILED');
+    items.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    for (const item of items) {
+      if (!navigator.onLine || !sessionIsUsable()) break;
+      try {
+        item.state = 'SYNCING';
+        item.attempts = Number(item.attempts || 0) + 1;
+        await idbPut(STORE_QUEUE, item);
+        updateQueueBadge();
+        await syncOneQueueItem(item);
+        await idbDelete(STORE_QUEUE, item.queueId);
+      } catch (err) {
+        const msg = humanError(err);
+        if (isAuthError(err) || err?.networkError) {
+          item.state = 'WAITING';
+          item.lastError = msg;
+          await idbPut(STORE_QUEUE, item);
+          if (isAuthError(err)) {
+            clearSession();
+            toast('Session expired. Queue lokal tetap aman; login sekali untuk lanjut.', 'warning', 6000);
+            showLogin('Session expired. Login kembali; queue lokal tidak hilang.');
+          }
+          break;
+        }
+        item.state = 'FAILED';
+        item.lastError = msg;
+        await idbPut(STORE_QUEUE, item);
+        console.warn('Queue item failed', item.queueId, err);
+        continue;
+      }
+    }
+  } finally {
+    state.syncing = false;
+    await refreshLocalState();
+    updateQueueBadge();
+    if (state.currentPage === 'evidence') renderEvidence();
+    if (state.currentPage === 'pekerjaan' && state.selectedRequirement) renderCapturePanel();
+  }
+}
+
+async function syncOneQueueItem(item) {
+  const photo = await idbGet(STORE_PHOTOS, item.photoLocalId);
+  const draft = await idbGet(STORE_DRAFTS, item.draftId);
+  if (!photo || !draft) throw new Error('Queue orphan: draft/foto lokal tidak ditemukan.');
+  const base64 = await blobToBase64(photo.blob);
+  const result = await api('/evidence/sync-photo', {
+    method: 'POST',
+    body: {
+      projectId: draft.projectId,
+      sessionId: draft.sessionId,
+      projectMaterialId: draft.projectMaterialId,
+      evidenceDraftId: draft.draftId,
+      photoLocalId: photo.photoLocalId,
+      latitude: photo.latitude,
+      longitude: photo.longitude,
+      gpsAccuracy: photo.gpsAccuracy,
+      gpsSource: photo.gpsSource,
+      distanceToPlanM: photo.distanceToPlanM,
+      capturedAt: photo.capturedAt,
+      fileName: photo.fileName,
+      mimeType: photo.mimeType,
+      fileSize: photo.fileSize,
+      photoHash: photo.photoHash,
+      deviceId: getDeviceId(),
+      qtyPlan: draft.qtyPlan,
+      qtyReal: draft.qtyReal,
+      fieldNote: draft.fieldNote,
+      assignmentId: draft.assignmentId || '',
+      parentEvidenceId: draft.parentEvidenceId || '',
+      revisionReason: draft.revisionReason || '',
+      base64
+    }
+  });
+
+  draft.serverEvidenceId = result.evidenceItemId;
+  draft.serverPhotoCount = Number(result.photoCount || draft.serverPhotoCount || 0);
+  draft.requiredPhotoCount = Number(result.requiredPhotoCount || draft.requiredPhotoCount || 1);
+  draft.workflow = 'SYNCED';
+  draft.updatedAt = new Date().toISOString();
+  await idbPut(STORE_DRAFTS, draft);
+
+  photo.state = 'SYNCED';
+  photo.serverPhotoId = result.photoId || '';
+  photo.serverEvidenceId = result.evidenceItemId || '';
+  photo.duplicateHashOf = result.duplicateHashOf || '';
+  photo.syncedAt = new Date().toISOString();
+  await idbPut(STORE_PHOTOS, photo);
+}
+
+async function renderEvidence() {
+  await refreshLocalState();
+  const drafts = state.drafts.slice().sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+  const queue = state.queue;
+  el.content.innerHTML = `
+    <div class="grid kpi">
+      ${kpi('Draft Lokal', drafts.filter(d => d.workflow === 'DRAFT_LOCAL').length)}
+      ${kpi('Menunggu Sync', queue.filter(q => q.state === 'WAITING' || q.state === 'SYNCING').length)}
+      ${kpi('Sync Gagal', queue.filter(q => q.state === 'FAILED').length)}
+      ${kpi('Submitted', drafts.filter(d => d.workflow === 'SUBMITTED').length)}
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="section-head"><h2>Queue & Draft Evidence</h2><button id="evidenceSyncBtn" class="btn secondary small" ${!navigator.onLine ? 'disabled' : ''}>Sync Sekarang</button></div>
+      <div class="list">
+        ${drafts.length ? drafts.map(d => draftCardHtml(d, queue)).join('') : '<div class="empty">Belum ada draft evidence lokal.</div>'}
+      </div>
+    </div>
+  `;
+  document.getElementById('evidenceSyncBtn')?.addEventListener('click', runSyncQueue);
+  el.content.querySelectorAll('[data-draft-submit]').forEach(btn => btn.addEventListener('click', async () => {
+    const draft = await idbGet(STORE_DRAFTS, btn.dataset.draftSubmit);
+    if (!draft?.serverEvidenceId) return;
+    try {
+      const result = await api(`/evidence/${encodeURIComponent(draft.serverEvidenceId)}/submit`, { method:'POST', body:{ fieldNote:draft.fieldNote || '' } });
+      draft.workflow = result.workflowStatus;
+      draft.updatedAt = new Date().toISOString();
+      await idbPut(STORE_DRAFTS,draft);
+      toast('Evidence submitted.', 'success');
+      renderEvidence();
+    } catch(err) { toast(humanError(err),'danger',6000); }
+  }));
+}
+
+function draftCardHtml(draft, queue) {
+  const q = queue.filter(x => x.draftId === draft.draftId);
+  const waiting = q.filter(x => ['WAITING','SYNCING'].includes(x.state)).length;
+  const failed = q.filter(x => x.state === 'FAILED').length;
+  const complete = Number(draft.serverPhotoCount || 0) >= Number(draft.requiredPhotoCount || 1);
+  return `
+    <div class="list-item">
+      <div><div class="item-title">${escapeHtml(draft.designator || draft.materialName || draft.projectMaterialId)}</div><div class="item-sub">${escapeHtml(draft.projectId)} • ${escapeHtml(draft.sessionId)}<br>Server ${Number(draft.serverPhotoCount || 0)}/${Number(draft.requiredPhotoCount || 0)} • Queue ${waiting}${failed ? ` • Failed ${failed}` : ''}</div></div>
+      <div style="display:grid;gap:7px;justify-items:end"><span class="badge ${workflowBadge(draft.workflow)}">${escapeHtml(draft.workflow || 'DRAFT_LOCAL')}</span>${draft.serverEvidenceId && complete && draft.workflow !== 'SUBMITTED' ? `<button class="btn success small" data-draft-submit="${escapeAttr(draft.draftId)}">Submit</button>` : ''}</div>
+    </div>`;
+}
+
+async function renderVerification() {
+  if (!hasPermission('verification.decide')) {
+    el.content.innerHTML = '<div class="empty">Role ini tidak memiliki hak verifikasi.</div>';
+    return;
+  }
+  if (!navigator.onLine) {
+    el.content.innerHTML = '<div class="empty">Verifikasi membutuhkan koneksi server. Evidence lapangan tetap dapat dibuat offline.</div>';
+    return;
+  }
+  try {
+    const data = await api('/verification/queue');
+    state.verificationQueue = data.items || [];
+    el.content.innerHTML = `
+      <div class="toolbar"><span class="badge warning">${state.verificationQueue.length} waiting</span><button id="refreshVerification" class="btn ghost small">Refresh</button></div>
+      <div class="list">${state.verificationQueue.length ? state.verificationQueue.map(verificationCardHtml).join('') : '<div class="empty">Tidak ada evidence menunggu verifikasi.</div>'}</div>
+    `;
+    document.getElementById('refreshVerification')?.addEventListener('click', renderVerification);
+    el.content.querySelectorAll('[data-verify]').forEach(btn => btn.addEventListener('click', () => handleVerificationAction(btn)));
+  } catch (err) {
+    el.content.innerHTML = `<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;
+  }
+}
+
+function verificationCardHtml(ev) {
+  const photos = ev.photos || [];
+  return `
+    <div class="card">
+      <div class="section-head"><div><h3>${escapeHtml(ev.itemLabel || ev.designator || ev.evidenceId)}</h3><div class="small muted">${escapeHtml(ev.evidenceId)} • V${Number(ev.versionNo || 1)} • ${escapeHtml(ev.projectId)} • ${escapeHtml(ev.sessionId || '-')}</div></div><span class="badge warning">SUBMITTED</span></div>
+      <div class="grid three">
+        <div><div class="tiny muted">GPS Accuracy</div><b>${formatNumber(ev.gpsAccuracy)} m</b></div>
+        <div><div class="tiny muted">Distance to Plan</div><b>${formatNumber(ev.distanceToPlanM)} m</b></div>
+        <div><div class="tiny muted">Foto</div><b>${photos.length}/${Number(ev.requiredPhotoCount || 1)}</b></div>
+      </div>
+      ${ev.fieldNote ? `<div class="status-box neutral"><b>Catatan Lapangan:</b> ${escapeHtml(ev.fieldNote)}</div>` : ''}
+      <div class="photo-grid" style="margin-top:12px">${photos.map(p => `<div class="photo-card"><div class="small"><b>${escapeHtml(p.fileName || p.photoId)}</b></div><div class="tiny muted">GPS ${formatNumber(p.gpsAccuracy)} m • Ke titik ${formatNumber(p.distanceToPlanM)} m</div>${p.duplicateStatus === 'HASH_DUPLICATE' ? '<span class="badge danger" style="margin-top:6px">POTENSI DUPLIKAT</span>' : ''}${p.url ? `<a class="btn outline small" href="${escapeAttr(p.url)}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;text-decoration:none">Lihat Foto Drive</a>` : ''}</div>`).join('')}</div>
+      <div class="form-row" style="margin-top:14px">
+        <div class="field"><label>Reason Code</label><select class="select" data-reason-for="${escapeAttr(ev.evidenceId)}"><option value="">-- pilih bila revision/reject --</option><option>FOTO_TIDAK_JELAS</option><option>GPS_TIDAK_SESUAI</option><option>MATERIAL_TIDAK_SESUAI</option><option>QTY_TIDAK_SESUAI</option><option>EVIDENCE_KURANG</option><option>LAINNYA</option></select></div>
+        <div class="field"><label>Catatan</label><input class="input" data-note-for="${escapeAttr(ev.evidenceId)}" placeholder="Catatan verifier"></div>
+      </div>
+      <div class="toolbar" style="margin-top:12px"><button class="btn success" data-verify="approve" data-id="${escapeAttr(ev.evidenceId)}">Approve</button><button class="btn warning" data-verify="revision" data-id="${escapeAttr(ev.evidenceId)}">Need Revision</button><button class="btn danger" data-verify="reject" data-id="${escapeAttr(ev.evidenceId)}">Reject</button></div>
+    </div>`;
+}
+
+async function handleVerificationAction(btn) {
+  const id = btn.dataset.id;
+  const action = btn.dataset.verify;
+  const reasonCode = document.querySelector(`[data-reason-for="${cssEscape(id)}"]`)?.value || '';
+  const note = document.querySelector(`[data-note-for="${cssEscape(id)}"]`)?.value || '';
+  if ((action === 'revision' || action === 'reject') && !reasonCode && !note) {
+    toast('Revision/Reject wajib punya alasan.', 'warning');
+    return;
+  }
+  try {
+    await api(`/verification/${encodeURIComponent(id)}/${action}`, { method:'POST', body:{reasonCode,note} });
+    toast(`Evidence ${action.toUpperCase()} berhasil.`, 'success');
+    renderVerification();
+  } catch(err) { toast(humanError(err),'danger',6000); }
+}
+
+async function renderMonitoring() {
+  let data = null;
+  if (navigator.onLine) {
+    try { data = await api('/monitoring'); await cachePut('monitoring', data); } catch {}
+  }
+  data = data || await cacheGet('monitoring') || {};
+  const statuses = data.byStatus || {};
+  el.content.innerHTML = `
+    <div class="grid kpi">
+      ${kpi('Evidence', data.evidenceTotal || 0)}
+      ${kpi('Waiting Verif', data.waitingVerification || 0)}
+      ${kpi('Need Revision', data.needRevision || 0)}
+      ${kpi('Verified', data.verified || 0)}
+    </div>
+    <div class="card" style="margin-top:16px"><h2>Status Workflow</h2><div class="list">${Object.keys(statuses).length ? Object.entries(statuses).sort((a,b)=>b[1]-a[1]).map(([k,v])=>statusRow(k,v,workflowBadge(k))).join('') : '<div class="empty">Belum ada data monitoring.</div>'}</div></div>
+  `;
+}
+
+async function renderAdmin() {
+  if (!hasPermission('user.manage') && !hasPermission('assignment.manage')) {
+    el.content.innerHTML = '<div class="empty">Role ini tidak memiliki menu Admin.</div>';
+    return;
+  }
+  if (!navigator.onLine) {
+    el.content.innerHTML = '<div class="empty">Admin master data membutuhkan koneksi server.</div>';
+    return;
+  }
+  try {
+    const [usersData, assignData, configData] = await Promise.all([api('/admin/users'), api('/admin/assignments'), api('/admin/config')]);
+    const users = usersData.users || [];
+    const assignments = assignData.assignments || [];
+    const adminConfig = configData.config || {};
+    const projects = state.bootstrap?.projects || [];
+    el.content.innerHTML = `
+      <div class="grid two">
+        <div class="card"><h2>User & Role</h2>
+          <div class="form-row"><div class="field"><label>Email</label><input id="adminUserEmail" class="input" placeholder="nama@domain.com"></div><div class="field"><label>Nama</label><input id="adminUserName" class="input"></div></div>
+          <div class="form-row" style="margin-top:10px"><div class="field"><label>Role</label><select id="adminUserRole" class="select"><option>LAPANGAN</option><option>ADMIN</option><option>VERIFIER</option><option>PM_LEADER</option></select></div><div class="field"><label>Area</label><input id="adminUserArea" class="input" placeholder="Pontianak"></div></div>
+          <button id="saveUserBtn" class="btn secondary full" style="margin-top:12px">Simpan User</button>
+        </div>
+        <div class="card"><h2>Assignment</h2>
+          <div class="field"><label>User</label><select id="assignUser" class="select">${users.map(u=>`<option value="${escapeAttr(u.email)}">${escapeHtml(u.fullName || u.email)} — ${escapeHtml(u.role)}</option>`).join('')}</select></div>
+          <div class="field" style="margin-top:10px"><label>Project</label><select id="assignProject" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}">${escapeHtml(p.projectId)} — ${escapeHtml(p.projectName)}</option>`).join('')}</select></div>
+          <div class="form-row" style="margin-top:10px"><div class="field"><label>Scope</label><select id="assignScope" class="select"><option>PROJECT</option><option>POINT</option></select></div><div class="field"><label>Scope Value</label><input id="assignScopeValue" class="input" placeholder="Kosong untuk PROJECT / PS-... untuk POINT"></div></div>
+          <button id="saveAssignmentBtn" class="btn secondary full" style="margin-top:12px">Simpan Assignment</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px"><h2>App Config Operasional</h2>
+        <div class="grid three">
+          <div class="field"><label>GPS Policy</label><select id="cfgGpsPolicy" class="select"><option ${String(adminConfig.GPS_POLICY).toUpperCase()==='DEV'?'selected':''}>DEV</option><option ${String(adminConfig.GPS_POLICY).toUpperCase()==='FIELD'?'selected':''}>FIELD</option></select></div>
+          <div class="field"><label>GPS Field Block (m)</label><input id="cfgGpsBlock" class="input" type="number" value="${escapeAttr(adminConfig.GPS_FIELD_BLOCK_M ?? 50)}"></div>
+          <div class="field"><label>Distance Warning (m)</label><input id="cfgDistanceWarn" class="input" type="number" value="${escapeAttr(adminConfig.POINT_DISTANCE_WARNING_M ?? 30)}"></div>
+        </div>
+        <button id="saveOperationalConfigBtn" class="btn secondary" style="margin-top:12px">Simpan Config</button>
+        <div class="small muted" style="margin-top:8px">Gunakan DEV selama test laptop. Ganti FIELD sebelum pilot tim lapangan.</div>
+      </div>
+      <div class="card" style="margin-top:16px"><h2>Daftar User</h2><div class="table-wrap"><table><thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Area</th><th>Aktif</th></tr></thead><tbody>${users.map(u=>`<tr><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.fullName)}</td><td>${escapeHtml(u.role)}</td><td>${escapeHtml(u.area)}</td><td>${u.active?'YES':'NO'}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="card" style="margin-top:16px"><h2>Assignment Aktif</h2><div class="table-wrap"><table><thead><tr><th>User</th><th>Project</th><th>Scope</th><th>Value</th><th>Status</th></tr></thead><tbody>${assignments.map(a=>`<tr><td>${escapeHtml(a.userEmail)}</td><td>${escapeHtml(a.projectId)}</td><td>${escapeHtml(a.scopeType)}</td><td>${escapeHtml(a.scopeValue)}</td><td>${escapeHtml(a.status)}</td></tr>`).join('')}</tbody></table></div></div>
+    `;
+    document.getElementById('saveUserBtn')?.addEventListener('click', saveAdminUser);
+    document.getElementById('saveAssignmentBtn')?.addEventListener('click', saveAdminAssignment);
+    document.getElementById('saveOperationalConfigBtn')?.addEventListener('click', saveOperationalConfig);
+  } catch(err) { el.content.innerHTML=`<div class="status-box danger">${escapeHtml(humanError(err))}</div>`; }
+}
+
+async function saveAdminUser() {
+  try {
+    await api('/admin/users/upsert', {method:'POST', body:{email:value('adminUserEmail'),fullName:value('adminUserName'),role:value('adminUserRole'),area:value('adminUserArea'),active:true}});
+    toast('User disimpan.', 'success');
+    renderAdmin();
+  } catch(err){toast(humanError(err),'danger',6000);}
+}
+
+async function saveAdminAssignment() {
+  try {
+    await api('/admin/assignments/upsert', {method:'POST', body:{userEmail:value('assignUser'),projectId:value('assignProject'),scopeType:value('assignScope'),scopeValue:value('assignScopeValue'),status:'ACTIVE',active:true}});
+    toast('Assignment disimpan.', 'success');
+    renderAdmin();
+  } catch(err){toast(humanError(err),'danger',6000);}
+}
+
+async function saveOperationalConfig() {
+  try {
+    const updates = [
+      ['GPS_POLICY', value('cfgGpsPolicy')],
+      ['GPS_FIELD_BLOCK_M', value('cfgGpsBlock')],
+      ['POINT_DISTANCE_WARNING_M', value('cfgDistanceWarn')]
+    ];
+    for (const [key, val] of updates) {
+      await api('/admin/config', { method:'POST', body:{ key, value:val } });
+    }
+    const boot = await api('/bootstrap');
+    state.bootstrap = boot;
+    state.user = boot.user;
+    state.config = boot.config || {};
+    await cachePut('bootstrap', boot);
+    toast('Config operasional disimpan.', 'success');
+    renderAdmin();
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+  }
+}
+
+async function renderOutput() {
+  let caps = state.bootstrap?.outputCapabilities || {};
+  if (navigator.onLine) {
+    try { caps = await api('/outputs/capabilities'); } catch {}
+  }
+  el.content.innerHTML = `
+    <div class="card"><h2>Output Generation Layer</h2><p class="muted">Fondasi stakeholder mapping sudah masuk V15. Preview boleh memakai data belum verified dengan penanda DRAFT; output resmi/final hanya memakai VERIFIED evidence.</p>
+      <div class="list">
+        ${statusRow('KML Plan / Realisasi', caps.kmlPlan || caps.kml || 'FOUNDATION_READY', 'success')}
+        ${statusRow('KMZ Evidence', caps.kmzEvidence || 'NEXT_INCREMENT', 'warning')}
+        ${statusRow('Word Evidence Report', caps.wordEvidence || caps.word || 'NEXT_INCREMENT', 'warning')}
+        ${statusRow('PDF Evidence Report', caps.pdfEvidence || caps.pdf || 'NEXT_INCREMENT', 'warning')}
+      </div>
+      <div class="status-box neutral"><b>Rule:</b> Official Output = VERIFIED EVIDENCE. Data stakeholder/material/designator tetap dipisahkan melalui mapping project.</div>
+    </div>`;
+}
+
+async function renderAudit() {
+  if (!hasPermission('audit.read')) { el.content.innerHTML='<div class="empty">Tidak memiliki hak audit.</div>'; return; }
+  if (!navigator.onLine) { el.content.innerHTML='<div class="empty">Audit Log dibaca dari server.</div>'; return; }
+  try {
+    const data = await api('/audit?limit=80');
+    const items = data.items || [];
+    el.content.innerHTML = `<div class="card"><h2>Audit Terbaru</h2><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>User</th><th>Role</th><th>Action</th><th>Entity</th><th>Reason</th></tr></thead><tbody>${items.map(a=>`<tr><td>${formatDate(a.CREATED_AT)}</td><td>${escapeHtml(a.USER_EMAIL)}</td><td>${escapeHtml(a.ROLE)}</td><td>${escapeHtml(a.ACTION)}</td><td>${escapeHtml(a.ENTITY_ID)}</td><td>${escapeHtml(a.REASON)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  } catch(err){el.content.innerHTML=`<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;}
+}
+
+function renderSettings() {
+  el.content.innerHTML = `
+    <div class="grid two">
+      <div class="card"><h2>Perangkat</h2><div class="list">${statusRow('Device ID', getDeviceId(), 'neutral')}${statusRow('App Version', APP_VERSION, 'info')}${statusRow('API Gateway', state.apiBase || 'BELUM ADA', state.apiBase ? 'success':'danger')}${statusRow('Session Expiry', state.sessionExpiresAt ? formatDate(state.sessionExpiresAt) : 'BELUM ADA', sessionIsUsable()?'success':'warning')}</div></div>
+      <div class="card"><h2>Konfigurasi Operasional</h2><div class="list">${statusRow('GPS Policy', state.config.GPS_POLICY || '-', state.config.GPS_POLICY === 'FIELD'?'success':'warning')}${statusRow('GPS Field Block', `${configNumber('GPS_FIELD_BLOCK_M',50)} m`, 'neutral')}${statusRow('Distance Warning', `${configNumber('POINT_DISTANCE_WARNING_M',30)} m`, 'neutral')}${statusRow('Photo Max', `${configNumber('MAX_PHOTO_MB',5.5)} MB`, 'neutral')}</div><button id="changeGatewayBtn" class="btn ghost full" style="margin-top:12px">Ubah API Gateway Perangkat Ini</button></div>
+    </div>`;
+  document.getElementById('changeGatewayBtn')?.addEventListener('click', () => {
+    const next = prompt('API Gateway URL', state.apiBase || '');
+    if (!next) return;
+    localStorage.setItem(API_BASE_KEY, next.trim().replace(/\/$/, ''));
+    location.reload();
+  });
+}
+
+async function selectProject(projectId, preload) {
+  state.selectedProjectId = projectId;
+  localStorage.setItem(SELECTED_PROJECT_KEY, projectId);
+  if (preload) await loadWorkspace(projectId);
+}
+
+async function loadWorkspace(projectId) {
+  const key = `workspace:${projectId}`;
+  if (navigator.onLine && sessionIsUsable()) {
+    try {
+      state.workspace = await api(`/projects/${encodeURIComponent(projectId)}/workspace`);
+      await cachePut(key, state.workspace);
+      return state.workspace;
+    } catch (err) {
+      const cached = await cacheGet(key);
+      if (cached) { state.workspace = cached; return cached; }
+      throw err;
+    }
+  }
+  state.workspace = await cacheGet(key);
+  return state.workspace;
+}
+
+async function loadRequirements(projectId, sessionId) {
+  const key = `requirements:${projectId}:${sessionId}`;
+  if (navigator.onLine && sessionIsUsable()) {
+    try {
+      const data = await api(`/points/${encodeURIComponent(sessionId)}/requirements?projectId=${encodeURIComponent(projectId)}`);
+      await cachePut(key, data);
+      return data;
+    } catch (err) {
+      const cached = await cacheGet(key);
+      if (cached) return cached;
+      throw err;
+    }
+  }
+  const cached = await cacheGet(key);
+  if (!cached) throw new Error('Requirement titik ini belum pernah dicache. Buka titik sekali saat online sebelum bekerja offline.');
+  return cached;
+}
+
+async function api(path, options = {}) {
+  const result = await apiRaw(path, options);
+  if (!result.ok) throw apiError(result);
+  return result.data;
+}
+
+async function apiRaw(path, options = {}) {
+  if (!state.apiBase) throw new Error('API Gateway belum diatur.');
+  const method = options.method || 'GET';
+  const headers = { Accept: 'application/json' };
+  if (options.auth !== false) {
+    if (!state.sessionToken) throw apiError({status:401,error:'SESSION_REQUIRED',message:'Login diperlukan.'});
+    headers.Authorization = `Bearer ${state.sessionToken}`;
+  }
+  let body;
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(options.body);
+  }
+  let response;
+  try {
+    response = await fetch(`${state.apiBase}${path}`, { method, headers, body, cache:'no-store' });
+  } catch (err) {
+    const e = new Error('Tidak dapat terhubung ke API Gateway.');
+    e.networkError = true;
+    throw e;
+  }
+  let data;
+  try { data = await response.json(); }
+  catch { throw new Error(`API response bukan JSON (HTTP ${response.status}).`); }
+  if (!response.ok || data.ok === false) throw apiError(data, response.status);
+  return data;
+}
+
+function apiError(data, fallbackStatus) {
+  const err = new Error(data?.message || data?.error || 'API error');
+  err.status = Number(data?.status || fallbackStatus || 500);
+  err.code = data?.error || '';
+  return err;
+}
+
+function isAuthError(err) { return Number(err?.status) === 401 || ['SESSION_REQUIRED','SESSION_EXPIRED'].includes(err?.code); }
+function humanError(err) { return err?.message || String(err || 'Terjadi kesalahan.'); }
+
+async function getGpsForCapture() {
+  const live = await getLiveGps().catch(err => ({ error: err }));
+  if (!live.error) {
+    localStorage.setItem(LAST_GPS_KEY, JSON.stringify({...live, cachedAt:new Date().toISOString()}));
+    return live;
+  }
+  const policy = String(state.config.GPS_POLICY || 'DEV').toUpperCase();
+  if (policy === 'DEV') {
+    const cached = safeJson(localStorage.getItem(LAST_GPS_KEY));
+    if (cached && Number.isFinite(Number(cached.latitude)) && Number.isFinite(Number(cached.longitude))) {
+      return { latitude:Number(cached.latitude), longitude:Number(cached.longitude), accuracy:Math.max(999,Number(cached.accuracy)||999), source:'DEV_CACHED_GPS' };
+    }
+  }
+  throw live.error;
+}
+
+function getLiveGps() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('Geolocation tidak didukung perangkat.'));
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ latitude:pos.coords.latitude, longitude:pos.coords.longitude, accuracy:Number(pos.coords.accuracy || 9999), source:'LIVE_GPS' }),
+      err => reject(new Error(err.code === 3 ? 'Permintaan GPS timeout.' : `GPS gagal: ${err.message || err.code}`)),
+      { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
+    );
+  });
+}
+
+function distanceToSelectedPlan(lat, lng) {
+  const plat = Number(state.selectedSession?.latPlan);
+  const plng = Number(state.selectedSession?.longPlan);
+  if (!Number.isFinite(plat) || !Number.isFinite(plng) || !Number.isFinite(lat) || !Number.isFinite(lng)) return NaN;
+  return haversine(lat, lng, plat, plng);
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000, rad = d => d * Math.PI / 180;
+  const dLat = rad(lat2-lat1), dLon = rad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+async function optimizePhoto(file) {
+  const maxMb = configNumber('MAX_PHOTO_MB', 5.5);
+  const maxBytes = maxMb * 1024 * 1024;
+  const maxEdge = configNumber('PHOTO_MAX_EDGE', 2560);
+  if (file.size <= maxBytes && ['image/jpeg','image/jpg','image/webp'].includes(String(file.type).toLowerCase())) {
+    return { blob:file, fileName:file.name || 'evidence.jpg', optimized:false };
+  }
+  const bitmap = await createImageBitmap(file);
+  try {
+    let w = bitmap.width, h = bitmap.height;
+    const scale = Math.min(1, maxEdge / Math.max(w,h));
+    w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+    let quality = .84, blob;
+    for (let i=0;i<6;i++) {
+      const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
+      const ctx=canvas.getContext('2d',{alpha:false}); ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h); ctx.drawImage(bitmap,0,0,w,h);
+      blob = await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('Kompresi foto gagal.')),'image/jpeg',quality));
+      if (blob.size <= maxBytes) break;
+      quality=Math.max(.56,quality-.07); w=Math.max(1,Math.round(w*.86)); h=Math.max(1,Math.round(h*.86));
+    }
+    if (!blob || blob.size > maxBytes) throw new Error(`Foto masih terlalu besar setelah optimasi (${formatBytes(blob?.size || 0)}).`);
+    return { blob, fileName:(file.name || 'evidence').replace(/\.[^.]+$/, '') + '.jpg', optimized:true };
+  } finally { bitmap.close?.(); }
+}
+
+async function sha256Blob(blob) {
+  const buf = await blob.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader(); r.onload=()=>resolve(String(r.result).split(',')[1]||''); r.onerror=()=>reject(new Error('Gagal membaca foto lokal.')); r.readAsDataURL(blob);
+  });
+}
+
+function getDeviceId() {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) { id = `DEV-${crypto.randomUUID?.() || uid()}`; localStorage.setItem(DEVICE_KEY,id); }
+  return id;
+}
+
+async function refreshLocalState() {
+  state.drafts = await idbGetAll(STORE_DRAFTS);
+  state.queue = await idbGetAll(STORE_QUEUE);
+  updateQueueBadge();
+}
+
+async function photoCountForDraft(draftId) {
+  if (!draftId) return { total:0, unsynced:0, synced:0 };
+  const photos = (await idbGetAll(STORE_PHOTOS)).filter(p => p.draftId === draftId);
+  return { total:photos.length, unsynced:photos.filter(p=>p.state!=='SYNCED').length, synced:photos.filter(p=>p.state==='SYNCED').length };
+}
+
+function updateNetworkUi() {
+  const online = navigator.onLine;
+  el.netBadge.textContent = online ? 'Online' : 'Offline';
+  el.netBadge.className = `badge ${online ? 'success':'warning'}`;
+}
+
+function updateQueueBadge() {
+  const pending = (state.queue || []).filter(q => ['WAITING','SYNCING'].includes(q.state)).length;
+  const failed = (state.queue || []).filter(q => q.state === 'FAILED').length;
+  el.queueBadge.textContent = failed ? `Queue ${pending} • Failed ${failed}` : `Queue ${pending}`;
+  el.queueBadge.className = `badge ${failed ? 'danger' : pending ? 'warning' : 'success'}`;
+}
+
+function hasPermission(p) { return (state.user?.permissions || []).includes(p); }
+function configNumber(key, fallback) { const n=Number(state.config?.[key]); return Number.isFinite(n)?n:fallback; }
+function truthyConfig(key, fallback) { const v=state.config?.[key]; if(v===undefined||v===null||v==='')return fallback; return ['TRUE','1','YES','ON'].includes(String(v).toUpperCase()); }
+
+function projectSelectHtml(projects, selected, id) {
+  return `<select id="${escapeAttr(id)}" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}" ${p.projectId===selected?'selected':''}>${escapeHtml(p.projectId)} — ${escapeHtml(p.projectName || p.lopRing || '')}</option>`).join('')}</select>`;
+}
+function kpi(label,value,sub='') { return `<div class="card kpi-card"><div class="value">${escapeHtml(String(value ?? 0))}</div><div class="label">${escapeHtml(label)}${sub?` • ${escapeHtml(sub)}`:''}</div></div>`; }
+function statusRow(label,value,badge='neutral') { return `<div class="list-item"><div><div class="item-title">${escapeHtml(label)}</div></div><span class="badge ${badge}">${escapeHtml(String(value ?? '-'))}</span></div>`; }
+function workflowBadge(status) { const s=String(status||'').toUpperCase(); if(['VERIFIED','SYNCED','COMPLETE'].includes(s))return 'success'; if(['SUBMITTED','QUEUED','SYNCING','NEED_REVISION','REOPENED'].includes(s))return 'warning'; if(['REJECTED','FAILED','SYNC_ERROR'].includes(s))return 'danger'; return 'neutral'; }
+function roleLabel(role) { return {LAPANGAN:'LAPANGAN',ADMIN:'ADMIN',VERIFIER:'VERIFIER',PM_LEADER:'PM / LEADER'}[String(role||'').toUpperCase()] || String(role||'-'); }
+function formatNumber(v) { const n=Number(v); return Number.isFinite(n)?(Math.round(n*10)/10).toLocaleString('id-ID'):'-'; }
+function formatCoord(v) { const n=Number(v); return Number.isFinite(n)?n.toFixed(6):'-'; }
+function formatBytes(bytes) { const n=Number(bytes)||0; if(n<1024)return `${n} B`; if(n<1024*1024)return `${(n/1024).toFixed(1)} KB`; return `${(n/1024/1024).toFixed(2)} MB`; }
+function formatDate(v) { if(!v)return '-'; const d=new Date(v); return isNaN(d)?escapeHtml(String(v)):d.toLocaleString('id-ID'); }
+function value(id) { return document.getElementById(id)?.value || ''; }
+function safeJson(v) { try{return JSON.parse(v)}catch{return null} }
+function uid() { return `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+function escapeAttr(value) { return escapeHtml(value).replace(/`/g,'&#096;'); }
+function cssEscape(value) { return window.CSS?.escape ? CSS.escape(value) : String(value).replace(/(["\\])/g,'\\$1'); }
+
+let toastTimer;
+function toast(message,type='neutral',duration=3500) {
+  clearTimeout(toastTimer); el.toast.className=`toast ${type}`; el.toast.textContent=message; el.toast.classList.remove('hidden');
+  toastTimer=setTimeout(()=>el.toast.classList.add('hidden'),duration);
+}
+
+function openDb() {
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(DB_NAME,DB_VERSION);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      if(!db.objectStoreNames.contains(STORE_CACHE))db.createObjectStore(STORE_CACHE,{keyPath:'key'});
+      if(!db.objectStoreNames.contains(STORE_DRAFTS))db.createObjectStore(STORE_DRAFTS,{keyPath:'draftId'});
+      if(!db.objectStoreNames.contains(STORE_PHOTOS))db.createObjectStore(STORE_PHOTOS,{keyPath:'photoLocalId'});
+      if(!db.objectStoreNames.contains(STORE_QUEUE))db.createObjectStore(STORE_QUEUE,{keyPath:'queueId'});
+    };
+    req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error);
+  });
+}
+
+async function withStore(name,mode,fn) {
+  const db=await openDb();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(name,mode), store=tx.objectStore(name); let req;
+    try{req=fn(store)}catch(err){reject(err);return}
+    tx.oncomplete=()=>resolve(req?.result); tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error);
+  });
+}
+function idbPut(store,value){return withStore(store,'readwrite',s=>s.put(value));}
+function idbDelete(store,key){return withStore(store,'readwrite',s=>s.delete(key));}
+function idbGet(store,key){return new Promise(async(resolve,reject)=>{try{const db=await openDb();const tx=db.transaction(store,'readonly');const r=tx.objectStore(store).get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)}catch(e){reject(e)}});}
+function idbGetAll(store){return new Promise(async(resolve,reject)=>{try{const db=await openDb();const tx=db.transaction(store,'readonly');const r=tx.objectStore(store).getAll();r.onsuccess=()=>resolve(r.result||[]);r.onerror=()=>reject(r.error)}catch(e){reject(e)}});}
+function cachePut(key,value){return idbPut(STORE_CACHE,{key,value,updatedAt:new Date().toISOString()});}
+async function cacheGet(key){const row=await idbGet(STORE_CACHE,key);return row?.value || null;}

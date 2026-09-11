@@ -1,0 +1,11 @@
+{
+  "name": "PEMS V15 - Project Evidence Management System",
+  "short_name": "PEMS V15",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "lang": "id-ID",
+  "description": "PEMS V15 Consolidated untuk Lapangan, Admin, Verifier, dan PM/Leader"
+}
