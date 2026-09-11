@@ -7,7 +7,7 @@
   <meta name="description" content="PEMS V15 - Project Evidence Management System">
   <title>PEMS V15</title>
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=v15-r7-active-draft">
+  <link rel="stylesheet" href="./styles.css?v=v15-1-r8">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -17,7 +17,7 @@
         <div class="brand-mark">P</div>
         <div>
           <div class="brand-title">PEMS</div>
-          <div class="brand-sub">V15 Consolidated R7</div>
+          <div class="brand-sub">V15.1 Operations R8</div>
         </div>
       </div>
       <nav id="sideNav" class="side-nav"></nav>
@@ -34,6 +34,25 @@
           <div id="pageSubtitle" class="page-subtitle">PEMS V15</div>
         </div>
         <div class="topbar-right">
+          <div class="notification-wrap">
+            <button id="notifBtn" class="notif-btn" type="button" aria-label="Notifikasi">
+              <span class="notif-icon">●</span>
+              <span class="notif-text">Notifikasi</span>
+              <span id="notifBadge" class="notif-count hidden">0</span>
+            </button>
+            <div id="notifPanel" class="notification-panel hidden">
+              <div class="notification-head">
+                <div>
+                  <b>Notification Center</b>
+                  <div id="notifGeneratedAt" class="tiny muted">Memuat...</div>
+                </div>
+                <button id="notifRefreshBtn" class="btn ghost small" type="button">Refresh</button>
+              </div>
+              <div id="notifList" class="notification-list">
+                <div class="empty">Belum ada notifikasi.</div>
+              </div>
+            </div>
+          </div>
           <span id="netBadge" class="badge neutral">...</span>
           <span id="queueBadge" class="badge warning">Queue 0</span>
           <span id="roleBadge" class="badge info"></span>
@@ -86,7 +105,7 @@
 
   <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden">
 
-  <script src="./config.js?v=v15-r7-active-draft"></script>
-  <script type="module" src="./app.js?v=v15-r7-active-draft"></script>
+  <script src="./config.js?v=v15-1-r8"></script>
+  <script type="module" src="./app.js?v=v15-1-r8"></script>
 </body>
 </html>

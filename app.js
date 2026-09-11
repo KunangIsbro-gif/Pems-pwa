@@ -41,7 +41,11 @@ const state = {
   photoPreviewUrls: new Map(),
   serverPhotoCache: new Map(),
   verifierPhotoObjectUrls: new Map(),
-  activeDraftId: ''
+  activeDraftId: '',
+  notifications: { count: 0, items: [], generatedAt: '' },
+  notificationTimer: null,
+  gpsWarmupPromise: null,
+  captureStage: { label: '', percent: 0, active: false }
 };
 
 const el = {
@@ -56,6 +60,12 @@ const el = {
   netBadge: document.getElementById('netBadge'),
   queueBadge: document.getElementById('queueBadge'),
   roleBadge: document.getElementById('roleBadge'),
+  notifBtn: document.getElementById('notifBtn'),
+  notifBadge: document.getElementById('notifBadge'),
+  notifPanel: document.getElementById('notifPanel'),
+  notifList: document.getElementById('notifList'),
+  notifGeneratedAt: document.getElementById('notifGeneratedAt'),
+  notifRefreshBtn: document.getElementById('notifRefreshBtn'),
   loginView: document.getElementById('loginView'),
   content: document.getElementById('content'),
   loginMessage: document.getElementById('loginMessage'),
@@ -124,6 +134,25 @@ function wireStaticEvents() {
   el.photoModal?.addEventListener('click', (event) => {
     if (event.target === el.photoModal) closePhotoModal();
   });
+
+  el.notifBtn?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    el.notifPanel?.classList.toggle('hidden');
+    if (!el.notifPanel?.classList.contains('hidden')) {
+      await refreshNotifications(true);
+    }
+  });
+
+  el.notifRefreshBtn?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    await refreshNotifications(true);
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest?.('.notification-wrap')) {
+      el.notifPanel?.classList.add('hidden');
+    }
+  });
 }
 
 function setupNetworkListeners() {
@@ -141,7 +170,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-r7-active-draft');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-1-r8');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -202,6 +231,7 @@ function clearSession() {
 }
 
 function logout() {
+  stopNotificationPolling();
   clearSession();
   hideAppShell();
   showLogin('Session ditutup. Login kembali bila diperlukan.');
@@ -305,7 +335,14 @@ async function bootAuthenticated() {
     showAppShell();
     renderNavigation();
     navigate('home');
-    if (navigator.onLine) runSyncQueue();
+
+    if (navigator.onLine) {
+      runSyncQueue();
+      refreshNotifications(false);
+      startNotificationPolling();
+      primeGpsCache();
+    }
+
     return true;
   } catch (err) {
     if (isAuthError(err)) clearSession();
@@ -338,12 +375,33 @@ function hideAppShell() {
 
 function renderNavigation() {
   const menus = state.bootstrap?.roleMenus || ['home', 'settings'];
+
   const render = (container) => {
-    container.innerHTML = menus.map(key => `<button class="nav-btn" data-nav="${escapeAttr(key)}">${escapeHtml(NAV_LABEL[key] || key)}</button>`).join('');
-    container.querySelectorAll('[data-nav]').forEach(btn => btn.addEventListener('click', () => navigate(btn.dataset.nav)));
+    container.innerHTML = menus.map(key => {
+      const count = notificationCountForPage(key);
+      return `<button class="nav-btn" data-nav="${escapeAttr(key)}">
+        <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
+        ${count ? `<span class="nav-count">${escapeHtml(String(count))}</span>` : ''}
+      </button>`;
+    }).join('');
+
+    container.querySelectorAll('[data-nav]').forEach(btn =>
+      btn.addEventListener('click', () => navigate(btn.dataset.nav))
+    );
   };
+
   render(el.sideNav);
   render(el.bottomNav);
+
+  document
+    .querySelectorAll('[data-nav]')
+    .forEach(btn =>
+      btn.classList.toggle(
+        'active',
+        btn.dataset.nav ===
+          state.currentPage
+      )
+    );
 }
 
 async function navigate(page) {
@@ -355,6 +413,14 @@ async function navigate(page) {
   el.pageSubtitle.textContent = meta[1];
   document.querySelectorAll('[data-nav]').forEach(btn => btn.classList.toggle('active', btn.dataset.nav === page));
   el.content.innerHTML = '<div class="empty">Memuat...</div>';
+
+  if (navigator.onLine) {
+    refreshNotifications(false);
+  }
+
+  if (page === 'pekerjaan') {
+    primeGpsCache();
+  }
 
   if (page === 'home') return renderHome();
   if (page === 'pekerjaan') return renderWork();
@@ -529,6 +595,7 @@ async function renderWork() {
   }
 
   await loadWorkspace(state.selectedProjectId);
+  primeGpsCache();
   const workspace = state.workspace;
   if (!workspace) {
     el.content.innerHTML = '<div class="empty">Workspace project belum tersedia offline. Buka project ini sekali saat online.</div>';
@@ -608,6 +675,146 @@ async function selectSession(sessionId) {
   }
 }
 
+function effectiveRequirementWorkflow(r, draft) {
+  const serverWorkflow =
+    String(
+      r?.workflowStatus ||
+      r?.verifyStatus ||
+      ''
+    ).toUpperCase();
+
+  const draftWorkflow =
+    String(
+      draft?.workflow ||
+      ''
+    ).toUpperCase();
+
+  const openRevision =
+    draft?.parentEvidenceId &&
+    !draft?.isHistory &&
+    ![
+      'SUBMITTED',
+      'VERIFIED',
+      'REJECTED',
+      'NEED_REVISION'
+    ].includes(
+      draftWorkflow
+    );
+
+  if (openRevision) {
+    return draftWorkflow ||
+      'DRAFT_LOCAL';
+  }
+
+  if (
+    [
+      'VERIFIED',
+      'NEED_REVISION',
+      'REJECTED',
+      'SUBMITTED',
+      'REVISION_RESOLVED',
+      'REOPENED'
+    ].includes(
+      serverWorkflow
+    )
+  ) {
+    return serverWorkflow;
+  }
+
+  return (
+    draftWorkflow ||
+    serverWorkflow
+  );
+}
+
+function selectedRequirementStatusBannerHtml() {
+  const r =
+    state.selectedRequirement;
+
+  if (!r) {
+    return '';
+  }
+
+  const draft =
+    findCurrentDraft();
+
+  const workflow =
+    effectiveRequirementWorkflow(
+      r,
+      draft
+    );
+
+  const target =
+    Number(
+      r.evidenceRequired || 0
+    );
+
+  const photoCount =
+    draft
+      ? Number(
+          draft.serverPhotoCount || 0
+        )
+      : Number(
+          r.photoCount || 0
+        );
+
+  let label =
+    friendlyWorkflowLabel(
+      workflow
+    );
+
+  let badge =
+    workflowBadge(
+      workflow
+    );
+
+  if (
+    !workflow ||
+    workflow === 'DRAFT'
+  ) {
+    if (
+      target > 0 &&
+      photoCount >= target
+    ) {
+      label =
+        'Complete — menunggu status workflow';
+      badge =
+        'success';
+    }
+    else {
+      label =
+        r.required
+          ? 'Belum lengkap'
+          : 'Opsional';
+      badge =
+        r.required
+          ? 'warning'
+          : 'neutral';
+    }
+  }
+
+  const version =
+    Number(
+      draft?.revisionVersionNo ||
+      r.latestVersionNo ||
+      1
+    );
+
+  return `
+    <div class="selected-item-banner ${badge}">
+      <div>
+        <span class="tiny">ITEM TERPILIH</span>
+        <b>${escapeHtml(r.designator || r.materialName || r.projectMaterialId)}</b>
+        <small>${escapeHtml(label)}</small>
+      </div>
+      <div class="selected-item-facts">
+        <span>Foto ${escapeHtml(String(photoCount))}/${escapeHtml(String(target))}</span>
+        <span>V${escapeHtml(String(version))}</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderRequirementsPanel() {
   const right = document.getElementById('workRight');
   if (!right || !state.requirements || !state.selectedSession) return;
@@ -615,6 +822,7 @@ function renderRequirementsPanel() {
   right.innerHTML = `
     <div class="section-head"><div><h2>${escapeHtml(state.selectedSession.anchorLabel || state.selectedSession.sessionId)}</h2><div class="small muted">${escapeHtml(state.selectedSession.sessionId)} • ${escapeHtml(state.selectedSession.anchorRole || '-')}</div></div><span class="badge info">${reqs.length} material valid</span></div>
     ${state.requirements.warnings?.length ? `<div class="warning-strip">${escapeHtml(state.requirements.warnings.map(w => w.message || w.code).join(' • '))}</div>` : ''}
+    ${selectedRequirementStatusBannerHtml()}
     <div id="requirementList" class="list"></div>
     <div id="capturePanel" style="margin-top:16px"></div>
   `;
@@ -678,23 +886,60 @@ function renderRequirementsPanel() {
       badgeText =
         revisionComplete ? 'REVISI COMPLETE' : 'PERLU PERBAIKAN';
     } else {
+      const workflow =
+        String(
+          r.workflowStatus ||
+          r.verifyStatus ||
+          ''
+        ).toUpperCase();
+
       const complete =
         target > 0 &&
         serverCount >= target;
 
-      badgeClass =
-        complete
-          ? 'success'
-          : r.required
-            ? 'warning'
-            : 'neutral';
+      if (workflow === 'VERIFIED') {
+        badgeClass = 'success';
+        badgeText = 'VERIFIED';
+        label = ` • V${Number(r.latestVersionNo || 1)}`;
+      }
+      else if (workflow === 'SUBMITTED') {
+        badgeClass = 'warning';
+        badgeText = 'MENUNGGU VERIF';
+        label = ` • V${Number(r.latestVersionNo || 1)}`;
+      }
+      else if (workflow === 'NEED_REVISION') {
+        badgeClass = 'warning';
+        badgeText = 'PERLU PERBAIKAN';
+        label = ` • V${Number(r.latestVersionNo || 1)}`;
+      }
+      else if (workflow === 'REJECTED') {
+        badgeClass = 'danger';
+        badgeText = 'DITOLAK';
+        label = ` • V${Number(r.latestVersionNo || 1)}`;
+      }
+      else if (workflow === 'SYNCED') {
+        badgeClass = 'info';
+        badgeText = 'SIAP SUBMIT';
+      }
+      else if (workflow === 'DRAFT_SERVER') {
+        badgeClass = 'neutral';
+        badgeText = 'PROSES';
+      }
+      else {
+        badgeClass =
+          complete
+            ? 'success'
+            : r.required
+              ? 'warning'
+              : 'neutral';
 
-      badgeText =
-        complete
-          ? 'COMPLETE'
-          : r.required
-            ? 'BELUM'
-            : 'OPSIONAL';
+        badgeText =
+          complete
+            ? 'COMPLETE'
+            : r.required
+              ? 'BELUM'
+              : 'OPSIONAL';
+      }
     }
 
     return `
@@ -948,17 +1193,46 @@ async function renderCapturePanel() {
     target === 0 ||
     serverCount >= target;
 
+  const activeWorkflow =
+    effectiveRequirementWorkflow(
+      r,
+      draft
+    );
+
   const locked =
     ['SUBMITTED','VERIFIED','REJECTED']
-      .includes(
-        String(
-          draft
-            ? (draft.workflow || '')
-            : (r.verifyStatus || '')
-        ).toUpperCase()
-      );
+      .includes(activeWorkflow);
+
+  const activeStatusLabel =
+    friendlyWorkflowLabel(activeWorkflow || (complete ? 'SYNCED' : 'DRAFT_LOCAL'));
+
+  const activeVersion =
+    Number(
+      draft?.revisionVersionNo ||
+      r.latestVersionNo ||
+      1
+    );
 
   panel.innerHTML = `
+    <div class="capture-status-strip ${workflowBadge(activeWorkflow)}">
+      <div>
+        <span class="tiny">STATUS ITEM</span>
+        <strong>${escapeHtml(activeStatusLabel)}</strong>
+      </div>
+      <div class="capture-status-meta">
+        <span>Foto ${serverCount}/${target}</span>
+        <span>V${escapeHtml(String(activeVersion))}</span>
+      </div>
+    </div>
+
+    <div id="captureProcess" class="capture-process ${state.captureStage.active ? '' : 'hidden'}">
+      <div class="capture-process-head">
+        <span id="captureStageLabel">${escapeHtml(state.captureStage.label || 'Memproses...')}</span>
+        <b id="captureStagePercent">${escapeHtml(String(state.captureStage.percent || 0))}%</b>
+      </div>
+      <div class="progress"><span id="captureStageBar" style="width:${Math.max(0,Math.min(100,Number(state.captureStage.percent||0)))}%"></span></div>
+    </div>
+
     <div class="divider"></div>
 
     ${draft?.parentEvidenceId ? `
@@ -1205,59 +1479,201 @@ function beginCapture() {
 
 async function onCameraFileSelected(event) {
   const file = event.target.files?.[0];
-  if (!file || !state.selectedRequirement || !state.selectedSession) return;
-  try {
-    toast('Membaca GPS...', 'warning');
-    const gps = await getGpsForCapture();
-    const pointDistance = distanceToSelectedPlan(gps.latitude, gps.longitude);
 
-    const blockGps = Number(configNumber('GPS_FIELD_BLOCK_M', 50));
-    const gpsPolicy = String(state.config.GPS_POLICY || 'DEV').toUpperCase();
-    if (gpsPolicy === 'FIELD' && gps.accuracy > blockGps) {
-      throw new Error(`GPS accuracy ${Math.round(gps.accuracy)} m > batas FIELD ${blockGps} m. Ulangi GPS.`);
+  if (
+    !file ||
+    !state.selectedRequirement ||
+    !state.selectedSession
+  ) {
+    return;
+  }
+
+  try {
+    setCaptureStage(
+      'GPS + optimasi foto',
+      12,
+      true
+    );
+
+    // Run the two slowest client-side steps at the same time.
+    const gpsPromise =
+      getGpsForCapture();
+
+    const optimizePromise =
+      optimizePhoto(file);
+
+    const [gps, optimized] =
+      await Promise.all([
+        gpsPromise,
+        optimizePromise
+      ]);
+
+    const pointDistance =
+      distanceToSelectedPlan(
+        gps.latitude,
+        gps.longitude
+      );
+
+    const blockGps =
+      Number(
+        configNumber(
+          'GPS_FIELD_BLOCK_M',
+          50
+        )
+      );
+
+    const gpsPolicy =
+      String(
+        state.config.GPS_POLICY ||
+        'DEV'
+      ).toUpperCase();
+
+    if (
+      gpsPolicy === 'FIELD' &&
+      gps.accuracy > blockGps
+    ) {
+      throw new Error(
+        `GPS accuracy ${Math.round(gps.accuracy)} m > batas FIELD ${blockGps} m. Ulangi GPS.`
+      );
     }
 
-    toast('Mengoptimalkan foto...', 'warning');
-    const optimized = await optimizePhoto(file);
-    const hash = await sha256Blob(optimized.blob);
-    const draft = await getOrCreateCurrentDraft(state.cameraContext || {});
-    const photoLocalId = `LPH-${crypto.randomUUID?.() || uid()}`;
+    setCaptureStage(
+      'Menyiapkan evidence lokal',
+      48,
+      true
+    );
+
+    const hash =
+      await sha256Blob(
+        optimized.blob
+      );
+
+    const draft =
+      await getOrCreateCurrentDraft(
+        state.cameraContext || {}
+      );
+
+    const photoLocalId =
+      `LPH-${crypto.randomUUID?.() || uid()}`;
+
     const photo = {
       photoLocalId,
-      draftId: draft.draftId,
-      blob: optimized.blob,
-      fileName: optimized.fileName,
-      mimeType: optimized.blob.type || 'image/jpeg',
-      fileSize: optimized.blob.size,
-      originalFileSize: file.size,
-      photoHash: hash,
-      latitude: gps.latitude,
-      longitude: gps.longitude,
-      gpsAccuracy: gps.accuracy,
-      gpsSource: gps.source,
-      distanceToPlanM: Number.isFinite(pointDistance) ? Math.round(pointDistance * 10) / 10 : null,
-      capturedAt: new Date().toISOString(),
-      state: 'LOCAL',
-      serverPhotoId: ''
+      draftId:
+        draft.draftId,
+      blob:
+        optimized.blob,
+      fileName:
+        optimized.fileName,
+      mimeType:
+        optimized.blob.type ||
+        'image/jpeg',
+      fileSize:
+        optimized.blob.size,
+      originalFileSize:
+        file.size,
+      photoHash:
+        hash,
+      latitude:
+        gps.latitude,
+      longitude:
+        gps.longitude,
+      gpsAccuracy:
+        gps.accuracy,
+      gpsSource:
+        gps.source,
+      distanceToPlanM:
+        Number.isFinite(
+          pointDistance
+        )
+          ? Math.round(
+              pointDistance * 10
+            ) / 10
+          : null,
+      capturedAt:
+        new Date().toISOString(),
+      state:
+        'LOCAL',
+      serverPhotoId:
+        ''
     };
-    await idbPut(STORE_PHOTOS, photo);
+
+    await idbPut(
+      STORE_PHOTOS,
+      photo
+    );
+
     const queueItem = {
-      queueId: `QUE-${photoLocalId}`,
+      queueId:
+        `QUE-${photoLocalId}`,
       photoLocalId,
-      draftId: draft.draftId,
-      state: 'WAITING',
-      attempts: 0,
-      lastError: '',
-      createdAt: new Date().toISOString()
+      draftId:
+        draft.draftId,
+      state:
+        'WAITING',
+      attempts:
+        0,
+      lastError:
+        '',
+      createdAt:
+        new Date().toISOString()
     };
-    await idbPut(STORE_QUEUE, queueItem);
+
+    await idbPut(
+      STORE_QUEUE,
+      queueItem
+    );
+
     await refreshLocalState();
     updateQueueBadge();
-    toast(`Foto tersimpan lokal. GPS ${Math.round(gps.accuracy)} m${Number.isFinite(pointDistance) ? ` • ke titik ${Math.round(pointDistance)} m` : ''}.`, 'success');
+
+    setCaptureStage(
+      navigator.onLine
+        ? 'Foto aman lokal — mulai upload'
+        : 'Foto aman di perangkat',
+      navigator.onLine ? 64 : 100,
+      true
+    );
+
     await renderCapturePanel();
-    if (navigator.onLine && truthyConfig('AUTO_SYNC', true)) runSyncQueue();
-  } catch (err) {
-    toast(humanError(err), 'danger', 6000);
+
+    toast(
+      `Foto tersimpan lokal. GPS ${Math.round(gps.accuracy)} m${
+        Number.isFinite(pointDistance)
+          ? ` • ke titik ${Math.round(pointDistance)} m`
+          : ''
+      }.`,
+      'success'
+    );
+
+    if (
+      navigator.onLine &&
+      truthyConfig(
+        'AUTO_SYNC',
+        true
+      )
+    ) {
+      runSyncQueue();
+    }
+    else {
+      setCaptureStage(
+        'Menunggu koneksi untuk sync',
+        100,
+        false
+      );
+    }
+  }
+  catch (err) {
+    setCaptureStage(
+      'Gagal memproses foto',
+      0,
+      false
+    );
+
+    toast(
+      humanError(err),
+      'danger',
+      6000
+    );
   }
 }
 
@@ -1423,23 +1839,98 @@ function assignmentForCurrentPoint() {
 }
 
 async function submitCurrentEvidence() {
-  const draft = findCurrentDraft();
+  const draft =
+    findCurrentDraft();
+
   if (!draft?.serverEvidenceId) {
-    toast('Evidence belum tersimpan di server.', 'warning');
+    toast(
+      'Evidence belum tersimpan di server.',
+      'warning'
+    );
     return;
   }
+
+  const btn =
+    document.getElementById(
+      'submitEvidenceBtn'
+    );
+
+  const oldText =
+    btn?.textContent || '';
+
   try {
-    const result = await api(`/evidence/${encodeURIComponent(draft.serverEvidenceId)}/submit`, {
-      method: 'POST', body: { fieldNote: draft.fieldNote || '' }
-    });
-    draft.workflow = result.workflowStatus || 'SUBMITTED';
-    draft.updatedAt = new Date().toISOString();
-    await idbPut(STORE_DRAFTS, draft);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent =
+        'Mengirim ke Verifier...';
+    }
+
+    setCaptureStage(
+      'Submit verifikasi',
+      88,
+      true
+    );
+
+    const result =
+      await api(
+        `/evidence/${encodeURIComponent(draft.serverEvidenceId)}/submit`,
+        {
+          method:
+            'POST',
+          body: {
+            fieldNote:
+              draft.fieldNote || ''
+          }
+        }
+      );
+
+    draft.workflow =
+      result.workflowStatus ||
+      'SUBMITTED';
+
+    draft.updatedAt =
+      new Date().toISOString();
+
+    await idbPut(
+      STORE_DRAFTS,
+      draft
+    );
+
     await refreshLocalState();
-    toast('Evidence SUBMITTED ke tim verifikasi.', 'success');
+
+    setCaptureStage(
+      'SUBMITTED',
+      100,
+      false
+    );
+
+    toast(
+      'Evidence SUBMITTED ke tim verifikasi.',
+      'success'
+    );
+
+    refreshNotifications(false);
     await renderCapturePanel();
-  } catch (err) {
-    toast(humanError(err), 'danger', 6000);
+  }
+  catch (err) {
+    setCaptureStage(
+      'Submit gagal',
+      0,
+      false
+    );
+
+    toast(
+      humanError(err),
+      'danger',
+      6000
+    );
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent =
+        oldText ||
+        'Submit Verifikasi';
+    }
   }
 }
 
@@ -1458,10 +1949,22 @@ async function runSyncQueue() {
       try {
         item.state = 'SYNCING';
         item.attempts = Number(item.attempts || 0) + 1;
+
+        setCaptureStage(
+          'Upload foto ke server',
+          72,
+          true
+        );
         await idbPut(STORE_QUEUE, item);
         updateQueueBadge();
         await syncOneQueueItem(item);
         await idbDelete(STORE_QUEUE, item.queueId);
+
+        setCaptureStage(
+          'Sync selesai',
+          100,
+          false
+        );
       } catch (err) {
         const msg = humanError(err);
         if (isAuthError(err) || err?.networkError) {
@@ -1488,6 +1991,8 @@ async function runSyncQueue() {
     updateQueueBadge();
     if (state.currentPage === 'evidence') renderEvidence();
     if (state.currentPage === 'pekerjaan' && state.selectedRequirement) renderCapturePanel();
+
+    refreshNotifications(false);
   }
 }
 
@@ -1705,52 +2210,134 @@ async function verifierPhotoObjectUrl(evidenceId, photoId) {
   return url;
 }
 
-async function hydrateVerifierPhotoPreviews() {
-  const images =
-    el.content.querySelectorAll(
-      '[data-verifier-photo-img]'
+async function hydrateOneVerifierPhoto(img) {
+  if (
+    !img ||
+    img.dataset.loaded === '1'
+  ) {
+    return;
+  }
+
+  img.dataset.loaded = '1';
+
+  const key =
+    img.dataset.verifierPhotoImg || '';
+
+  const splitAt =
+    key.indexOf('|');
+
+  if (splitAt < 1) {
+    return;
+  }
+
+  const evidenceId =
+    key.slice(
+      0,
+      splitAt
     );
 
-  for (const img of images) {
-    const key =
-      img.dataset.verifierPhotoImg || '';
+  const photoId =
+    key.slice(
+      splitAt + 1
+    );
 
-    const splitAt = key.indexOf('|');
-    if (splitAt < 1) continue;
+  const loading =
+    el.content.querySelector(
+      `[data-verifier-photo-loading="${cssEscape(key)}"]`
+    );
 
-    const evidenceId =
-      key.slice(0, splitAt);
-
-    const photoId =
-      key.slice(splitAt + 1);
-
-    const loading =
-      el.content.querySelector(
-        `[data-verifier-photo-loading="${cssEscape(key)}"]`
+  try {
+    const url =
+      await verifierPhotoObjectUrl(
+        evidenceId,
+        photoId
       );
 
-    try {
-      const url =
-        await verifierPhotoObjectUrl(
-          evidenceId,
-          photoId
-        );
+    img.src = url;
+    img.classList.remove(
+      'hidden'
+    );
 
-      img.src = url;
-      img.classList.remove('hidden');
-
-      if (loading) {
-        loading.classList.add('hidden');
-      }
-    }
-    catch (err) {
-      if (loading) {
-        loading.textContent =
-          'Preview gagal — gunakan Lihat Foto Drive';
-        loading.classList.add('danger-text');
-      }
+    if (loading) {
+      loading.classList.add(
+        'hidden'
+      );
     }
   }
+  catch (err) {
+    if (loading) {
+      loading.textContent =
+        'Preview belum dimuat — klik Lihat / Perbesar';
+      loading.classList.add(
+        'danger-text'
+      );
+    }
+
+    img.dataset.loaded =
+      '0';
+  }
+}
+
+function hydrateVerifierPhotoPreviews() {
+  const images =
+    Array.from(
+      el.content.querySelectorAll(
+        '[data-verifier-photo-img]'
+      )
+    );
+
+  if (!images.length) {
+    return;
+  }
+
+  if (
+    'IntersectionObserver' in
+    window
+  ) {
+    const observer =
+      new IntersectionObserver(
+        entries => {
+          entries.forEach(
+            entry => {
+              if (
+                entry.isIntersecting
+              ) {
+                observer.unobserve(
+                  entry.target
+                );
+
+                hydrateOneVerifierPhoto(
+                  entry.target
+                );
+              }
+            }
+          );
+        },
+        {
+          rootMargin:
+            '220px 0px'
+        }
+      );
+
+    images.forEach(
+      img =>
+        observer.observe(
+          img
+        )
+    );
+
+    return;
+  }
+
+  // Fallback: only the first visible cards are hydrated immediately.
+  images
+    .slice(0, 2)
+    .forEach(
+      img =>
+        hydrateOneVerifierPhoto(
+          img
+        )
+    );
 }
 
 async function openVerifierPhotoModal(
@@ -1813,26 +2400,237 @@ async function handleVerificationAction(btn) {
   try {
     await api(`/verification/${encodeURIComponent(id)}/${action}`, { method:'POST', body:{reasonCode,note} });
     toast(`Evidence ${action.toUpperCase()} berhasil.`, 'success');
+    await refreshNotifications(true);
     renderVerification();
   } catch(err) { toast(humanError(err),'danger',6000); }
 }
 
 async function renderMonitoring() {
   let data = null;
+
   if (navigator.onLine) {
-    try { data = await api('/monitoring'); await cachePut('monitoring', data); } catch {}
+    try {
+      data =
+        await api(
+          '/monitoring'
+        );
+
+      await cachePut(
+        'monitoring',
+        data
+      );
+    }
+    catch {}
   }
-  data = data || await cacheGet('monitoring') || {};
-  const statuses = data.byStatus || {};
+
+  data =
+    data ||
+    await cacheGet(
+      'monitoring'
+    ) ||
+    {};
+
+  const role =
+    String(
+      state.user?.role ||
+      data.role ||
+      ''
+    ).toUpperCase();
+
+  const statuses =
+    data.byStatus || {};
+
+  const actionItems =
+    data.actionItems || [];
+
+  const recentItems =
+    data.recentItems || [];
+
+  const byUser =
+    data.byUser || [];
+
+  const isField =
+    role === 'LAPANGAN';
+
+  const metricCards =
+    isField
+      ? [
+          [
+            'Evidence Saya',
+            data.evidenceTotal || 0,
+            'yang pernah saya kirim/buat'
+          ],
+          [
+            'Menunggu Verif',
+            data.waitingVerification || 0,
+            'sudah submit'
+          ],
+          [
+            'Perlu Perbaikan',
+            data.needRevision || 0,
+            'harus saya tindak'
+          ],
+          [
+            'Selesai',
+            data.verified || 0,
+            'verified'
+          ]
+        ]
+      : [
+          [
+            'Total Evidence',
+            data.evidenceTotal || 0,
+            'dalam akses saya'
+          ],
+          [
+            'Menunggu Verif',
+            data.waitingVerification || 0,
+            'butuh keputusan'
+          ],
+          [
+            'Perlu Revisi',
+            data.needRevision || 0,
+            'dikembalikan ke lapangan'
+          ],
+          [
+            'Verified',
+            data.verified || 0,
+            'selesai'
+          ]
+        ];
+
   el.content.innerHTML = `
-    <div class="grid kpi">
-      ${kpi('Evidence', data.evidenceTotal || 0)}
-      ${kpi('Waiting Verif', data.waitingVerification || 0)}
-      ${kpi('Need Revision', data.needRevision || 0)}
-      ${kpi('Verified', data.verified || 0)}
+    <div class="monitoring-intro card">
+      <div>
+        <h2>${isField ? 'Monitoring Pekerjaan Saya' : 'Monitoring Operasional'}</h2>
+        <p class="muted">
+          ${isField
+            ? 'Lihat status evidence yang benar-benar dibuat oleh akun ini: apa yang menunggu verifikasi, perlu diperbaiki, dan sudah selesai.'
+            : 'Fokus pada pekerjaan yang masih membutuhkan tindakan: verifikasi, revisi, rejected, atau sudah sync tetapi belum submit.'}
+        </p>
+      </div>
+      <span class="badge info">${escapeHtml(roleLabel(role))}</span>
     </div>
-    <div class="card" style="margin-top:16px"><h2>Status Workflow</h2><div class="list">${Object.keys(statuses).length ? Object.entries(statuses).sort((a,b)=>b[1]-a[1]).map(([k,v])=>statusRow(k,v,workflowBadge(k))).join('') : '<div class="empty">Belum ada data monitoring.</div>'}</div></div>
+
+    <div class="grid kpi" style="margin-top:16px">
+      ${metricCards.map(row =>
+        kpi(row[0], row[1], row[2])
+      ).join('')}
+    </div>
+
+    <div class="grid ${isField ? 'two' : 'two'}" style="margin-top:16px">
+      <div class="card">
+        <div class="section-head">
+          <h2>Perlu Tindakan</h2>
+          <span class="badge ${actionItems.length ? 'warning' : 'success'}">${actionItems.length || 0}</span>
+        </div>
+        <div class="list">
+          ${actionItems.length
+            ? actionItems.map(item => `
+              <button class="list-item clickable monitoring-action" data-monitor-page="${escapeAttr(item.page || 'monitoring')}">
+                <div>
+                  <div class="item-title">${escapeHtml(item.label || item.code)}</div>
+                  <div class="item-sub">${escapeHtml(item.detail || '')}</div>
+                </div>
+                <span class="badge ${escapeAttr(item.severity || 'neutral')}">${escapeHtml(String(item.count || 0))}</span>
+              </button>
+            `).join('')
+            : '<div class="empty">Tidak ada pekerjaan yang membutuhkan tindakan saat ini.</div>'}
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Arti Status</h2>
+        <div class="status-definition-grid">
+          ${Object.entries(data.statusDefinitions || {}).map(([key, label]) => `
+            <div class="status-definition">
+              <span class="badge ${workflowBadge(key)}">${escapeHtml(key)}</span>
+              <span>${escapeHtml(label)}</span>
+            </div>
+          `).join('') || '<div class="empty">Belum ada definisi status.</div>'}
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="section-head">
+        <div>
+          <h2>${isField ? 'Evidence Terakhir Saya' : 'Evidence Terbaru'}</h2>
+          <div class="small muted">${isField ? 'Menunjukkan titik/material yang sebenarnya diverifikasi.' : '20 aktivitas evidence terbaru di area akses.'}</div>
+        </div>
+        <span class="badge neutral">${recentItems.length}</span>
+      </div>
+
+      <div class="monitoring-evidence-list">
+        ${recentItems.length
+          ? recentItems.map(item => `
+            <div class="monitoring-evidence-row">
+              <div class="monitoring-evidence-main">
+                <div class="item-title">${escapeHtml(item.itemLabel || item.evidenceId)}</div>
+                <div class="item-sub">
+                  ${escapeHtml(item.sessionId || '-')}
+                  ${item.designator ? ` • ${escapeHtml(item.designator)}` : ''}
+                  • V${escapeHtml(String(item.versionNo || 1))}
+                  <br>
+                  ${isField ? '' : `${escapeHtml(item.createdByName || item.createdBy || '-')} • `}
+                  ${escapeHtml(formatDate(item.createdAt))}
+                </div>
+                ${item.fieldNote ? `<div class="monitor-note">${escapeHtml(item.fieldNote)}</div>` : ''}
+              </div>
+              <div class="monitoring-evidence-side">
+                <span class="badge ${workflowBadge(item.workflowStatus)}">${escapeHtml(item.workflowLabel || friendlyWorkflowLabel(item.workflowStatus))}</span>
+                <div class="tiny muted">Foto ${escapeHtml(String(item.actualPhotoCount || 0))}/${escapeHtml(String(item.requiredPhotoCount || 0))}</div>
+              </div>
+            </div>
+          `).join('')
+          : '<div class="empty">Belum ada evidence milik akun/area ini.</div>'}
+      </div>
+    </div>
+
+    ${!isField && byUser.length ? `
+      <div class="card" style="margin-top:16px">
+        <div class="section-head">
+          <h2>Progress per User</h2>
+          <span class="badge info">${byUser.length} user</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Total</th>
+                <th>Waiting</th>
+                <th>Revision</th>
+                <th>Verified</th>
+                <th>Rejected</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${byUser.map(user => `
+                <tr>
+                  <td>
+                    <b>${escapeHtml(user.name || user.email)}</b>
+                    <div class="tiny muted">${escapeHtml(user.email)}</div>
+                  </td>
+                  <td>${escapeHtml(String(user.total || 0))}</td>
+                  <td>${escapeHtml(String(user.submitted || 0))}</td>
+                  <td>${escapeHtml(String(user.needRevision || 0))}</td>
+                  <td>${escapeHtml(String(user.verified || 0))}</td>
+                  <td>${escapeHtml(String(user.rejected || 0))}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    ` : ''}
   `;
+
+  el.content.querySelectorAll('[data-monitor-page]').forEach(btn => {
+    btn.addEventListener('click', () =>
+      navigate(btn.dataset.monitorPage || 'monitoring')
+    );
+  });
 }
 
 async function renderAdmin() {
@@ -1886,6 +2684,7 @@ async function saveAdminUser() {
   try {
     await api('/admin/users/upsert', {method:'POST', body:{email:value('adminUserEmail'),fullName:value('adminUserName'),role:value('adminUserRole'),area:value('adminUserArea'),active:true}});
     toast('User disimpan.', 'success');
+    await refreshNotifications(true);
     renderAdmin();
   } catch(err){toast(humanError(err),'danger',6000);}
 }
@@ -1894,6 +2693,7 @@ async function saveAdminAssignment() {
   try {
     await api('/admin/assignments/upsert', {method:'POST', body:{userEmail:value('assignUser'),projectId:value('assignProject'),scopeType:value('assignScope'),scopeValue:value('assignScopeValue'),status:'ACTIVE',active:true}});
     toast('Assignment disimpan.', 'success');
+    await refreshNotifications(true);
     renderAdmin();
   } catch(err){toast(humanError(err),'danger',6000);}
 }
@@ -1943,16 +2743,44 @@ async function renderAudit() {
   try {
     const data = await api('/audit?limit=80');
     const items = data.items || [];
-    el.content.innerHTML = `<div class="card"><h2>Audit Terbaru</h2><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>User</th><th>Role</th><th>Action</th><th>Entity</th><th>Reason</th></tr></thead><tbody>${items.map(a=>`<tr><td>${formatDate(a.CREATED_AT)}</td><td>${escapeHtml(a.USER_EMAIL)}</td><td>${escapeHtml(a.ROLE)}</td><td>${escapeHtml(a.ACTION)}</td><td>${escapeHtml(a.ENTITY_ID)}</td><td>${escapeHtml(a.REASON)}</td></tr>`).join('')}</tbody></table></div></div>`;
+    el.content.innerHTML = `<div class="card"><h2>Audit Terbaru</h2><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Nama User</th><th>Role</th><th>Action</th><th>Entity</th><th>Reason</th></tr></thead><tbody>${items.map(a=>`<tr><td>${formatDate(a.CREATED_AT)}</td><td><b>${escapeHtml(a.USER_NAME || a.USER_EMAIL || 'SYSTEM')}</b><div class="tiny muted">${escapeHtml(a.USER_EMAIL || '')}</div></td><td>${escapeHtml(a.ROLE)}</td><td>${escapeHtml(a.ACTION)}</td><td>${escapeHtml(a.ENTITY_ID)}</td><td>${escapeHtml(a.REASON)}</td></tr>`).join('')}</tbody></table></div></div>`;
   } catch(err){el.content.innerHTML=`<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;}
 }
 
 function renderSettings() {
+  const isField =
+    String(
+      state.user?.role || ''
+    ).toUpperCase() ===
+    'LAPANGAN';
+
   el.content.innerHTML = `
     <div class="grid two">
-      <div class="card"><h2>Perangkat</h2><div class="list">${statusRow('Device ID', getDeviceId(), 'neutral')}${statusRow('App Version', APP_VERSION, 'info')}${statusRow('API Gateway', state.apiBase || 'BELUM ADA', state.apiBase ? 'success':'danger')}${statusRow('Session Expiry', state.sessionExpiresAt ? formatDate(state.sessionExpiresAt) : 'BELUM ADA', sessionIsUsable()?'success':'warning')}</div></div>
-      <div class="card"><h2>Konfigurasi Operasional</h2><div class="list">${statusRow('GPS Policy', state.config.GPS_POLICY || '-', state.config.GPS_POLICY === 'FIELD'?'success':'warning')}${statusRow('GPS Field Block', `${configNumber('GPS_FIELD_BLOCK_M',50)} m`, 'neutral')}${statusRow('Distance Warning', `${configNumber('POINT_DISTANCE_WARNING_M',30)} m`, 'neutral')}${statusRow('Photo Max', `${configNumber('MAX_PHOTO_MB',5.5)} MB`, 'neutral')}</div><button id="changeGatewayBtn" class="btn ghost full" style="margin-top:12px">Ubah API Gateway Perangkat Ini</button></div>
+      <div class="card">
+        <h2>Perangkat</h2>
+        <div class="list">
+          ${statusRow('Device ID', getDeviceId(), 'neutral')}
+          ${statusRow('App Version', APP_VERSION, 'info')}
+          ${statusRow('Koneksi API', state.apiBase ? 'Terhubung' : 'Belum terhubung', state.apiBase ? 'success':'danger')}
+          ${statusRow('Session', sessionIsUsable() ? 'Aktif' : 'Login diperlukan', sessionIsUsable()?'success':'warning')}
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Konfigurasi Operasional</h2>
+        <div class="list">
+          ${statusRow('GPS Policy', state.config.GPS_POLICY || '-', state.config.GPS_POLICY === 'FIELD'?'success':'warning')}
+          ${statusRow('GPS Field Block', `${configNumber('GPS_FIELD_BLOCK_M',50)} m`, 'neutral')}
+          ${statusRow('Distance Warning', `${configNumber('POINT_DISTANCE_WARNING_M',30)} m`, 'neutral')}
+          ${statusRow('Photo Max', `${configNumber('MAX_PHOTO_MB',5.5)} MB`, 'neutral')}
+        </div>
+
+        ${isField
+          ? '<div class="small muted" style="margin-top:12px">Konfigurasi server dikunci untuk role LAPANGAN.</div>'
+          : '<button id="changeGatewayBtn" class="btn ghost full" style="margin-top:12px">Ubah API Gateway Perangkat Ini</button>'}
+      </div>
     </div>`;
+
   document.getElementById('changeGatewayBtn')?.addEventListener('click', () => {
     const next = prompt('API Gateway URL', state.apiBase || '');
     if (!next) return;
@@ -2047,28 +2875,263 @@ function isAuthError(err) { return Number(err?.status) === 401 || ['SESSION_REQU
 function humanError(err) { return err?.message || String(err || 'Terjadi kesalahan.'); }
 
 async function getGpsForCapture() {
-  const live = await getLiveGps().catch(err => ({ error: err }));
+  const recent =
+    readRecentLiveGps(
+      20_000
+    );
+
+  const policy =
+    String(
+      state.config.GPS_POLICY ||
+      'DEV'
+    ).toUpperCase();
+
+  const blockGps =
+    Number(
+      configNumber(
+        'GPS_FIELD_BLOCK_M',
+        50
+      )
+    );
+
+  if (
+    recent &&
+    (
+      policy !== 'FIELD' ||
+      Number(recent.accuracy) <=
+        blockGps
+    )
+  ) {
+    return {
+      latitude:
+        Number(recent.latitude),
+      longitude:
+        Number(recent.longitude),
+      accuracy:
+        Number(recent.accuracy),
+      source:
+        'LIVE_GPS_RECENT'
+    };
+  }
+
+  const live =
+    await getLiveGps()
+      .catch(
+        err => ({
+          error:
+            err
+        })
+      );
+
   if (!live.error) {
-    localStorage.setItem(LAST_GPS_KEY, JSON.stringify({...live, cachedAt:new Date().toISOString()}));
+    localStorage.setItem(
+      LAST_GPS_KEY,
+      JSON.stringify({
+        ...live,
+        cachedAt:
+          new Date().toISOString()
+      })
+    );
+
     return live;
   }
-  const policy = String(state.config.GPS_POLICY || 'DEV').toUpperCase();
-  if (policy === 'DEV') {
-    const cached = safeJson(localStorage.getItem(LAST_GPS_KEY));
-    if (cached && Number.isFinite(Number(cached.latitude)) && Number.isFinite(Number(cached.longitude))) {
-      return { latitude:Number(cached.latitude), longitude:Number(cached.longitude), accuracy:Math.max(999,Number(cached.accuracy)||999), source:'DEV_CACHED_GPS' };
+
+  if (
+    policy === 'DEV'
+  ) {
+    const cached =
+      safeJson(
+        localStorage.getItem(
+          LAST_GPS_KEY
+        )
+      );
+
+    if (
+      cached &&
+      Number.isFinite(
+        Number(
+          cached.latitude
+        )
+      ) &&
+      Number.isFinite(
+        Number(
+          cached.longitude
+        )
+      )
+    ) {
+      return {
+        latitude:
+          Number(
+            cached.latitude
+          ),
+        longitude:
+          Number(
+            cached.longitude
+          ),
+        accuracy:
+          Math.max(
+            999,
+            Number(
+              cached.accuracy
+            ) || 999
+          ),
+        source:
+          'DEV_CACHED_GPS'
+      };
     }
   }
+
   throw live.error;
 }
 
-function getLiveGps() {
+function readRecentLiveGps(
+  maxAgeMs = 20_000
+) {
+  const cached =
+    safeJson(
+      localStorage.getItem(
+        LAST_GPS_KEY
+      )
+    );
+
+  if (!cached) {
+    return null;
+  }
+
+  if (
+    !String(
+      cached.source || ''
+    ).startsWith(
+      'LIVE_GPS'
+    )
+  ) {
+    return null;
+  }
+
+  const cachedAt =
+    new Date(
+      cached.cachedAt || 0
+    ).getTime();
+
+  if (
+    !Number.isFinite(
+      cachedAt
+    ) ||
+    (
+      Date.now() -
+      cachedAt
+    ) > maxAgeMs
+  ) {
+    return null;
+  }
+
+  return cached;
+}
+
+function primeGpsCache() {
+  if (
+    !navigator.onLine ||
+    !navigator.geolocation
+  ) {
+    return;
+  }
+
+  if (
+    readRecentLiveGps(
+      20_000
+    )
+  ) {
+    return;
+  }
+
+  if (
+    state.gpsWarmupPromise
+  ) {
+    return;
+  }
+
+  state.gpsWarmupPromise =
+    getLiveGps({
+      timeout:
+        8_000,
+      maximumAge:
+        10_000
+    })
+      .then(
+        gps => {
+          localStorage.setItem(
+            LAST_GPS_KEY,
+            JSON.stringify({
+              ...gps,
+              cachedAt:
+                new Date().toISOString()
+            })
+          );
+
+          return gps;
+        }
+      )
+      .catch(
+        () => null
+      )
+      .finally(
+        () => {
+          state.gpsWarmupPromise =
+            null;
+        }
+      );
+}
+
+function getLiveGps(options = {}) {
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new Error('Geolocation tidak didukung perangkat.'));
+    if (!navigator.geolocation) {
+      return reject(
+        new Error(
+          'Geolocation tidak didukung perangkat.'
+        )
+      );
+    }
+
     navigator.geolocation.getCurrentPosition(
-      pos => resolve({ latitude:pos.coords.latitude, longitude:pos.coords.longitude, accuracy:Number(pos.coords.accuracy || 9999), source:'LIVE_GPS' }),
-      err => reject(new Error(err.code === 3 ? 'Permintaan GPS timeout.' : `GPS gagal: ${err.message || err.code}`)),
-      { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
+      pos =>
+        resolve({
+          latitude:
+            pos.coords.latitude,
+          longitude:
+            pos.coords.longitude,
+          accuracy:
+            Number(
+              pos.coords.accuracy ||
+              9999
+            ),
+          source:
+            'LIVE_GPS'
+        }),
+      err =>
+        reject(
+          new Error(
+            err.code === 3
+              ? 'Permintaan GPS timeout.'
+              : `GPS gagal: ${
+                  err.message ||
+                  err.code
+                }`
+          )
+        ),
+      {
+        enableHighAccuracy:
+          true,
+        timeout:
+          Number(
+            options.timeout ||
+            8_000
+          ),
+        maximumAge:
+          Number(
+            options.maximumAge ??
+            10_000
+          )
+      }
     );
   });
 }
@@ -2088,11 +3151,53 @@ function haversine(lat1, lon1, lat2, lon2) {
 }
 
 async function optimizePhoto(file) {
-  const maxMb = configNumber('MAX_PHOTO_MB', 5.5);
-  const maxBytes = maxMb * 1024 * 1024;
-  const maxEdge = configNumber('PHOTO_MAX_EDGE', 2560);
-  if (file.size <= maxBytes && ['image/jpeg','image/jpg','image/webp'].includes(String(file.type).toLowerCase())) {
-    return { blob:file, fileName:file.name || 'evidence.jpg', optimized:false };
+  const hardMaxMb =
+    configNumber(
+      'MAX_PHOTO_MB',
+      5.5
+    );
+
+  const targetMb =
+    Math.min(
+      hardMaxMb,
+      configNumber(
+        'PHOTO_UPLOAD_TARGET_MB',
+        1.8
+      )
+    );
+
+  const maxBytes =
+    targetMb *
+    1024 *
+    1024;
+
+  const maxEdge =
+    configNumber(
+      'PHOTO_MAX_EDGE',
+      1920
+    );
+
+  if (
+    file.size <= maxBytes &&
+    [
+      'image/jpeg',
+      'image/jpg',
+      'image/webp'
+    ].includes(
+      String(
+        file.type
+      ).toLowerCase()
+    )
+  ) {
+    return {
+      blob:
+        file,
+      fileName:
+        file.name ||
+        'evidence.jpg',
+      optimized:
+        false
+    };
   }
   const bitmap = await createImageBitmap(file);
   try {
@@ -2156,6 +3261,270 @@ function updateQueueBadge() {
   el.queueBadge.className = `badge ${failed ? 'danger' : pending ? 'warning' : 'success'}`;
 }
 
+
+function friendlyWorkflowLabel(status) {
+  const s =
+    String(
+      status || ''
+    ).toUpperCase();
+
+  return {
+    DRAFT_LOCAL:
+      'Draft Lokal',
+    DRAFT_SERVER:
+      'Tersimpan Server',
+    SYNCED:
+      'Siap Submit',
+    SUBMITTED:
+      'Menunggu Verifikasi',
+    NEED_REVISION:
+      'Perlu Perbaikan',
+    REJECTED:
+      'Ditolak',
+    VERIFIED:
+      'Verified / Selesai',
+    REVISION_RESOLVED:
+      'Revisi Selesai',
+    REOPENED:
+      'Dibuka Kembali'
+  }[s] || s || 'Belum Mulai';
+}
+
+function setCaptureStage(
+  label,
+  percent,
+  active = true
+) {
+  state.captureStage = {
+    label:
+      String(label || ''),
+    percent:
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Number(percent || 0)
+        )
+      ),
+    active:
+      active === true
+  };
+
+  const wrap =
+    document.getElementById(
+      'captureProcess'
+    );
+
+  const labelEl =
+    document.getElementById(
+      'captureStageLabel'
+    );
+
+  const percentEl =
+    document.getElementById(
+      'captureStagePercent'
+    );
+
+  const bar =
+    document.getElementById(
+      'captureStageBar'
+    );
+
+  if (wrap) {
+    wrap.classList.toggle(
+      'hidden',
+      !state.captureStage.active
+    );
+  }
+
+  if (labelEl) {
+    labelEl.textContent =
+      state.captureStage.label;
+  }
+
+  if (percentEl) {
+    percentEl.textContent =
+      `${state.captureStage.percent}%`;
+  }
+
+  if (bar) {
+    bar.style.width =
+      `${state.captureStage.percent}%`;
+  }
+}
+
+function notificationCountForPage(page) {
+  return (
+    state.notifications?.items ||
+    []
+  )
+    .filter(
+      item =>
+        String(
+          item.page || ''
+        ) ===
+        String(page || '')
+    )
+    .reduce(
+      (sum, item) =>
+        sum +
+        Number(
+          item.count || 0
+        ),
+      0
+    );
+}
+
+async function refreshNotifications(forceRender = false) {
+  if (
+    !navigator.onLine ||
+    !sessionIsUsable()
+  ) {
+    return;
+  }
+
+  try {
+    const data =
+      await api(
+        '/notifications'
+      );
+
+    state.notifications = {
+      count:
+        Number(data.count || 0),
+      items:
+        Array.isArray(data.items)
+          ? data.items
+          : [],
+      generatedAt:
+        data.generatedAt || ''
+    };
+
+    renderNotificationCenter();
+    renderNavigation();
+
+    if (forceRender) {
+      renderNotificationCenter();
+    }
+  }
+  catch (err) {
+    console.warn(
+      'Notification refresh failed',
+      err
+    );
+  }
+}
+
+function renderNotificationCenter() {
+  const data =
+    state.notifications || {
+      count:
+        0,
+      items:
+        []
+    };
+
+  const count =
+    Number(
+      data.count || 0
+    );
+
+  if (el.notifBadge) {
+    el.notifBadge.textContent =
+      String(count);
+
+    el.notifBadge.classList.toggle(
+      'hidden',
+      count < 1
+    );
+  }
+
+  if (el.notifGeneratedAt) {
+    el.notifGeneratedAt.textContent =
+      data.generatedAt
+        ? `Update ${formatDate(data.generatedAt)}`
+        : 'Belum diperbarui';
+  }
+
+  if (!el.notifList) {
+    return;
+  }
+
+  const items =
+    data.items || [];
+
+  el.notifList.innerHTML =
+    items.length
+      ? items.map(item => `
+          <button
+            type="button"
+            class="notification-item"
+            data-notif-page="${escapeAttr(item.page || 'monitoring')}">
+            <span class="notification-dot ${escapeAttr(item.severity || 'neutral')}"></span>
+            <span class="notification-copy">
+              <b>${escapeHtml(item.title || item.type)}</b>
+              <small>${escapeHtml(item.message || '')}</small>
+            </span>
+            <span class="badge ${escapeAttr(item.severity || 'neutral')}">${escapeHtml(String(item.count || 0))}</span>
+          </button>
+        `).join('')
+      : '<div class="empty notification-empty">Tidak ada pekerjaan baru yang perlu ditindak.</div>';
+
+  el.notifList
+    .querySelectorAll(
+      '[data-notif-page]'
+    )
+    .forEach(
+      btn => {
+        btn.addEventListener(
+          'click',
+          () => {
+            el.notifPanel?.classList.add(
+              'hidden'
+            );
+
+            navigate(
+              btn.dataset.notifPage ||
+              'monitoring'
+            );
+          }
+        );
+      }
+    );
+}
+
+function startNotificationPolling() {
+  stopNotificationPolling();
+
+  state.notificationTimer =
+    setInterval(
+      () => {
+        if (
+          navigator.onLine &&
+          sessionIsUsable()
+        ) {
+          refreshNotifications(
+            false
+          );
+        }
+      },
+      45_000
+    );
+}
+
+function stopNotificationPolling() {
+  if (
+    state.notificationTimer
+  ) {
+    clearInterval(
+      state.notificationTimer
+    );
+
+    state.notificationTimer =
+      null;
+  }
+}
+
 function hasPermission(p) { return (state.user?.permissions || []).includes(p); }
 function configNumber(key, fallback) { const n=Number(state.config?.[key]); return Number.isFinite(n)?n:fallback; }
 function truthyConfig(key, fallback) { const v=state.config?.[key]; if(v===undefined||v===null||v==='')return fallback; return ['TRUE','1','YES','ON'].includes(String(v).toUpperCase()); }
@@ -2165,7 +3534,7 @@ function projectSelectHtml(projects, selected, id) {
 }
 function kpi(label,value,sub='') { return `<div class="card kpi-card"><div class="value">${escapeHtml(String(value ?? 0))}</div><div class="label">${escapeHtml(label)}${sub?` • ${escapeHtml(sub)}`:''}</div></div>`; }
 function statusRow(label,value,badge='neutral') { return `<div class="list-item"><div><div class="item-title">${escapeHtml(label)}</div></div><span class="badge ${badge}">${escapeHtml(String(value ?? '-'))}</span></div>`; }
-function workflowBadge(status) { const s=String(status||'').toUpperCase(); if(['VERIFIED','SYNCED','COMPLETE'].includes(s))return 'success'; if(['SUBMITTED','QUEUED','SYNCING','NEED_REVISION','REOPENED'].includes(s))return 'warning'; if(['REJECTED','FAILED','SYNC_ERROR'].includes(s))return 'danger'; return 'neutral'; }
+function workflowBadge(status) { const s=String(status||'').toUpperCase(); if(['VERIFIED','SYNCED','COMPLETE','REVISION_RESOLVED'].includes(s))return 'success'; if(['SUBMITTED','QUEUED','SYNCING','NEED_REVISION','REOPENED'].includes(s))return 'warning'; if(['REJECTED','FAILED','SYNC_ERROR'].includes(s))return 'danger'; if(['DRAFT_SERVER'].includes(s))return 'info'; return 'neutral'; }
 function roleLabel(role) { return {LAPANGAN:'LAPANGAN',ADMIN:'ADMIN',VERIFIER:'VERIFIER',PM_LEADER:'PM / LEADER'}[String(role||'').toUpperCase()] || String(role||'-'); }
 function formatNumber(v) { const n=Number(v); return Number.isFinite(n)?(Math.round(n*10)/10).toLocaleString('id-ID'):'-'; }
 function formatCoord(v) { const n=Number(v); return Number.isFinite(n)?n.toFixed(6):'-'; }
