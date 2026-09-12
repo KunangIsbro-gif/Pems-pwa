@@ -52,7 +52,14 @@ const state = {
   requirementsInflight: new Map(),
   requirementsRequestSeq: 0,
   gpsWarmupPromise: null,
-  captureStage: { label: '', percent: 0, active: false }
+  captureStage: { label: '', percent: 0, active: false },
+  adminSection: 'project-setup',
+  adminMenuOpen: false,
+  adminProjects: [],
+  adminMasterOptions: { stakeholders: [], projectTypes: [], stos: [] },
+  adminMasterData: [],
+  adminCanPublish: false,
+  adminPlanUploading: false
 };
 
 const el = {
@@ -96,7 +103,7 @@ const NAV_META = {
   evidence: ['Evidence', 'Draft lokal, queue, sync, dan submit'],
   verifikasi: ['Verifikasi', 'Periksa realisasi yang SUBMITTED'],
   monitoring: ['Monitoring', 'Progress dan exception yang perlu tindakan'],
-  admin: ['Admin', 'User, assignment, dan konfigurasi'],
+  admin: ['Admin', 'Project setup, user, assignment, dan konfigurasi'],
   output: ['Output Center', 'KML/KMZ, Word, PDF, dan report'],
   audit: ['Audit Log', 'Riwayat perubahan penting'],
   settings: ['Settings', 'Status aplikasi dan konfigurasi perangkat']
@@ -394,9 +401,35 @@ function hideAppShell() {
 function renderNavigation() {
   const menus = state.bootstrap?.roleMenus || ['home', 'settings'];
 
+  const adminSubItems = [
+    ['project-setup', 'Project Setup'],
+    ['project-list', 'Daftar Project'],
+    ['master-data', 'Master Data'],
+    ['users', 'Daftar User'],
+    ['config', 'App Config Operasional'],
+    ['assignments', 'Assignment Aktif']
+  ];
+
   const render = (container) => {
+    const isSidebar = container === el.sideNav;
     container.innerHTML = menus.map(key => {
       const count = notificationCountForPage(key);
+      if (key === 'admin' && isSidebar) {
+        return `
+          <div class="nav-group ${state.adminMenuOpen ? 'open' : ''}">
+            <button class="nav-btn nav-admin-toggle ${state.currentPage === 'admin' ? 'active' : ''}" data-admin-toggle="1">
+              <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
+              <span class="nav-admin-chevron">${state.adminMenuOpen ? '▾' : '▸'}</span>
+            </button>
+            <div class="admin-subnav ${state.adminMenuOpen ? '' : 'hidden'}">
+              ${adminSubItems.map(([section, label]) => `
+                <button class="admin-subnav-btn ${state.currentPage === 'admin' && state.adminSection === section ? 'active' : ''}" data-admin-section="${escapeAttr(section)}">
+                  ${escapeHtml(label)}
+                </button>
+              `).join('')}
+            </div>
+          </div>`;
+      }
       return `<button class="nav-btn" data-nav="${escapeAttr(key)}">
         <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
         ${count ? `<span class="nav-count">${escapeHtml(String(count))}</span>` : ''}
@@ -406,6 +439,31 @@ function renderNavigation() {
     container.querySelectorAll('[data-nav]').forEach(btn =>
       btn.addEventListener('click', () => navigate(btn.dataset.nav))
     );
+
+    container.querySelectorAll('[data-admin-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.adminMenuOpen = !state.adminMenuOpen;
+        if (state.adminMenuOpen && state.currentPage !== 'admin') {
+          state.adminSection = state.adminSection || 'project-setup';
+          navigate('admin');
+          return;
+        }
+        renderNavigation();
+      });
+    });
+
+    container.querySelectorAll('[data-admin-section]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.adminMenuOpen = true;
+        state.adminSection = btn.dataset.adminSection || 'project-setup';
+        if (state.currentPage === 'admin') {
+          showAdminSection(state.adminSection);
+          renderNavigation();
+        } else {
+          navigate('admin');
+        }
+      });
+    });
   };
 
   render(el.sideNav);
@@ -416,8 +474,7 @@ function renderNavigation() {
     .forEach(btn =>
       btn.classList.toggle(
         'active',
-        btn.dataset.nav ===
-          state.currentPage
+        btn.dataset.nav === state.currentPage
       )
     );
 }
@@ -2912,8 +2969,9 @@ async function renderAdmin() {
     return;
   }
   try {
-    const [projectData, usersData, assignData, configData] = await Promise.all([
+    const [projectData, masterData, usersData, assignData, configData] = await Promise.all([
       api('/admin/projects'),
+      api('/admin/master-data'),
       api('/admin/users'),
       api('/admin/assignments'),
       api('/admin/config')
@@ -2922,8 +2980,13 @@ async function renderAdmin() {
     const users = usersData.users || [];
     const assignments = assignData.assignments || [];
     const adminConfig = configData.config || {};
+    const masterItems = masterData.items || [];
+    const masterOptions = masterData.activeOptions || projectData.masterOptions || { stakeholders: [], projectTypes: [], stos: [] };
     const canPublish = !!projectData.canPublish;
     state.adminProjects = projects;
+    state.adminMasterOptions = masterOptions;
+    state.adminMasterData = masterItems;
+    state.adminCanPublish = canPublish;
     if (state.bootstrap) state.bootstrap.projects = projects;
 
     const tcBadge = p => {
@@ -2932,104 +2995,224 @@ async function renderAdmin() {
       return `<span class="badge ${tone}">${escapeHtml(tc)}</span>`;
     };
 
+    const optionsHtml = (items, placeholder) => `
+      <option value="">${escapeHtml(placeholder || 'Pilih')}</option>
+      ${(items || []).map(v => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`).join('')}`;
+
     el.content.innerHTML = `
-      <div class="card">
-        <div class="section-head">
-          <div>
-            <h2>Project Setup</h2>
-            <div class="small muted">Master project dikelola dari web. Sheet 01_PROJECTS menjadi storage backend dan schema lama dimigrasikan otomatis.</div>
+      <section class="admin-section" data-admin-panel="project-setup">
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h2>Project Setup</h2>
+              <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
+            </div>
+            <span class="badge info">R11C</span>
           </div>
-          <span class="badge info">R11A</span>
+
+          <div class="status-box neutral" style="margin-top:12px">
+            <b>Flow:</b> Buat/Edit Draft → Upload BOQ Plan → Upload KML/KMZ Plan → Validasi → Publish.
+            <div class="tiny muted" style="margin-top:4px">File plan di-upload dari web, disimpan ke folder project di Drive, lalu File ID + versi dicatat otomatis ke 01_PROJECTS.</div>
+          </div>
+
+          <div class="grid three" style="margin-top:14px">
+            <div class="field"><label>Project ID *</label><input id="prjProjectId" class="input" placeholder="26KT...-0017"></div>
+            <div class="field"><label>Stakeholder *</label><select id="prjStakeholder" class="select">${optionsHtml(masterOptions.stakeholders, 'Pilih Stakeholder')}</select></div>
+            <div class="field"><label>Project Type</label><select id="prjProjectType" class="select">${optionsHtml(masterOptions.projectTypes, 'Pilih Project Type')}</select></div>
+          </div>
+          <div class="field" style="margin-top:10px"><label>Project Name *</label><input id="prjProjectName" class="input" placeholder="Nama pekerjaan/project"></div>
+
+          <div class="grid three" style="margin-top:10px">
+            <div class="field"><label>Contract</label><input id="prjContract" class="input"></div>
+            <div class="field"><label>Surat Pesanan / WO</label><input id="prjSuratPesanan" class="input"></div>
+            <div class="field"><label>Status Project</label><select id="prjStatusProject" class="select"><option>NOT_STARTED</option><option>ON_PROGRESS</option><option>HOLD</option><option>RFS</option><option>COMPLETED</option><option>CLOSED</option></select></div>
+          </div>
+
+          <div class="grid three" style="margin-top:10px">
+            <div class="field"><label>Regional</label><input id="prjRegional" class="input" placeholder="REGIONAL IV"></div>
+            <div class="field"><label>Witel / Branch</label><input id="prjWitelBranch" class="input" placeholder="PONTIANAK / KALBAR"></div>
+            <div class="field"><label>Area</label><input id="prjArea" class="input" placeholder="Pontianak"></div>
+          </div>
+
+          <div class="grid three" style="margin-top:10px">
+            <div class="field"><label>Detail Project Name / Span / SF / MF / Cluster</label><input id="prjDetailProject" class="input" placeholder="Contoh: PTK-PHASE4A-DF020 / Span 01 / Cluster A"></div>
+            <div class="field"><label>STO</label><select id="prjSto" class="select">${optionsHtml(masterOptions.stos, 'Pilih STO')}</select></div>
+            <div class="field"><label>Pelaksana</label><input id="prjPelaksana" class="input"></div>
+          </div>
+
+          <div class="grid three" style="margin-top:10px">
+            <div class="field"><label>Mitra</label><input id="prjMitra" class="input"></div>
+            <div class="field"><label>Start Date</label><input id="prjStartDate" class="input" type="date"></div>
+            <div class="field"><label>Target Selesai</label><input id="prjTargetSelesai" class="input" type="date"></div>
+          </div>
+
+          <div class="grid three" style="margin-top:10px">
+            <div class="field"><label>Realisasi Selesai</label><input id="prjRealisasiSelesai" class="input" type="date"></div>
+            <div class="field" style="grid-column:span 2"><label>Catatan</label><input id="prjNotes" class="input" placeholder="Catatan project"></div>
+          </div>
+
+          <div id="projectSlaPreview" class="status-box neutral" style="margin-top:12px">Isi Start Date dan Target Selesai untuk menghitung SLA otomatis.</div>
+          <div class="row-actions" style="margin-top:12px">
+            <button id="saveProjectBtn" class="btn secondary">Simpan Draft Project</button>
+            <button id="resetProjectBtn" class="btn ghost">Form Baru</button>
+          </div>
+          <div class="tiny muted" style="margin-top:8px">${canPublish ? 'PM/LEADER memiliki hak Publish setelah BOQ dan KML tervalidasi.' : 'ADMIN dapat menyiapkan/edit master project. Publish final tetap hak PM/LEADER.'}</div>
+
+          <div class="plan-files-box" style="margin-top:18px">
+            <div class="section-head">
+              <div>
+                <h3>Plan Files</h3>
+                <div class="small muted">Simpan Draft Project terlebih dahulu, lalu upload file plan untuk Project ID tersebut.</div>
+              </div>
+              <span class="badge neutral">BOQ + KML</span>
+            </div>
+            <div class="grid two" style="margin-top:12px">
+              <div class="plan-upload-card">
+                <div class="field">
+                  <label>BOQ Plan</label>
+                  <input id="boqPlanFile" class="input" type="file" accept=".xlsx,.xls,.csv">
+                </div>
+                <div id="boqPlanStatus" class="tiny muted" style="margin-top:8px">Belum ada BOQ Plan pada project yang dipilih.</div>
+                <button id="uploadBoqPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload BOQ Plan</button>
+              </div>
+              <div class="plan-upload-card">
+                <div class="field">
+                  <label>KML / KMZ Plan</label>
+                  <input id="kmlPlanFile" class="input" type="file" accept=".kml,.kmz">
+                </div>
+                <div id="kmlPlanStatus" class="tiny muted" style="margin-top:8px">Belum ada KML/KMZ Plan pada project yang dipilih.</div>
+                <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
+              </div>
+            </div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11C:</b> upload file sumber + versioning sudah aktif. Parsing/mapping isi BOQ dan KML masuk tahap Validasi berikutnya, jadi Admin tetap tidak perlu edit sheet manual.</div>
+          </div>
         </div>
+      </section>
 
-        <div class="status-box neutral" style="margin-top:12px">
-          <b>Flow:</b> Buat/Edit Draft → BOQ Plan → KML/KMZ Plan → Validasi → Publish.
-          <div class="tiny muted" style="margin-top:4px">R11A mengaktifkan master project + SLA/Time of Critical. Upload BOQ/KML masuk increment berikutnya tanpa edit sheet manual.</div>
+      <section class="admin-section hidden" data-admin-panel="project-list">
+        <div class="card"><div class="section-head"><h2>Daftar Project</h2><span class="badge info">${projects.length} project</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Project</th><th>Stakeholder</th><th>Detail / STO</th><th>Plan File</th><th>Setup</th><th>Status</th><th>SLA</th><th>Time of Critical</th><th></th></tr></thead><tbody>
+            ${projects.length ? projects.map(p=>`<tr>
+              <td><b>${escapeHtml(p.projectId)}</b><div class="tiny muted">${escapeHtml(p.projectName || '-')}</div></td>
+              <td>${escapeHtml(p.stakeholder || '-')}<div class="tiny muted">${escapeHtml(p.projectType || '-')}</div></td>
+              <td>${escapeHtml(p.detailProject || p.lop || '-')}<div class="tiny muted">STO: ${escapeHtml(p.sto || '-')}</div></td>
+              <td><div class="tiny"><b>BOQ</b> ${p.boqPlanFileId ? `V${escapeHtml(String(p.boqVersion || 1))} ✓` : '—'}</div><div class="tiny"><b>KML</b> ${p.kmlPlanFileId ? `V${escapeHtml(String(p.kmlPlanVersion || 1))} ✓` : '—'}</div></td>
+              <td><span class="badge ${String(p.setupStatus).toUpperCase()==='PUBLISHED'?'success':'warning'}">${escapeHtml(p.setupStatus || 'DRAFT')}</span></td>
+              <td>${escapeHtml(p.statusProject || '-')}</td>
+              <td>${p.slaDays === '' || p.slaDays == null ? '-' : `${escapeHtml(String(p.elapsedDays || 0))} / ${escapeHtml(String(p.slaDays))} hari`}<div class="tiny muted">${p.slaUsagePct === '' || p.slaUsagePct == null ? '' : `${escapeHtml(String(p.slaUsagePct))}%`}</div></td>
+              <td>${tcBadge(p)}<div class="tiny muted">${escapeHtml(p.timeCriticalLabel || '')}</div></td>
+              <td><button class="btn ghost small" data-edit-project="${escapeAttr(p.projectId)}">Edit / Plan</button></td>
+            </tr>`).join('') : '<tr><td colspan="9" class="muted">Belum ada project.</td></tr>'}
+          </tbody></table></div>
         </div>
+      </section>
 
-        <div class="grid three" style="margin-top:14px">
-          <div class="field"><label>Project ID *</label><input id="prjProjectId" class="input" placeholder="26KT...-0017"></div>
-          <div class="field"><label>Stakeholder *</label><input id="prjStakeholder" class="input" placeholder="MITRATEL"></div>
-          <div class="field"><label>Project Type</label><input id="prjProjectType" class="input" placeholder="FTTT / FTTH / OSP"></div>
+
+      <section class="admin-section hidden" data-admin-panel="master-data">
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h2>Master Data</h2>
+              <div class="small muted">Stakeholder, Project Type, dan STO dikelola dari web. Dropdown Project Setup membaca data aktif di sini.</div>
+            </div>
+            <span class="badge info">${masterItems.filter(m => m.active).length} aktif</span>
+          </div>
+
+          <input id="masterDataId" type="hidden">
+          <div class="grid three" style="margin-top:14px">
+            <div class="field">
+              <label>Master Type *</label>
+              <select id="masterDataType" class="select">
+                <option value="STAKEHOLDER">STAKEHOLDER</option>
+                <option value="PROJECT_TYPE">PROJECT TYPE</option>
+                <option value="STO">STO</option>
+              </select>
+            </div>
+            <div class="field"><label>Code *</label><input id="masterDataCode" class="input" placeholder="Contoh: MITRATEL / FTTT / PTK"></div>
+            <div class="field"><label>Nama</label><input id="masterDataName" class="input" placeholder="Nama tampil"></div>
+          </div>
+          <div class="grid three" style="margin-top:10px">
+            <div class="field"><label>Area <span class="tiny muted">(opsional, terutama STO)</span></label><input id="masterDataArea" class="input" placeholder="Pontianak"></div>
+            <div class="field"><label>Urutan</label><input id="masterDataSort" class="input" type="number" value="100"></div>
+            <div class="field"><label>Status</label><select id="masterDataActive" class="select"><option value="TRUE">AKTIF</option><option value="FALSE">NONAKTIF</option></select></div>
+          </div>
+          <div class="field" style="margin-top:10px"><label>Keterangan</label><input id="masterDataDescription" class="input" placeholder="Catatan master data"></div>
+          <div class="row-actions" style="margin-top:12px">
+            <button id="saveMasterDataBtn" class="btn secondary">Simpan Master Data</button>
+            <button id="resetMasterDataBtn" class="btn ghost">Form Baru</button>
+          </div>
+
+          ${['STAKEHOLDER','PROJECT_TYPE','STO'].map(type => {
+            const rows = masterItems.filter(m => m.type === type);
+            const label = type === 'PROJECT_TYPE' ? 'Project Type' : type === 'STO' ? 'STO' : 'Stakeholder';
+            return `
+              <div style="margin-top:20px">
+                <div class="section-head">
+                  <h3>${label}</h3>
+                  <span class="badge neutral">${rows.length}</span>
+                </div>
+                <div class="table-wrap" style="margin-top:8px">
+                  <table>
+                    <thead><tr><th>Code</th><th>Nama</th><th>Area</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                      ${rows.length ? rows.map(m => `
+                        <tr>
+                          <td><b>${escapeHtml(m.code)}</b></td>
+                          <td>${escapeHtml(m.name || '-')}</td>
+                          <td>${escapeHtml(m.area || '-')}</td>
+                          <td><span class="badge ${m.active ? 'success' : 'neutral'}">${m.active ? 'AKTIF' : 'NONAKTIF'}</span></td>
+                          <td>
+                            <div class="row-actions">
+                              <button class="btn ghost small" data-edit-master="${escapeAttr(m.masterId)}">Edit</button>
+                              <button class="btn ghost small" data-toggle-master="${escapeAttr(m.masterId)}">${m.active ? 'Nonaktifkan' : 'Aktifkan'}</button>
+                            </div>
+                          </td>
+                        </tr>`).join('') : '<tr><td colspan="5" class="muted">Belum ada data.</td></tr>'}
+                    </tbody>
+                  </table>
+                </div>
+              </div>`;
+          }).join('')}
+          <div class="status-box neutral" style="margin-top:16px">
+            <b>Catatan:</b> data tidak dihapus permanen. Gunakan Nonaktifkan agar project lama tetap memiliki referensi historis.
+          </div>
         </div>
-        <div class="field" style="margin-top:10px"><label>Project Name *</label><input id="prjProjectName" class="input" placeholder="Nama pekerjaan/project"></div>
+      </section>
 
-        <div class="grid three" style="margin-top:10px">
-          <div class="field"><label>Contract</label><input id="prjContract" class="input"></div>
-          <div class="field"><label>Surat Pesanan / WO</label><input id="prjSuratPesanan" class="input"></div>
-          <div class="field"><label>Status Project</label><select id="prjStatusProject" class="select"><option>NOT_STARTED</option><option>ON_PROGRESS</option><option>HOLD</option><option>RFS</option><option>COMPLETED</option><option>CLOSED</option></select></div>
-        </div>
-
-        <div class="grid three" style="margin-top:10px">
-          <div class="field"><label>Regional</label><input id="prjRegional" class="input" placeholder="REGIONAL IV"></div>
-          <div class="field"><label>Witel / Branch</label><input id="prjWitelBranch" class="input" placeholder="PONTIANAK / KALBAR"></div>
-          <div class="field"><label>Area</label><input id="prjArea" class="input" placeholder="Pontianak"></div>
-        </div>
-
-        <div class="grid three" style="margin-top:10px">
-          <div class="field"><label>LOP</label><input id="prjLop" class="input"></div>
-          <div class="field"><label>STO</label><input id="prjSto" class="input"></div>
-          <div class="field"><label>Pelaksana</label><input id="prjPelaksana" class="input"></div>
-        </div>
-
-        <div class="grid three" style="margin-top:10px">
-          <div class="field"><label>Mitra</label><input id="prjMitra" class="input"></div>
-          <div class="field"><label>Start Date</label><input id="prjStartDate" class="input" type="date"></div>
-          <div class="field"><label>Target Selesai</label><input id="prjTargetSelesai" class="input" type="date"></div>
-        </div>
-
-        <div class="grid three" style="margin-top:10px">
-          <div class="field"><label>Realisasi Selesai</label><input id="prjRealisasiSelesai" class="input" type="date"></div>
-          <div class="field" style="grid-column:span 2"><label>Catatan</label><input id="prjNotes" class="input" placeholder="Catatan project"></div>
-        </div>
-
-        <div id="projectSlaPreview" class="status-box neutral" style="margin-top:12px">Isi Start Date dan Target Selesai untuk menghitung SLA otomatis.</div>
-        <div class="row-actions" style="margin-top:12px">
-          <button id="saveProjectBtn" class="btn secondary">Simpan Draft Project</button>
-          <button id="resetProjectBtn" class="btn ghost">Form Baru</button>
-        </div>
-        <div class="tiny muted" style="margin-top:8px">${canPublish ? 'PM/LEADER memiliki hak Publish setelah BOQ dan KML tervalidasi.' : 'ADMIN dapat menyiapkan/edit master project. Publish final tetap hak PM/LEADER.'}</div>
-      </div>
-
-      <div class="card" style="margin-top:16px"><h2>Daftar Project</h2>
-        <div class="table-wrap"><table><thead><tr><th>Project</th><th>Stakeholder</th><th>LOP / STO</th><th>Setup</th><th>Status</th><th>SLA</th><th>Time of Critical</th><th></th></tr></thead><tbody>
-          ${projects.length ? projects.map(p=>`<tr>
-            <td><b>${escapeHtml(p.projectId)}</b><div class="tiny muted">${escapeHtml(p.projectName || '-')}</div></td>
-            <td>${escapeHtml(p.stakeholder || '-')}</td>
-            <td>${escapeHtml(p.lop || '-')}<div class="tiny muted">${escapeHtml(p.sto || '-')}</div></td>
-            <td><span class="badge ${String(p.setupStatus).toUpperCase()==='PUBLISHED'?'success':'warning'}">${escapeHtml(p.setupStatus || 'DRAFT')}</span></td>
-            <td>${escapeHtml(p.statusProject || '-')}</td>
-            <td>${p.slaDays === '' || p.slaDays == null ? '-' : `${escapeHtml(String(p.elapsedDays || 0))} / ${escapeHtml(String(p.slaDays))} hari`}<div class="tiny muted">${p.slaUsagePct === '' || p.slaUsagePct == null ? '' : `${escapeHtml(String(p.slaUsagePct))}%`}</div></td>
-            <td>${tcBadge(p)}<div class="tiny muted">${escapeHtml(p.timeCriticalLabel || '')}</div></td>
-            <td><button class="btn ghost small" data-edit-project="${escapeAttr(p.projectId)}">Edit</button></td>
-          </tr>`).join('') : '<tr><td colspan="8" class="muted">Belum ada project.</td></tr>'}
-        </tbody></table></div>
-      </div>
-
-      <div class="grid two" style="margin-top:16px">
-        <div class="card"><h2>User & Role</h2>
+      <section class="admin-section hidden" data-admin-panel="users">
+        <div class="card">
+          <div class="section-head"><h2>User & Role</h2><span class="badge info">${users.length} user</span></div>
           <div class="form-row"><div class="field"><label>Email</label><input id="adminUserEmail" class="input" placeholder="nama@domain.com"></div><div class="field"><label>Nama</label><input id="adminUserName" class="input"></div></div>
           <div class="form-row" style="margin-top:10px"><div class="field"><label>Role</label><select id="adminUserRole" class="select"><option>LAPANGAN</option><option>ADMIN</option><option>VERIFIER</option><option>PM_LEADER</option></select></div><div class="field"><label>Area</label><input id="adminUserArea" class="input" placeholder="Pontianak"></div></div>
-          <button id="saveUserBtn" class="btn secondary full" style="margin-top:12px">Simpan User</button>
+          <button id="saveUserBtn" class="btn secondary" style="margin-top:12px">Simpan User</button>
+          <div class="table-wrap" style="margin-top:16px"><table><thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Area</th><th>Aktif</th></tr></thead><tbody>${users.map(u=>`<tr><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.fullName)}</td><td>${escapeHtml(u.role)}</td><td>${escapeHtml(u.area)}</td><td>${u.active?'YES':'NO'}</td></tr>`).join('')}</tbody></table></div>
         </div>
-        <div class="card"><h2>Assignment</h2>
-          <div class="field"><label>User</label><select id="assignUser" class="select">${users.map(u=>`<option value="${escapeAttr(u.email)}">${escapeHtml(u.fullName || u.email)} — ${escapeHtml(u.role)}</option>`).join('')}</select></div>
-          <div class="field" style="margin-top:10px"><label>Project</label><select id="assignProject" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}">${escapeHtml(p.projectId)} — ${escapeHtml(p.projectName)}</option>`).join('')}</select></div>
-          <div class="form-row" style="margin-top:10px"><div class="field"><label>Scope</label><select id="assignScope" class="select"><option>PROJECT</option><option>POINT</option></select></div><div class="field"><label>Scope Value</label><input id="assignScopeValue" class="input" placeholder="Kosong untuk PROJECT / PS-... untuk POINT"></div></div>
-          <button id="saveAssignmentBtn" class="btn secondary full" style="margin-top:12px">Simpan Assignment</button>
+      </section>
+
+      <section class="admin-section hidden" data-admin-panel="config">
+        <div class="card"><h2>App Config Operasional</h2>
+          <div class="grid three" style="margin-top:12px">
+            <div class="field"><label>GPS Policy</label><select id="cfgGpsPolicy" class="select"><option ${String(adminConfig.GPS_POLICY).toUpperCase()==='DEV'?'selected':''}>DEV</option><option ${String(adminConfig.GPS_POLICY).toUpperCase()==='FIELD'?'selected':''}>FIELD</option></select></div>
+            <div class="field"><label>GPS Field Block (m)</label><input id="cfgGpsBlock" class="input" type="number" value="${escapeAttr(adminConfig.GPS_FIELD_BLOCK_M ?? 50)}"></div>
+            <div class="field"><label>Distance Warning (m)</label><input id="cfgDistanceWarn" class="input" type="number" value="${escapeAttr(adminConfig.POINT_DISTANCE_WARNING_M ?? 30)}"></div>
+          </div>
+          <button id="saveOperationalConfigBtn" class="btn secondary" style="margin-top:12px">Simpan Config</button>
+          <div class="small muted" style="margin-top:8px">Gunakan DEV selama test laptop. Ganti FIELD sebelum pilot tim lapangan.</div>
         </div>
-      </div>
-      <div class="card" style="margin-top:16px"><h2>App Config Operasional</h2>
-        <div class="grid three">
-          <div class="field"><label>GPS Policy</label><select id="cfgGpsPolicy" class="select"><option ${String(adminConfig.GPS_POLICY).toUpperCase()==='DEV'?'selected':''}>DEV</option><option ${String(adminConfig.GPS_POLICY).toUpperCase()==='FIELD'?'selected':''}>FIELD</option></select></div>
-          <div class="field"><label>GPS Field Block (m)</label><input id="cfgGpsBlock" class="input" type="number" value="${escapeAttr(adminConfig.GPS_FIELD_BLOCK_M ?? 50)}"></div>
-          <div class="field"><label>Distance Warning (m)</label><input id="cfgDistanceWarn" class="input" type="number" value="${escapeAttr(adminConfig.POINT_DISTANCE_WARNING_M ?? 30)}"></div>
+      </section>
+
+      <section class="admin-section hidden" data-admin-panel="assignments">
+        <div class="card">
+          <div class="section-head"><h2>Assignment Aktif</h2><span class="badge info">${assignments.length} aktif</span></div>
+          <div class="grid two" style="margin-top:12px">
+            <div class="field"><label>User</label><select id="assignUser" class="select">${users.map(u=>`<option value="${escapeAttr(u.email)}">${escapeHtml(u.fullName || u.email)} — ${escapeHtml(u.role)}</option>`).join('')}</select></div>
+            <div class="field"><label>Project</label><select id="assignProject" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}">${escapeHtml(p.projectId)} — ${escapeHtml(p.projectName)}</option>`).join('')}</select></div>
+          </div>
+          <div class="grid two" style="margin-top:10px"><div class="field"><label>Scope</label><select id="assignScope" class="select"><option>PROJECT</option><option>POINT</option></select></div><div class="field"><label>Scope Value</label><input id="assignScopeValue" class="input" placeholder="Kosong untuk PROJECT / PS-... untuk POINT"></div></div>
+          <button id="saveAssignmentBtn" class="btn secondary" style="margin-top:12px">Simpan Assignment</button>
+          <div class="table-wrap" style="margin-top:16px"><table><thead><tr><th>User</th><th>Project</th><th>Scope</th><th>Value</th><th>Status</th></tr></thead><tbody>${assignments.map(a=>`<tr><td>${escapeHtml(a.userEmail)}</td><td>${escapeHtml(a.projectId)}</td><td>${escapeHtml(a.scopeType)}</td><td>${escapeHtml(a.scopeValue)}</td><td>${escapeHtml(a.status)}</td></tr>`).join('')}</tbody></table></div>
         </div>
-        <button id="saveOperationalConfigBtn" class="btn secondary" style="margin-top:12px">Simpan Config</button>
-        <div class="small muted" style="margin-top:8px">Gunakan DEV selama test laptop. Ganti FIELD sebelum pilot tim lapangan.</div>
-      </div>
-      <div class="card" style="margin-top:16px"><h2>Daftar User</h2><div class="table-wrap"><table><thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Area</th><th>Aktif</th></tr></thead><tbody>${users.map(u=>`<tr><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.fullName)}</td><td>${escapeHtml(u.role)}</td><td>${escapeHtml(u.area)}</td><td>${u.active?'YES':'NO'}</td></tr>`).join('')}</tbody></table></div></div>
-      <div class="card" style="margin-top:16px"><h2>Assignment Aktif</h2><div class="table-wrap"><table><thead><tr><th>User</th><th>Project</th><th>Scope</th><th>Value</th><th>Status</th></tr></thead><tbody>${assignments.map(a=>`<tr><td>${escapeHtml(a.userEmail)}</td><td>${escapeHtml(a.projectId)}</td><td>${escapeHtml(a.scopeType)}</td><td>${escapeHtml(a.scopeValue)}</td><td>${escapeHtml(a.status)}</td></tr>`).join('')}</tbody></table></div></div>
+      </section>
     `;
 
     document.getElementById('saveProjectBtn')?.addEventListener('click', saveAdminProject);
@@ -3038,16 +3221,118 @@ async function renderAdmin() {
     document.getElementById('prjTargetSelesai')?.addEventListener('change', updateAdminProjectSlaPreview);
     document.getElementById('prjRealisasiSelesai')?.addEventListener('change', updateAdminProjectSlaPreview);
     document.getElementById('prjStatusProject')?.addEventListener('change', updateAdminProjectSlaPreview);
-    el.content.querySelectorAll('[data-edit-project]').forEach(btn => btn.addEventListener('click', () => fillAdminProjectForm(btn.dataset.editProject)));
+    document.getElementById('uploadBoqPlanBtn')?.addEventListener('click', () => uploadAdminPlanFile('BOQ'));
+    document.getElementById('uploadKmlPlanBtn')?.addEventListener('click', () => uploadAdminPlanFile('KML'));
+    el.content.querySelectorAll('[data-edit-project]').forEach(btn => btn.addEventListener('click', () => {
+      state.adminSection = 'project-setup';
+      showAdminSection('project-setup');
+      renderNavigation();
+      fillAdminProjectForm(btn.dataset.editProject);
+    }));
+    document.getElementById('saveMasterDataBtn')?.addEventListener('click', saveAdminMasterData);
+    document.getElementById('resetMasterDataBtn')?.addEventListener('click', resetAdminMasterForm);
+    el.content.querySelectorAll('[data-edit-master]').forEach(btn => btn.addEventListener('click', () => fillAdminMasterForm(btn.dataset.editMaster)));
+    el.content.querySelectorAll('[data-toggle-master]').forEach(btn => btn.addEventListener('click', () => toggleAdminMasterData(btn.dataset.toggleMaster)));
     document.getElementById('saveUserBtn')?.addEventListener('click', saveAdminUser);
     document.getElementById('saveAssignmentBtn')?.addEventListener('click', saveAdminAssignment);
     document.getElementById('saveOperationalConfigBtn')?.addEventListener('click', saveOperationalConfig);
+
+    showAdminSection(state.adminSection || 'project-setup');
 
     if (projectData.schemaMigration?.changed && !state.projectSchemaMigrationShown) {
       state.projectSchemaMigrationShown = true;
       toast('Schema 01_PROJECTS diperbarui otomatis.', 'success', 4500);
     }
   } catch(err) { el.content.innerHTML=`<div class="status-box danger">${escapeHtml(humanError(err))}</div>`; }
+}
+
+function showAdminSection(section) {
+  const valid = ['project-setup','project-list','master-data','users','config','assignments'];
+  section = valid.includes(section) ? section : 'project-setup';
+  state.adminSection = section;
+  el.content?.querySelectorAll('[data-admin-panel]').forEach(panel => {
+    panel.classList.toggle('hidden', panel.dataset.adminPanel !== section);
+  });
+  const labels = {
+    'project-setup': 'Project Setup',
+    'project-list': 'Daftar Project',
+    'master-data': 'Master Data',
+    'users': 'Daftar User',
+    'config': 'App Config Operasional',
+    'assignments': 'Assignment Aktif'
+  };
+  if (state.currentPage === 'admin') el.pageSubtitle.textContent = labels[section] || 'Admin';
+}
+
+function updateAdminPlanFileStatus(project) {
+  const boq = document.getElementById('boqPlanStatus');
+  const kml = document.getElementById('kmlPlanStatus');
+  if (boq) {
+    boq.innerHTML = project?.boqPlanFileId
+      ? `<b>Aktif:</b> ${escapeHtml(project.boqPlanFileName || 'BOQ Plan')} · V${escapeHtml(String(project.boqVersion || 1))}`
+      : 'Belum ada BOQ Plan pada project yang dipilih.';
+  }
+  if (kml) {
+    kml.innerHTML = project?.kmlPlanFileId
+      ? `<b>Aktif:</b> ${escapeHtml(project.kmlPlanFileName || 'KML/KMZ Plan')} · V${escapeHtml(String(project.kmlPlanVersion || 1))}`
+      : 'Belum ada KML/KMZ Plan pada project yang dipilih.';
+  }
+}
+
+function adminFileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Gagal membaca file.'));
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      const chunkSize = 0x8000;
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
+      }
+      resolve(btoa(binary));
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function uploadAdminPlanFile(kind) {
+  if (state.adminPlanUploading) return;
+  const projectId = value('prjProjectId');
+  const input = document.getElementById(kind === 'BOQ' ? 'boqPlanFile' : 'kmlPlanFile');
+  const file = input?.files?.[0];
+  if (!projectId) {
+    toast('Isi dan Simpan Draft Project terlebih dahulu.', 'warning', 5000);
+    return;
+  }
+  if (!file) {
+    toast(`Pilih file ${kind === 'BOQ' ? 'BOQ Plan' : 'KML/KMZ Plan'} terlebih dahulu.`, 'warning', 5000);
+    return;
+  }
+  const maxBytes = 12 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    toast('File terlalu besar. Maksimum 12 MB dari web.', 'danger', 6000);
+    return;
+  }
+  try {
+    state.adminPlanUploading = true;
+    const btn = document.getElementById(kind === 'BOQ' ? 'uploadBoqPlanBtn' : 'uploadKmlPlanBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Mengunggah...'; }
+    const base64 = await adminFileToBase64(file);
+    const result = await api(`/admin/projects/${encodeURIComponent(projectId)}/plan-file`, {
+      method: 'POST',
+      body: { kind, fileName: file.name, mimeType: file.type || 'application/octet-stream', base64 }
+    });
+    toast(`${kind} Plan tersimpan · V${result.version}.`, 'success', 5000);
+    await renderAdmin();
+    state.adminSection = 'project-setup';
+    showAdminSection('project-setup');
+    fillAdminProjectForm(projectId);
+  } catch (err) {
+    toast(humanError(err), 'danger', 7000);
+  } finally {
+    state.adminPlanUploading = false;
+  }
 }
 
 function adminDateDiffDays(a, b) {
@@ -3094,11 +3379,14 @@ function updateAdminProjectSlaPreview() {
 }
 
 function resetAdminProjectForm() {
-  ['prjProjectId','prjStakeholder','prjProjectType','prjProjectName','prjContract','prjSuratPesanan','prjRegional','prjWitelBranch','prjArea','prjLop','prjSto','prjPelaksana','prjMitra','prjStartDate','prjTargetSelesai','prjRealisasiSelesai','prjNotes'].forEach(id => {
+  ['prjProjectId','prjStakeholder','prjProjectType','prjProjectName','prjContract','prjSuratPesanan','prjRegional','prjWitelBranch','prjArea','prjDetailProject','prjSto','prjPelaksana','prjMitra','prjStartDate','prjTargetSelesai','prjRealisasiSelesai','prjNotes'].forEach(id => {
     const node = document.getElementById(id); if (node) node.value = '';
   });
   const status = document.getElementById('prjStatusProject'); if (status) status.value = 'NOT_STARTED';
   const id = document.getElementById('prjProjectId'); if (id) id.readOnly = false;
+  const boqInput = document.getElementById('boqPlanFile'); if (boqInput) boqInput.value = '';
+  const kmlInput = document.getElementById('kmlPlanFile'); if (kmlInput) kmlInput.value = '';
+  updateAdminPlanFileStatus(null);
   updateAdminProjectSlaPreview();
 }
 
@@ -3106,10 +3394,17 @@ function fillAdminProjectForm(projectId) {
   const p = (state.adminProjects || []).find(x => x.projectId === projectId);
   if (!p) return;
   const set = (id, val) => { const node = document.getElementById(id); if (node) node.value = val ?? ''; };
-  set('prjProjectId', p.projectId); set('prjStakeholder', p.stakeholder); set('prjProjectType', p.projectType);
+  const setSelect = (id, val) => {
+    const node = document.getElementById(id);
+    const v = val ?? '';
+    if (!node) return;
+    if (v && !Array.from(node.options).some(o => o.value === v)) node.add(new Option(`${v} (legacy/nonaktif)`, v));
+    node.value = v;
+  };
+  set('prjProjectId', p.projectId); setSelect('prjStakeholder', p.stakeholder); setSelect('prjProjectType', p.projectType);
   set('prjProjectName', p.projectName); set('prjContract', p.contract); set('prjSuratPesanan', p.suratPesanan);
-  set('prjRegional', p.regional); set('prjWitelBranch', p.witelBranch); set('prjArea', p.area); set('prjLop', p.lop);
-  set('prjSto', p.sto); set('prjPelaksana', p.pelaksana); set('prjMitra', p.mitra); set('prjStartDate', p.startDate);
+  set('prjRegional', p.regional); set('prjWitelBranch', p.witelBranch); set('prjArea', p.area); set('prjDetailProject', p.detailProject || p.lop);
+  setSelect('prjSto', p.sto); set('prjPelaksana', p.pelaksana); set('prjMitra', p.mitra); set('prjStartDate', p.startDate);
   set('prjTargetSelesai', p.targetSelesai); set('prjRealisasiSelesai', p.realisasiSelesai);
   const statusNode = document.getElementById('prjStatusProject');
   const statusValue = p.statusProject || 'NOT_STARTED';
@@ -3119,6 +3414,7 @@ function fillAdminProjectForm(projectId) {
   set('prjStatusProject', statusValue);
   set('prjNotes', p.notes);
   const id = document.getElementById('prjProjectId'); if (id) id.readOnly = true;
+  updateAdminPlanFileStatus(p);
   updateAdminProjectSlaPreview();
   document.getElementById('prjProjectId')?.scrollIntoView({behavior:'smooth', block:'center'});
 }
@@ -3128,15 +3424,96 @@ async function saveAdminProject() {
     const body = {
       projectId: value('prjProjectId'), stakeholder: value('prjStakeholder'), projectType: value('prjProjectType'), projectName: value('prjProjectName'),
       contract: value('prjContract'), suratPesanan: value('prjSuratPesanan'), regional: value('prjRegional'), witelBranch: value('prjWitelBranch'),
-      area: value('prjArea'), lop: value('prjLop'), sto: value('prjSto'), pelaksana: value('prjPelaksana'), mitra: value('prjMitra'),
+      area: value('prjArea'), detailProject: value('prjDetailProject'), sto: value('prjSto'), pelaksana: value('prjPelaksana'), mitra: value('prjMitra'),
       startDate: value('prjStartDate'), targetSelesai: value('prjTargetSelesai'), realisasiSelesai: value('prjRealisasiSelesai'),
       statusProject: value('prjStatusProject'), notes: value('prjNotes'), active: true
     };
     await api('/admin/projects/upsert', {method:'POST', body});
     toast('Project disimpan. SLA dihitung otomatis.', 'success');
     await refreshNotifications(true, true);
-    renderAdmin();
+    state.adminSection = 'project-setup';
+    await renderAdmin();
+    fillAdminProjectForm(body.projectId);
   } catch(err) { toast(humanError(err), 'danger', 6000); }
+}
+
+
+function resetAdminMasterForm() {
+  const set = (id, val) => { const node = document.getElementById(id); if (node) node.value = val; };
+  set('masterDataId', '');
+  set('masterDataType', 'STAKEHOLDER');
+  set('masterDataCode', '');
+  set('masterDataName', '');
+  set('masterDataArea', '');
+  set('masterDataSort', '100');
+  set('masterDataActive', 'TRUE');
+  set('masterDataDescription', '');
+  const code = document.getElementById('masterDataCode');
+  if (code) code.readOnly = false;
+}
+
+function fillAdminMasterForm(masterId) {
+  const item = (state.adminMasterData || []).find(m => m.masterId === masterId);
+  if (!item) return;
+  const set = (id, val) => { const node = document.getElementById(id); if (node) node.value = val ?? ''; };
+  set('masterDataId', item.masterId);
+  set('masterDataType', item.type);
+  set('masterDataCode', item.code);
+  set('masterDataName', item.name);
+  set('masterDataArea', item.area);
+  set('masterDataSort', String(item.sortOrder ?? 100));
+  set('masterDataActive', item.active ? 'TRUE' : 'FALSE');
+  set('masterDataDescription', item.description);
+  document.getElementById('masterDataCode')?.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+async function saveAdminMasterData() {
+  try {
+    const body = {
+      masterId: value('masterDataId'),
+      type: value('masterDataType'),
+      code: value('masterDataCode'),
+      name: value('masterDataName'),
+      area: value('masterDataArea'),
+      description: value('masterDataDescription'),
+      sortOrder: Number(value('masterDataSort') || 0),
+      active: value('masterDataActive') === 'TRUE'
+    };
+    await api('/admin/master-data', { method:'POST', body });
+    toast('Master Data disimpan. Dropdown Project Setup ikut diperbarui.', 'success', 5000);
+    state.adminSection = 'master-data';
+    await renderAdmin();
+    showAdminSection('master-data');
+  } catch(err) {
+    toast(humanError(err), 'danger', 6500);
+  }
+}
+
+async function toggleAdminMasterData(masterId) {
+  const item = (state.adminMasterData || []).find(m => m.masterId === masterId);
+  if (!item) return;
+  try {
+    await api('/admin/master-data', {
+      method:'POST',
+      body: {
+        masterId: item.masterId,
+        type: item.type,
+        code: item.code,
+        name: item.name,
+        area: item.area,
+        description: item.description,
+        sortOrder: item.sortOrder,
+        active: !item.active,
+        reason: item.active ? 'Nonaktifkan dari Admin Web' : 'Aktifkan kembali dari Admin Web'
+      }
+    });
+    toast(`${item.code} ${item.active ? 'dinonaktifkan' : 'diaktifkan kembali'}.`, 'success', 4500);
+    state.adminSection = 'master-data';
+    await renderAdmin();
+    showAdminSection('master-data');
+  } catch(err) {
+    toast(humanError(err), 'danger', 6500);
+  }
 }
 
 async function saveAdminUser() {

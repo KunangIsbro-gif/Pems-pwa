@@ -293,3 +293,15 @@ body.modal-open{overflow:hidden}
 @keyframes pems-point-spin{
   to{transform:rotate(360deg)}
 }
+
+/* R11B Admin submenu + plan file upload */
+.nav-group{display:grid;gap:4px}
+.nav-admin-toggle{width:100%}
+.nav-admin-chevron{font-size:.9rem;opacity:.8}
+.admin-subnav{display:grid;gap:4px;padding:2px 0 4px 14px}
+.admin-subnav-btn{border:0;background:transparent;color:#94a3b8;text-align:left;padding:8px 10px;border-radius:10px;font-size:.82rem;font-weight:650;cursor:pointer}
+.admin-subnav-btn:hover,.admin-subnav-btn.active{background:rgba(255,255,255,.08);color:#fff}
+.plan-files-box{border:1px dashed #cbd5e1;border-radius:16px;padding:16px;background:#f8fafc}
+.plan-upload-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff}
+.admin-section.hidden{display:none!important}
+@media(max-width:900px){.admin-subnav{display:none!important}.plan-files-box{padding:12px}}
