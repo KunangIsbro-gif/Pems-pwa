@@ -2903,7 +2903,7 @@ async function renderMonitoring(options = {}) {
 }
 
 async function renderAdmin() {
-  if (!hasPermission('user.manage') && !hasPermission('assignment.manage')) {
+  if (!hasPermission('project.manage') && !hasPermission('user.manage') && !hasPermission('assignment.manage')) {
     el.content.innerHTML = '<div class="empty">Role ini tidak memiliki menu Admin.</div>';
     return;
   }
@@ -2912,13 +2912,101 @@ async function renderAdmin() {
     return;
   }
   try {
-    const [usersData, assignData, configData] = await Promise.all([api('/admin/users'), api('/admin/assignments'), api('/admin/config')]);
+    const [projectData, usersData, assignData, configData] = await Promise.all([
+      api('/admin/projects'),
+      api('/admin/users'),
+      api('/admin/assignments'),
+      api('/admin/config')
+    ]);
+    const projects = projectData.projects || [];
     const users = usersData.users || [];
     const assignments = assignData.assignments || [];
     const adminConfig = configData.config || {};
-    const projects = state.bootstrap?.projects || [];
+    const canPublish = !!projectData.canPublish;
+    state.adminProjects = projects;
+    if (state.bootstrap) state.bootstrap.projects = projects;
+
+    const tcBadge = p => {
+      const tc = String(p.timeCritical || 'NO_SLA').toUpperCase();
+      const tone = tc === 'OVERDUE' ? 'danger' : tc === 'CRITICAL' ? 'warning' : tc === 'ATTENTION' ? 'warning' : tc === 'COMPLETED' ? 'success' : tc === 'NORMAL' ? 'success' : 'neutral';
+      return `<span class="badge ${tone}">${escapeHtml(tc)}</span>`;
+    };
+
     el.content.innerHTML = `
-      <div class="grid two">
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <h2>Project Setup</h2>
+            <div class="small muted">Master project dikelola dari web. Sheet 01_PROJECTS menjadi storage backend dan schema lama dimigrasikan otomatis.</div>
+          </div>
+          <span class="badge info">R11A</span>
+        </div>
+
+        <div class="status-box neutral" style="margin-top:12px">
+          <b>Flow:</b> Buat/Edit Draft → BOQ Plan → KML/KMZ Plan → Validasi → Publish.
+          <div class="tiny muted" style="margin-top:4px">R11A mengaktifkan master project + SLA/Time of Critical. Upload BOQ/KML masuk increment berikutnya tanpa edit sheet manual.</div>
+        </div>
+
+        <div class="grid three" style="margin-top:14px">
+          <div class="field"><label>Project ID *</label><input id="prjProjectId" class="input" placeholder="26KT...-0017"></div>
+          <div class="field"><label>Stakeholder *</label><input id="prjStakeholder" class="input" placeholder="MITRATEL"></div>
+          <div class="field"><label>Project Type</label><input id="prjProjectType" class="input" placeholder="FTTT / FTTH / OSP"></div>
+        </div>
+        <div class="field" style="margin-top:10px"><label>Project Name *</label><input id="prjProjectName" class="input" placeholder="Nama pekerjaan/project"></div>
+
+        <div class="grid three" style="margin-top:10px">
+          <div class="field"><label>Contract</label><input id="prjContract" class="input"></div>
+          <div class="field"><label>Surat Pesanan / WO</label><input id="prjSuratPesanan" class="input"></div>
+          <div class="field"><label>Status Project</label><select id="prjStatusProject" class="select"><option>NOT_STARTED</option><option>ON_PROGRESS</option><option>HOLD</option><option>RFS</option><option>COMPLETED</option><option>CLOSED</option></select></div>
+        </div>
+
+        <div class="grid three" style="margin-top:10px">
+          <div class="field"><label>Regional</label><input id="prjRegional" class="input" placeholder="REGIONAL IV"></div>
+          <div class="field"><label>Witel / Branch</label><input id="prjWitelBranch" class="input" placeholder="PONTIANAK / KALBAR"></div>
+          <div class="field"><label>Area</label><input id="prjArea" class="input" placeholder="Pontianak"></div>
+        </div>
+
+        <div class="grid three" style="margin-top:10px">
+          <div class="field"><label>LOP</label><input id="prjLop" class="input"></div>
+          <div class="field"><label>STO</label><input id="prjSto" class="input"></div>
+          <div class="field"><label>Pelaksana</label><input id="prjPelaksana" class="input"></div>
+        </div>
+
+        <div class="grid three" style="margin-top:10px">
+          <div class="field"><label>Mitra</label><input id="prjMitra" class="input"></div>
+          <div class="field"><label>Start Date</label><input id="prjStartDate" class="input" type="date"></div>
+          <div class="field"><label>Target Selesai</label><input id="prjTargetSelesai" class="input" type="date"></div>
+        </div>
+
+        <div class="grid three" style="margin-top:10px">
+          <div class="field"><label>Realisasi Selesai</label><input id="prjRealisasiSelesai" class="input" type="date"></div>
+          <div class="field" style="grid-column:span 2"><label>Catatan</label><input id="prjNotes" class="input" placeholder="Catatan project"></div>
+        </div>
+
+        <div id="projectSlaPreview" class="status-box neutral" style="margin-top:12px">Isi Start Date dan Target Selesai untuk menghitung SLA otomatis.</div>
+        <div class="row-actions" style="margin-top:12px">
+          <button id="saveProjectBtn" class="btn secondary">Simpan Draft Project</button>
+          <button id="resetProjectBtn" class="btn ghost">Form Baru</button>
+        </div>
+        <div class="tiny muted" style="margin-top:8px">${canPublish ? 'PM/LEADER memiliki hak Publish setelah BOQ dan KML tervalidasi.' : 'ADMIN dapat menyiapkan/edit master project. Publish final tetap hak PM/LEADER.'}</div>
+      </div>
+
+      <div class="card" style="margin-top:16px"><h2>Daftar Project</h2>
+        <div class="table-wrap"><table><thead><tr><th>Project</th><th>Stakeholder</th><th>LOP / STO</th><th>Setup</th><th>Status</th><th>SLA</th><th>Time of Critical</th><th></th></tr></thead><tbody>
+          ${projects.length ? projects.map(p=>`<tr>
+            <td><b>${escapeHtml(p.projectId)}</b><div class="tiny muted">${escapeHtml(p.projectName || '-')}</div></td>
+            <td>${escapeHtml(p.stakeholder || '-')}</td>
+            <td>${escapeHtml(p.lop || '-')}<div class="tiny muted">${escapeHtml(p.sto || '-')}</div></td>
+            <td><span class="badge ${String(p.setupStatus).toUpperCase()==='PUBLISHED'?'success':'warning'}">${escapeHtml(p.setupStatus || 'DRAFT')}</span></td>
+            <td>${escapeHtml(p.statusProject || '-')}</td>
+            <td>${p.slaDays === '' || p.slaDays == null ? '-' : `${escapeHtml(String(p.elapsedDays || 0))} / ${escapeHtml(String(p.slaDays))} hari`}<div class="tiny muted">${p.slaUsagePct === '' || p.slaUsagePct == null ? '' : `${escapeHtml(String(p.slaUsagePct))}%`}</div></td>
+            <td>${tcBadge(p)}<div class="tiny muted">${escapeHtml(p.timeCriticalLabel || '')}</div></td>
+            <td><button class="btn ghost small" data-edit-project="${escapeAttr(p.projectId)}">Edit</button></td>
+          </tr>`).join('') : '<tr><td colspan="8" class="muted">Belum ada project.</td></tr>'}
+        </tbody></table></div>
+      </div>
+
+      <div class="grid two" style="margin-top:16px">
         <div class="card"><h2>User & Role</h2>
           <div class="form-row"><div class="field"><label>Email</label><input id="adminUserEmail" class="input" placeholder="nama@domain.com"></div><div class="field"><label>Nama</label><input id="adminUserName" class="input"></div></div>
           <div class="form-row" style="margin-top:10px"><div class="field"><label>Role</label><select id="adminUserRole" class="select"><option>LAPANGAN</option><option>ADMIN</option><option>VERIFIER</option><option>PM_LEADER</option></select></div><div class="field"><label>Area</label><input id="adminUserArea" class="input" placeholder="Pontianak"></div></div>
@@ -2943,10 +3031,112 @@ async function renderAdmin() {
       <div class="card" style="margin-top:16px"><h2>Daftar User</h2><div class="table-wrap"><table><thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Area</th><th>Aktif</th></tr></thead><tbody>${users.map(u=>`<tr><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.fullName)}</td><td>${escapeHtml(u.role)}</td><td>${escapeHtml(u.area)}</td><td>${u.active?'YES':'NO'}</td></tr>`).join('')}</tbody></table></div></div>
       <div class="card" style="margin-top:16px"><h2>Assignment Aktif</h2><div class="table-wrap"><table><thead><tr><th>User</th><th>Project</th><th>Scope</th><th>Value</th><th>Status</th></tr></thead><tbody>${assignments.map(a=>`<tr><td>${escapeHtml(a.userEmail)}</td><td>${escapeHtml(a.projectId)}</td><td>${escapeHtml(a.scopeType)}</td><td>${escapeHtml(a.scopeValue)}</td><td>${escapeHtml(a.status)}</td></tr>`).join('')}</tbody></table></div></div>
     `;
+
+    document.getElementById('saveProjectBtn')?.addEventListener('click', saveAdminProject);
+    document.getElementById('resetProjectBtn')?.addEventListener('click', resetAdminProjectForm);
+    document.getElementById('prjStartDate')?.addEventListener('change', updateAdminProjectSlaPreview);
+    document.getElementById('prjTargetSelesai')?.addEventListener('change', updateAdminProjectSlaPreview);
+    document.getElementById('prjRealisasiSelesai')?.addEventListener('change', updateAdminProjectSlaPreview);
+    document.getElementById('prjStatusProject')?.addEventListener('change', updateAdminProjectSlaPreview);
+    el.content.querySelectorAll('[data-edit-project]').forEach(btn => btn.addEventListener('click', () => fillAdminProjectForm(btn.dataset.editProject)));
     document.getElementById('saveUserBtn')?.addEventListener('click', saveAdminUser);
     document.getElementById('saveAssignmentBtn')?.addEventListener('click', saveAdminAssignment);
     document.getElementById('saveOperationalConfigBtn')?.addEventListener('click', saveOperationalConfig);
+
+    if (projectData.schemaMigration?.changed && !state.projectSchemaMigrationShown) {
+      state.projectSchemaMigrationShown = true;
+      toast('Schema 01_PROJECTS diperbarui otomatis.', 'success', 4500);
+    }
   } catch(err) { el.content.innerHTML=`<div class="status-box danger">${escapeHtml(humanError(err))}</div>`; }
+}
+
+function adminDateDiffDays(a, b) {
+  if (!a || !b) return null;
+  const da = new Date(`${a}T00:00:00`);
+  const db = new Date(`${b}T00:00:00`);
+  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return null;
+  return Math.round((db.getTime() - da.getTime()) / 86400000);
+}
+
+function updateAdminProjectSlaPreview() {
+  const box = document.getElementById('projectSlaPreview');
+  if (!box) return;
+  const start = value('prjStartDate');
+  const target = value('prjTargetSelesai');
+  const actual = value('prjRealisasiSelesai');
+  const status = value('prjStatusProject').toUpperCase();
+  const sla = adminDateDiffDays(start, target);
+  if (sla == null) {
+    box.className = 'status-box neutral';
+    box.innerHTML = 'Isi Start Date dan Target Selesai untuk menghitung SLA otomatis.';
+    return;
+  }
+  if (sla < 0) {
+    box.className = 'status-box danger';
+    box.innerHTML = '<b>Tanggal tidak valid.</b> Target Selesai tidak boleh lebih awal dari Start Date.';
+    return;
+  }
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  if (actual || ['COMPLETED','CLOSED'].includes(status)) {
+    const done = actual || todayIso;
+    const delta = adminDateDiffDays(target, done) || 0;
+    box.className = 'status-box success';
+    box.innerHTML = `<b>SLA ${sla} hari.</b> ${delta < 0 ? `Selesai ${Math.abs(delta)} hari lebih cepat.` : delta > 0 ? `Selesai ${delta} hari terlambat.` : 'Selesai tepat waktu.'}`;
+    return;
+  }
+  const elapsed = Math.max(0, adminDateDiffDays(start, todayIso) || 0);
+  const remaining = adminDateDiffDays(todayIso, target) || 0;
+  const usage = sla > 0 ? Math.max(0, Math.round((elapsed / sla) * 100)) : (remaining < 0 ? 101 : 0);
+  const tc = remaining < 0 || usage > 100 ? 'OVERDUE' : usage > 85 ? 'CRITICAL' : usage > 70 ? 'ATTENTION' : 'NORMAL';
+  box.className = `status-box ${tc === 'OVERDUE' ? 'danger' : tc === 'CRITICAL' || tc === 'ATTENTION' ? 'warning' : 'success'}`;
+  box.innerHTML = `<b>SLA ${sla} hari · ${usage}% terpakai · ${tc}</b><div class="tiny" style="margin-top:4px">Elapsed ${elapsed} hari · ${remaining >= 0 ? `sisa ${remaining} hari` : `terlambat ${Math.abs(remaining)} hari`}.</div>`;
+}
+
+function resetAdminProjectForm() {
+  ['prjProjectId','prjStakeholder','prjProjectType','prjProjectName','prjContract','prjSuratPesanan','prjRegional','prjWitelBranch','prjArea','prjLop','prjSto','prjPelaksana','prjMitra','prjStartDate','prjTargetSelesai','prjRealisasiSelesai','prjNotes'].forEach(id => {
+    const node = document.getElementById(id); if (node) node.value = '';
+  });
+  const status = document.getElementById('prjStatusProject'); if (status) status.value = 'NOT_STARTED';
+  const id = document.getElementById('prjProjectId'); if (id) id.readOnly = false;
+  updateAdminProjectSlaPreview();
+}
+
+function fillAdminProjectForm(projectId) {
+  const p = (state.adminProjects || []).find(x => x.projectId === projectId);
+  if (!p) return;
+  const set = (id, val) => { const node = document.getElementById(id); if (node) node.value = val ?? ''; };
+  set('prjProjectId', p.projectId); set('prjStakeholder', p.stakeholder); set('prjProjectType', p.projectType);
+  set('prjProjectName', p.projectName); set('prjContract', p.contract); set('prjSuratPesanan', p.suratPesanan);
+  set('prjRegional', p.regional); set('prjWitelBranch', p.witelBranch); set('prjArea', p.area); set('prjLop', p.lop);
+  set('prjSto', p.sto); set('prjPelaksana', p.pelaksana); set('prjMitra', p.mitra); set('prjStartDate', p.startDate);
+  set('prjTargetSelesai', p.targetSelesai); set('prjRealisasiSelesai', p.realisasiSelesai);
+  const statusNode = document.getElementById('prjStatusProject');
+  const statusValue = p.statusProject || 'NOT_STARTED';
+  if (statusNode && !Array.from(statusNode.options).some(o => o.value === statusValue)) {
+    statusNode.add(new Option(statusValue, statusValue));
+  }
+  set('prjStatusProject', statusValue);
+  set('prjNotes', p.notes);
+  const id = document.getElementById('prjProjectId'); if (id) id.readOnly = true;
+  updateAdminProjectSlaPreview();
+  document.getElementById('prjProjectId')?.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+async function saveAdminProject() {
+  try {
+    const body = {
+      projectId: value('prjProjectId'), stakeholder: value('prjStakeholder'), projectType: value('prjProjectType'), projectName: value('prjProjectName'),
+      contract: value('prjContract'), suratPesanan: value('prjSuratPesanan'), regional: value('prjRegional'), witelBranch: value('prjWitelBranch'),
+      area: value('prjArea'), lop: value('prjLop'), sto: value('prjSto'), pelaksana: value('prjPelaksana'), mitra: value('prjMitra'),
+      startDate: value('prjStartDate'), targetSelesai: value('prjTargetSelesai'), realisasiSelesai: value('prjRealisasiSelesai'),
+      statusProject: value('prjStatusProject'), notes: value('prjNotes'), active: true
+    };
+    await api('/admin/projects/upsert', {method:'POST', body});
+    toast('Project disimpan. SLA dihitung otomatis.', 'success');
+    await refreshNotifications(true, true);
+    renderAdmin();
+  } catch(err) { toast(humanError(err), 'danger', 6000); }
 }
 
 async function saveAdminUser() {
