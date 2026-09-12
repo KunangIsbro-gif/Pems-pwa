@@ -50,6 +50,7 @@ const state = {
   monitoringLastFetchAt: 0,
   workspaceInflight: new Map(),
   requirementsInflight: new Map(),
+  requirementsRequestSeq: 0,
   gpsWarmupPromise: null,
   captureStage: { label: '', percent: 0, active: false }
 };
@@ -176,7 +177,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-2-r9');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-3-r10');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -701,8 +702,16 @@ async function selectSession(sessionId) {
     state.selectedSession?.sessionId ===
     sessionId;
 
-  state.selectedSession = (state.workspace?.pointSessions || []).find(s => s.sessionId === sessionId) || null;
-  const revisionPmId = state.revisionTargetPmId || '';
+  state.selectedSession =
+    (state.workspace?.pointSessions || [])
+      .find(
+        s =>
+          s.sessionId ===
+          sessionId
+      ) || null;
+
+  const revisionPmId =
+    state.revisionTargetPmId || '';
 
   if (
     sameSession &&
@@ -710,29 +719,119 @@ async function selectSession(sessionId) {
     !revisionPmId
   ) {
     renderSessionList(
-      document.getElementById('sessionSearch')?.value || ''
+      document.getElementById(
+        'sessionSearch'
+      )?.value || ''
     );
+
     renderRequirementsPanel();
     return;
   }
 
+  const requestSeq =
+    ++state.requirementsRequestSeq;
+
+  // Clear old point state immediately.
+  // Never leave previous point/material on screen while new point is loading.
+  state.requirements = null;
   state.selectedRequirement = null;
-  renderSessionList(document.getElementById('sessionSearch')?.value || '');
-  const right = document.getElementById('workRight');
-  if (!right || !state.selectedSession) return;
-  right.innerHTML = '<div class="empty">Memuat requirement titik...</div>';
+
+  renderSessionList(
+    document.getElementById(
+      'sessionSearch'
+    )?.value || ''
+  );
+
+  const right =
+    document.getElementById(
+      'workRight'
+    );
+
+  if (
+    !right ||
+    !state.selectedSession
+  ) {
+    return;
+  }
+
+  const loadingLabel =
+    state.selectedSession.anchorLabel ||
+    state.selectedSession.sessionId;
+
+  const loadingRole =
+    state.selectedSession.anchorRole ||
+    '-';
+
+  right.innerHTML = `
+    <div class="point-loading-state">
+      <div class="point-loading-spinner"></div>
+      <div>
+        <b>Memuat ${escapeHtml(loadingLabel)}</b>
+        <div class="small muted">
+          ${escapeHtml(state.selectedSession.sessionId)}
+          • ${escapeHtml(loadingRole)}
+        </div>
+        <div class="tiny muted">
+          Requirement titik sebelumnya disembunyikan sampai data titik ini siap.
+        </div>
+      </div>
+    </div>
+  `;
 
   try {
-    state.requirements = await loadRequirements(state.selectedProjectId, sessionId);
+    const data =
+      await loadRequirements(
+        state.selectedProjectId,
+        sessionId
+      );
+
+    // User may have clicked another point while this request was running.
+    if (
+      requestSeq !==
+        state.requirementsRequestSeq ||
+      state.selectedSession?.sessionId !==
+        sessionId
+    ) {
+      return;
+    }
+
+    state.requirements =
+      data;
+
     if (revisionPmId) {
-      state.selectedRequirement = (state.requirements?.requirements || []).find(r => r.projectMaterialId === revisionPmId) || null;
+      state.selectedRequirement =
+        (
+          state.requirements?.requirements ||
+          []
+        ).find(
+          r =>
+            r.projectMaterialId ===
+            revisionPmId
+        ) || null;
+
       state.revisionTargetPmId = '';
     }
+
     renderRequirementsPanel();
-  } catch (err) {
-    right.innerHTML = `<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;
+  }
+  catch (err) {
+    if (
+      requestSeq !==
+        state.requirementsRequestSeq ||
+      state.selectedSession?.sessionId !==
+        sessionId
+    ) {
+      return;
+    }
+
+    right.innerHTML = `
+      <div class="status-box danger">
+        ${escapeHtml(humanError(err))}
+      </div>
+    `;
   }
 }
+
 
 function effectiveRequirementWorkflow(r, draft) {
   const serverWorkflow =
@@ -1020,15 +1119,41 @@ function renderRequirementsPanel() {
 }
 
 async function selectRequirement(projectMaterialId) {
-  state.selectedRequirement = (state.requirements?.requirements || []).find(r => r.projectMaterialId === projectMaterialId) || null;
+  state.selectedRequirement =
+    (
+      state.requirements?.requirements ||
+      []
+    ).find(
+      r =>
+        r.projectMaterialId ===
+        projectMaterialId
+    ) || null;
+
+  // renderRequirementsPanel() already invokes renderCapturePanel()
+  // for the selected requirement. Do not invoke it twice.
   renderRequirementsPanel();
-  await renderCapturePanel();
 }
 
 
 async function getServerPhotosForEvidence(evidenceId) {
-  if (!evidenceId || !navigator.onLine) {
-    return state.serverPhotoCache.get(evidenceId) || [];
+  if (!evidenceId) {
+    return [];
+  }
+
+  if (
+    state.serverPhotoCache.has(
+      evidenceId
+    )
+  ) {
+    return (
+      state.serverPhotoCache.get(
+        evidenceId
+      ) || []
+    );
+  }
+
+  if (!navigator.onLine) {
+    return [];
   }
 
   try {
@@ -3077,7 +3202,7 @@ async function refreshWorkspaceInBackground(projectId, key) {
 
 async function loadRequirements(projectId, sessionId, options = {}) {
   const key =
-    `requirements:${userCachePrefix()}:${projectId}:${sessionId}`;
+    `requirements:r10:${userCachePrefix()}:${projectId}:${sessionId}`;
 
   const requestKey =
     `${projectId}:${sessionId}`;
