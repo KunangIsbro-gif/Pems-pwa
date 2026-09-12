@@ -44,6 +44,12 @@ const state = {
   activeDraftId: '',
   notifications: { count: 0, items: [], generatedAt: '' },
   notificationTimer: null,
+  notificationInflight: null,
+  notificationLastFetchAt: 0,
+  monitoringInflight: null,
+  monitoringLastFetchAt: 0,
+  workspaceInflight: new Map(),
+  requirementsInflight: new Map(),
   gpsWarmupPromise: null,
   captureStage: { label: '', percent: 0, active: false }
 };
@@ -139,13 +145,13 @@ function wireStaticEvents() {
     event.stopPropagation();
     el.notifPanel?.classList.toggle('hidden');
     if (!el.notifPanel?.classList.contains('hidden')) {
-      await refreshNotifications(true);
+      await refreshNotifications(true, true);
     }
   });
 
   el.notifRefreshBtn?.addEventListener('click', async (event) => {
     event.stopPropagation();
-    await refreshNotifications(true);
+    await refreshNotifications(true, true);
   });
 
   document.addEventListener('click', (event) => {
@@ -170,7 +176,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-1-r8');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-2-r9');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -332,6 +338,17 @@ async function bootAuthenticated() {
       localStorage.removeItem(ACTIVE_DRAFT_KEY);
     }
 
+    const cachedNotifRow =
+      await cacheGetRow(
+        `notifications:${userCachePrefix()}`
+      );
+
+    if (cachedNotifRow?.value) {
+      state.notifications =
+        cachedNotifRow.value;
+      renderNotificationCenter();
+    }
+
     showAppShell();
     renderNavigation();
     navigate('home');
@@ -414,9 +431,8 @@ async function navigate(page) {
   document.querySelectorAll('[data-nav]').forEach(btn => btn.classList.toggle('active', btn.dataset.nav === page));
   el.content.innerHTML = '<div class="empty">Memuat...</div>';
 
-  if (navigator.onLine) {
-    refreshNotifications(false);
-  }
+  // R9: notifications are no longer fetched on every navigation.
+  // Polling/manual refresh handles them without blocking page flow.
 
   if (page === 'pekerjaan') {
     primeGpsCache();
@@ -435,15 +451,41 @@ async function navigate(page) {
 
 async function renderHome() {
   await refreshLocalState();
-  let monitoring = state.monitoring;
-  if (navigator.onLine && sessionIsUsable()) {
-    try {
-      monitoring = await api('/monitoring');
-      state.monitoring = monitoring;
-      await cachePut('monitoring', monitoring);
-    } catch {}
-  } else if (!monitoring) {
-    monitoring = await cacheGet('monitoring');
+  let monitoring =
+    state.monitoring;
+
+  const homeMonitoringKey =
+    `monitoring:${userCachePrefix()}`;
+
+  const homeMonitoringRow =
+    await cacheGetRow(
+      homeMonitoringKey
+    );
+
+  if (
+    !monitoring &&
+    homeMonitoringRow?.value
+  ) {
+    monitoring =
+      homeMonitoringRow.value;
+
+    state.monitoring =
+      monitoring;
+  }
+
+  if (
+    navigator.onLine &&
+    sessionIsUsable() &&
+    (
+      !homeMonitoringRow?.value ||
+      cacheRowAgeMs(
+        homeMonitoringRow
+      ) > 30_000
+    )
+  ) {
+    fetchMonitoringOnce(
+      homeMonitoringKey
+    ).catch(() => {});
   }
   if (navigator.onLine && hasPermission('evidence.revise')) {
     try {
@@ -655,8 +697,25 @@ function renderSessionList(filter) {
 }
 
 async function selectSession(sessionId) {
+  const sameSession =
+    state.selectedSession?.sessionId ===
+    sessionId;
+
   state.selectedSession = (state.workspace?.pointSessions || []).find(s => s.sessionId === sessionId) || null;
   const revisionPmId = state.revisionTargetPmId || '';
+
+  if (
+    sameSession &&
+    state.requirements &&
+    !revisionPmId
+  ) {
+    renderSessionList(
+      document.getElementById('sessionSearch')?.value || ''
+    );
+    renderRequirementsPanel();
+    return;
+  }
+
   state.selectedRequirement = null;
   renderSessionList(document.getElementById('sessionSearch')?.value || '');
   const right = document.getElementById('workRight');
@@ -2400,34 +2459,119 @@ async function handleVerificationAction(btn) {
   try {
     await api(`/verification/${encodeURIComponent(id)}/${action}`, { method:'POST', body:{reasonCode,note} });
     toast(`Evidence ${action.toUpperCase()} berhasil.`, 'success');
-    await refreshNotifications(true);
+    await refreshNotifications(true, true);
     renderVerification();
   } catch(err) { toast(humanError(err),'danger',6000); }
 }
 
-async function renderMonitoring() {
-  let data = null;
 
-  if (navigator.onLine) {
-    try {
-      data =
-        await api(
-          '/monitoring'
+async function fetchMonitoringOnce(cacheKey) {
+  if (
+    state.monitoringInflight
+  ) {
+    return await state.monitoringInflight;
+  }
+
+  state.monitoringInflight =
+    api('/monitoring')
+      .then(async data => {
+        state.monitoring =
+          data;
+
+        state.monitoringLastFetchAt =
+          Date.now();
+
+        await cachePut(
+          cacheKey,
+          data
         );
 
-      await cachePut(
-        'monitoring',
-        data
+        return data;
+      })
+      .finally(() => {
+        state.monitoringInflight =
+          null;
+      });
+
+  return await state.monitoringInflight;
+}
+
+async function refreshMonitoringInBackground(cacheKey) {
+  try {
+    const data =
+      await fetchMonitoringOnce(
+        cacheKey
+      );
+
+    if (
+      state.currentPage ===
+      'monitoring'
+    ) {
+      // Refresh UI only after data arrives; current cached UI stays visible.
+      renderMonitoring({
+        force: false,
+        fromBackground: true
+      });
+    }
+
+    return data;
+  }
+  catch (err) {
+    console.warn(
+      'Background monitoring refresh failed',
+      err
+    );
+  }
+}
+
+async function renderMonitoring(options = {}) {
+  const cacheKey =
+    `monitoring:${userCachePrefix()}`;
+
+  const force =
+    options.force === true;
+
+  let data = null;
+
+  const cachedRow =
+    await cacheGetRow(
+      cacheKey
+    );
+
+  if (
+    !force &&
+    cachedRow?.value
+  ) {
+    data =
+      cachedRow.value;
+
+    state.monitoring =
+      data;
+
+    if (
+      navigator.onLine &&
+      sessionIsUsable() &&
+      cacheRowAgeMs(cachedRow) > 30_000
+    ) {
+      refreshMonitoringInBackground(
+        cacheKey
       );
     }
-    catch {}
+  }
+  else if (
+    navigator.onLine &&
+    sessionIsUsable()
+  ) {
+    data =
+      await fetchMonitoringOnce(
+        cacheKey
+      );
   }
 
   data =
     data ||
-    await cacheGet(
-      'monitoring'
-    ) ||
+    cachedRow?.value ||
+    state.monitoring ||
     {};
 
   const role =
@@ -2684,7 +2828,7 @@ async function saveAdminUser() {
   try {
     await api('/admin/users/upsert', {method:'POST', body:{email:value('adminUserEmail'),fullName:value('adminUserName'),role:value('adminUserRole'),area:value('adminUserArea'),active:true}});
     toast('User disimpan.', 'success');
-    await refreshNotifications(true);
+    await refreshNotifications(true, true);
     renderAdmin();
   } catch(err){toast(humanError(err),'danger',6000);}
 }
@@ -2693,7 +2837,7 @@ async function saveAdminAssignment() {
   try {
     await api('/admin/assignments/upsert', {method:'POST', body:{userEmail:value('assignUser'),projectId:value('assignProject'),scopeType:value('assignScope'),scopeValue:value('assignScopeValue'),status:'ACTIVE',active:true}});
     toast('Assignment disimpan.', 'success');
-    await refreshNotifications(true);
+    await refreshNotifications(true, true);
     renderAdmin();
   } catch(err){toast(humanError(err),'danger',6000);}
 }
@@ -2795,39 +2939,277 @@ async function selectProject(projectId, preload) {
   if (preload) await loadWorkspace(projectId);
 }
 
-async function loadWorkspace(projectId) {
-  const key = `workspace:${projectId}`;
-  if (navigator.onLine && sessionIsUsable()) {
+async function loadWorkspace(projectId, options = {}) {
+  const key =
+    `workspace:${userCachePrefix()}:${projectId}`;
+
+  const force =
+    options.force === true;
+
+  if (
+    !force &&
+    state.workspace?.project?.projectId === projectId
+  ) {
+    return state.workspace;
+  }
+
+  const cachedRow =
+    await cacheGetRow(key);
+
+  if (
+    !force &&
+    cachedRow?.value
+  ) {
+    state.workspace =
+      cachedRow.value;
+
+    // Stale-while-revalidate. Do not make the user wait.
+    if (
+      navigator.onLine &&
+      sessionIsUsable() &&
+      cacheRowAgeMs(cachedRow) > 300_000
+    ) {
+      refreshWorkspaceInBackground(
+        projectId,
+        key
+      );
+    }
+
+    return state.workspace;
+  }
+
+  if (
+    navigator.onLine &&
+    sessionIsUsable()
+  ) {
+    if (
+      state.workspaceInflight.has(
+        projectId
+      )
+    ) {
+      return await state.workspaceInflight.get(
+        projectId
+      );
+    }
+
+    const promise =
+      api(
+        `/projects/${encodeURIComponent(projectId)}/workspace`
+      )
+        .then(async data => {
+          state.workspace = data;
+          await cachePut(key, data);
+          return data;
+        })
+        .finally(() => {
+          state.workspaceInflight.delete(
+            projectId
+          );
+        });
+
+    state.workspaceInflight.set(
+      projectId,
+      promise
+    );
+
     try {
-      state.workspace = await api(`/projects/${encodeURIComponent(projectId)}/workspace`);
-      await cachePut(key, state.workspace);
-      return state.workspace;
-    } catch (err) {
-      const cached = await cacheGet(key);
-      if (cached) { state.workspace = cached; return cached; }
+      return await promise;
+    }
+    catch (err) {
+      if (cachedRow?.value) {
+        state.workspace =
+          cachedRow.value;
+        return state.workspace;
+      }
       throw err;
     }
   }
-  state.workspace = await cacheGet(key);
+
+  state.workspace =
+    cachedRow?.value ||
+    null;
+
   return state.workspace;
 }
 
-async function loadRequirements(projectId, sessionId) {
-  const key = `requirements:${projectId}:${sessionId}`;
-  if (navigator.onLine && sessionIsUsable()) {
+async function refreshWorkspaceInBackground(projectId, key) {
+  if (
+    state.workspaceInflight.has(
+      projectId
+    )
+  ) {
+    return;
+  }
+
+  const promise =
+    api(
+      `/projects/${encodeURIComponent(projectId)}/workspace`
+    )
+      .then(async data => {
+        await cachePut(key, data);
+
+        if (
+          state.selectedProjectId ===
+          projectId
+        ) {
+          state.workspace = data;
+        }
+
+        return data;
+      })
+      .catch(err => {
+        console.warn(
+          'Background workspace refresh failed',
+          err
+        );
+      })
+      .finally(() => {
+        state.workspaceInflight.delete(
+          projectId
+        );
+      });
+
+  state.workspaceInflight.set(
+    projectId,
+    promise
+  );
+}
+
+async function loadRequirements(projectId, sessionId, options = {}) {
+  const key =
+    `requirements:${userCachePrefix()}:${projectId}:${sessionId}`;
+
+  const requestKey =
+    `${projectId}:${sessionId}`;
+
+  const force =
+    options.force === true;
+
+  const cachedRow =
+    await cacheGetRow(key);
+
+  if (
+    !force &&
+    cachedRow?.value
+  ) {
+    // Requirements change rarely; use cached response instantly.
+    // Background refresh only when cache is older than 2 minutes.
+    if (
+      navigator.onLine &&
+      sessionIsUsable() &&
+      cacheRowAgeMs(cachedRow) > 120_000
+    ) {
+      refreshRequirementsInBackground(
+        projectId,
+        sessionId,
+        key,
+        requestKey
+      );
+    }
+
+    return cachedRow.value;
+  }
+
+  if (
+    navigator.onLine &&
+    sessionIsUsable()
+  ) {
+    if (
+      state.requirementsInflight.has(
+        requestKey
+      )
+    ) {
+      return await state.requirementsInflight.get(
+        requestKey
+      );
+    }
+
+    const promise =
+      api(
+        `/points/${encodeURIComponent(sessionId)}/requirements?projectId=${encodeURIComponent(projectId)}`
+      )
+        .then(async data => {
+          await cachePut(key, data);
+          return data;
+        })
+        .finally(() => {
+          state.requirementsInflight.delete(
+            requestKey
+          );
+        });
+
+    state.requirementsInflight.set(
+      requestKey,
+      promise
+    );
+
     try {
-      const data = await api(`/points/${encodeURIComponent(sessionId)}/requirements?projectId=${encodeURIComponent(projectId)}`);
-      await cachePut(key, data);
-      return data;
-    } catch (err) {
-      const cached = await cacheGet(key);
-      if (cached) return cached;
+      return await promise;
+    }
+    catch (err) {
+      if (cachedRow?.value) {
+        return cachedRow.value;
+      }
       throw err;
     }
   }
-  const cached = await cacheGet(key);
-  if (!cached) throw new Error('Requirement titik ini belum pernah dicache. Buka titik sekali saat online sebelum bekerja offline.');
-  return cached;
+
+  if (!cachedRow?.value) {
+    throw new Error(
+      'Requirement titik ini belum pernah dicache. Buka titik sekali saat online sebelum bekerja offline.'
+    );
+  }
+
+  return cachedRow.value;
+}
+
+async function refreshRequirementsInBackground(
+  projectId,
+  sessionId,
+  key,
+  requestKey
+) {
+  if (
+    state.requirementsInflight.has(
+      requestKey
+    )
+  ) {
+    return;
+  }
+
+  const promise =
+    api(
+      `/points/${encodeURIComponent(sessionId)}/requirements?projectId=${encodeURIComponent(projectId)}`
+    )
+      .then(async data => {
+        await cachePut(key, data);
+
+        if (
+          state.selectedProjectId === projectId &&
+          state.selectedSession?.sessionId === sessionId
+        ) {
+          state.requirements = data;
+          renderRequirementsPanel();
+        }
+
+        return data;
+      })
+      .catch(err => {
+        console.warn(
+          'Background requirement refresh failed',
+          err
+        );
+      })
+      .finally(() => {
+        state.requirementsInflight.delete(
+          requestKey
+        );
+      });
+
+  state.requirementsInflight.set(
+    requestKey,
+    promise
+  );
 }
 
 async function api(path, options = {}) {
@@ -3375,7 +3757,7 @@ function notificationCountForPage(page) {
     );
 }
 
-async function refreshNotifications(forceRender = false) {
+async function refreshNotifications(forceRender = false, forceNetwork = false) {
   if (
     !navigator.onLine ||
     !sessionIsUsable()
@@ -3383,36 +3765,81 @@ async function refreshNotifications(forceRender = false) {
     return;
   }
 
-  try {
-    const data =
-      await api(
-        '/notifications'
-      );
+  if (
+    document.visibilityState ===
+      'hidden' &&
+    !forceNetwork
+  ) {
+    return;
+  }
 
-    state.notifications = {
-      count:
-        Number(data.count || 0),
-      items:
-        Array.isArray(data.items)
-          ? data.items
-          : [],
-      generatedAt:
-        data.generatedAt || ''
-    };
+  const age =
+    Date.now() -
+    Number(
+      state.notificationLastFetchAt || 0
+    );
 
-    renderNotificationCenter();
-    renderNavigation();
-
+  if (
+    !forceNetwork &&
+    age < 120_000 &&
+    state.notifications?.generatedAt
+  ) {
     if (forceRender) {
       renderNotificationCenter();
+      renderNavigation();
     }
+    return state.notifications;
   }
-  catch (err) {
-    console.warn(
-      'Notification refresh failed',
-      err
-    );
+
+  if (
+    state.notificationInflight
+  ) {
+    return await state.notificationInflight;
   }
+
+  state.notificationInflight =
+    api('/notifications')
+      .then(data => {
+        state.notificationLastFetchAt =
+          Date.now();
+
+        state.notifications = {
+          count:
+            Number(data.count || 0),
+          items:
+            Array.isArray(data.items)
+              ? data.items
+              : [],
+          generatedAt:
+            data.generatedAt || ''
+        };
+
+        cachePut(
+          `notifications:${userCachePrefix()}`,
+          state.notifications
+        ).catch(() => {});
+
+        renderNotificationCenter();
+        renderNavigation();
+
+        if (forceRender) {
+          renderNotificationCenter();
+        }
+
+        return state.notifications;
+      })
+      .catch(err => {
+        console.warn(
+          'Notification refresh failed',
+          err
+        );
+      })
+      .finally(() => {
+        state.notificationInflight =
+          null;
+      });
+
+  return await state.notificationInflight;
 }
 
 function renderNotificationCenter() {
@@ -3501,14 +3928,17 @@ function startNotificationPolling() {
       () => {
         if (
           navigator.onLine &&
-          sessionIsUsable()
+          sessionIsUsable() &&
+          document.visibilityState ===
+            'visible'
         ) {
           refreshNotifications(
+            false,
             false
           );
         }
       },
-      45_000
+      120_000
     );
 }
 
@@ -3581,3 +4011,11 @@ function idbGet(store,key){return new Promise(async(resolve,reject)=>{try{const 
 function idbGetAll(store){return new Promise(async(resolve,reject)=>{try{const db=await openDb();const tx=db.transaction(store,'readonly');const r=tx.objectStore(store).getAll();r.onsuccess=()=>resolve(r.result||[]);r.onerror=()=>reject(r.error)}catch(e){reject(e)}});}
 function cachePut(key,value){return idbPut(STORE_CACHE,{key,value,updatedAt:new Date().toISOString()});}
 async function cacheGet(key){const row=await idbGet(STORE_CACHE,key);return row?.value || null;}
+async function cacheGetRow(key){return await idbGet(STORE_CACHE,key);}
+function cacheRowAgeMs(row){
+  const ts = new Date(row?.updatedAt || 0).getTime();
+  return Number.isFinite(ts) ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
+}
+function userCachePrefix(){
+  return String(state.user?.email || 'anonymous').toLowerCase();
+}
