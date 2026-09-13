@@ -442,12 +442,10 @@ function renderNavigation() {
 
     container.querySelectorAll('[data-admin-toggle]').forEach(btn => {
       btn.addEventListener('click', () => {
+        // R11D: parent Admin adalah accordion lokal. Tidak boleh menunggu API.
+        // Klik pertama hanya buka/tutup submenu secara instan; request server baru
+        // dimulai setelah user memilih salah satu submenu.
         state.adminMenuOpen = !state.adminMenuOpen;
-        if (state.adminMenuOpen && state.currentPage !== 'admin') {
-          state.adminSection = state.adminSection || 'project-setup';
-          navigate('admin');
-          return;
-        }
         renderNavigation();
       });
     });
@@ -486,7 +484,7 @@ async function navigate(page) {
   const meta = NAV_META[page] || [page, ''];
   el.pageTitle.textContent = meta[0];
   el.pageSubtitle.textContent = meta[1];
-  document.querySelectorAll('[data-nav]').forEach(btn => btn.classList.toggle('active', btn.dataset.nav === page));
+  renderNavigation();
   el.content.innerHTML = '<div class="empty">Memuat...</div>';
 
   // R9: notifications are no longer fetched on every navigation.
@@ -3007,7 +3005,7 @@ async function renderAdmin() {
               <h2>Project Setup</h2>
               <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
             </div>
-            <span class="badge info">R11C</span>
+            <span class="badge info">R11D</span>
           </div>
 
           <div class="status-box neutral" style="margin-top:12px">
@@ -3084,7 +3082,7 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11C:</b> upload file sumber + versioning sudah aktif. Parsing/mapping isi BOQ dan KML masuk tahap Validasi berikutnya, jadi Admin tetap tidak perlu edit sheet manual.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11D:</b> upload file sumber + versioning sudah aktif. Parsing/mapping isi BOQ dan KML masuk tahap Validasi berikutnya, jadi Admin tetap tidak perlu edit sheet manual.</div>
           </div>
         </div>
       </section>
