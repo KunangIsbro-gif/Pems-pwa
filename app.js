@@ -445,7 +445,7 @@ function renderNavigation() {
 
     container.querySelectorAll('[data-admin-toggle]').forEach(btn => {
       btn.addEventListener('click', () => {
-        // R11F: parent Admin adalah accordion lokal. Tidak boleh menunggu API.
+        // R11I: parent Admin adalah accordion lokal. Tidak boleh menunggu API.
         // Klik pertama hanya buka/tutup submenu secara instan; request server baru
         // dimulai setelah user memilih salah satu submenu.
         state.adminMenuOpen = !state.adminMenuOpen;
@@ -2227,10 +2227,45 @@ async function runSyncQueue() {
   }
 }
 
+
+async function makeVerifierThumbnailBase64PEMS_(blob) {
+  if (!blob) return { base64:'', mimeType:'image/jpeg', bytes:0 };
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const maxEdge = 320;
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', {alpha:false});
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h); ctx.drawImage(bitmap,0,0,w,h);
+    let quality = .55;
+    let out = null;
+    for (let i=0;i<4;i++) {
+      out = await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Thumbnail gagal dibuat.')),'image/jpeg',quality));
+      if (out.size <= 28000) break;
+      quality = Math.max(.34, quality-.08);
+    }
+    if (!out || out.size > 31000) return {base64:'', mimeType:'image/jpeg', bytes:0};
+    return { base64: await blobToBase64(out), mimeType: out.type || 'image/jpeg', bytes: out.size };
+  } finally { bitmap.close?.(); }
+}
+
 async function syncOneQueueItem(item) {
   const photo = await idbGet(STORE_PHOTOS, item.photoLocalId);
   const draft = await idbGet(STORE_DRAFTS, item.draftId);
   if (!photo || !draft) throw new Error('Queue orphan: draft/foto lokal tidak ditemukan.');
+  let thumbnail = photo.thumbnail || null;
+  if (!thumbnail?.base64) {
+    try {
+      thumbnail = await makeVerifierThumbnailBase64PEMS_(photo.blob);
+      photo.thumbnail = thumbnail;
+      await idbPut(STORE_PHOTOS, photo);
+    } catch (thumbErr) {
+      thumbnail = {base64:'', mimeType:'image/jpeg', bytes:0};
+    }
+  }
   const base64 = await blobToBase64(photo.blob);
   const result = await api('/evidence/sync-photo', {
     method: 'POST',
@@ -2257,6 +2292,9 @@ async function syncOneQueueItem(item) {
       assignmentId: draft.assignmentId || '',
       parentEvidenceId: draft.parentEvidenceId || '',
       revisionReason: draft.revisionReason || '',
+      thumbnailBase64: thumbnail?.base64 || '',
+      thumbnailMimeType: thumbnail?.mimeType || 'image/jpeg',
+      thumbnailBytes: Number(thumbnail?.bytes || 0),
       base64
     }
   });
@@ -2380,11 +2418,10 @@ function verificationCardHtml(ev) {
             data-evidence-id="${escapeAttr(ev.evidenceId)}"
             data-photo-id="${escapeAttr(p.photoId)}"
             aria-label="Lihat foto evidence">
-            <div class="verifier-photo-loading" data-verifier-photo-loading="${escapeAttr(ev.evidenceId)}|${escapeAttr(p.photoId)}">Memuat foto...</div>
-            <img
-              class="hidden"
-              data-verifier-photo-img="${escapeAttr(ev.evidenceId)}|${escapeAttr(p.photoId)}"
-              alt="${escapeAttr(p.fileName || p.photoId)}">
+            ${p.thumbnailBase64
+              ? `<img class="verifier-photo-thumb" loading="lazy" src="data:${escapeAttr(p.thumbnailMimeType || 'image/jpeg')};base64,${escapeAttr(p.thumbnailBase64)}" alt="${escapeAttr(p.fileName || p.photoId)}">`
+              : `<div class="verifier-photo-loading" data-verifier-photo-loading="${escapeAttr(ev.evidenceId)}|${escapeAttr(p.photoId)}">Memuat preview lama...</div>
+                 <img class="hidden" data-verifier-photo-img="${escapeAttr(ev.evidenceId)}|${escapeAttr(p.photoId)}" alt="${escapeAttr(p.fileName || p.photoId)}">`}
           </button>
           <div class="toolbar compact">
             <button
@@ -3050,11 +3087,11 @@ async function renderAdmin() {
               <h2>Project Setup</h2>
               <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
             </div>
-            <span class="badge info">R11F</span>
+            <span class="badge info">R11I</span>
           </div>
 
           <div class="status-box neutral" style="margin-top:12px">
-            <b>Flow:</b> Buat/Edit Draft → Upload BOQ Plan → Upload KML/KMZ Plan → Cek Kelengkapan → Publish.
+            <b>Flow:</b> Draft → Upload Plan → Plan Review → Ready for Execution → Publish → Reconciliation → Finalized.
             <div class="tiny muted" style="margin-top:4px">File plan di-upload dari web, disimpan ke folder project di Drive, lalu File ID + versi dicatat otomatis ke 01_PROJECTS.</div>
           </div>
 
@@ -3131,7 +3168,13 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11G:</b> file sumber + versioning aktif. BOQ/KML yang sudah di-upload dapat dibuka langsung dari web. Parsing/mapping isi BOQ dan KML tetap masuk tahap Validasi berikutnya.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11I:</b> file sumber + versioning aktif. Jalankan Plan Review sebelum Publish for Field Execution.</div>
+            <div class="plan-review-box" style="margin-top:14px">
+              <div class="section-head"><div><h3>Plan Review — BOQ vs KML</h3><div class="small muted">Mismatch menjadi warning untuk review PM; blocker hanya untuk kondisi yang membuat Field Execution tidak dapat berjalan.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
+              <div id="planReviewSummary" class="status-box neutral" style="margin-top:10px">Upload BOQ + KML lalu jalankan Analisis Plan.</div>
+              <div class="row-actions" style="margin-top:10px"><button id="runPlanReviewBtn" class="btn secondary" type="button">Analisis / Refresh Plan</button><button id="viewPlanReviewBtn" class="btn ghost" type="button">Lihat Temuan</button></div>
+              <div id="planReviewFindings" class="hidden" style="margin-top:10px"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -3139,7 +3182,7 @@ async function renderAdmin() {
       <section class="admin-section hidden" data-admin-panel="project-list">
         <div class="card"><div class="section-head"><h2>Daftar Project</h2><span class="badge info">${projects.length} project</span></div>
           <div class="field" style="margin:12px 0"><label>Cari Project</label><input id="adminProjectSearch" class="input" placeholder="Cari PID, stakeholder, detail pekerjaan, STO..."></div>
-          <div class="table-wrap"><table><thead><tr><th>PID</th><th>Stakeholder</th><th>Detail Pekerjaan / STO</th><th>Plan File</th><th>Setup</th><th>Status</th><th>SLA</th><th>Time of Critical</th><th>Aksi</th></tr></thead><tbody>
+          <div class="table-wrap"><table><thead><tr><th>PID</th><th>Stakeholder</th><th>Detail Pekerjaan / STO</th><th>Plan File</th><th>Plan Review</th><th>Setup</th><th>Status</th><th>SLA</th><th>Time of Critical</th><th>Aksi</th></tr></thead><tbody>
             ${projects.length ? projects.map(p=>{ const pub=adminProjectPublishStatePEMS_(p); return `<tr data-project-row data-search="${escapeAttr([p.projectId,p.stakeholder,p.projectType,p.detailProject||p.lop,p.sto,p.statusProject,p.setupStatus].filter(Boolean).join(' ').toLowerCase())}">
               <td><b>${escapeHtml(p.projectId)}</b></td>
               <td>${escapeHtml(p.stakeholder || '-')}<div class="tiny muted">${escapeHtml(p.projectType || '-')}</div></td>
@@ -3148,12 +3191,13 @@ async function renderAdmin() {
                 <div class="tiny plan-file-row"><b>BOQ</b> ${p.boqPlanFileId ? `V${escapeHtml(String(p.boqVersion || 1))} ✓ <a class="inline-link" href="${escapeAttr(adminDriveFileUrlPEMS_(p.boqPlanFileId))}" target="_blank" rel="noopener">Buka</a>` : '—'}</div>
                 <div class="tiny plan-file-row"><b>KML</b> ${p.kmlPlanFileId ? `V${escapeHtml(String(p.kmlPlanVersion || 1))} ✓ <a class="inline-link" href="${escapeAttr(adminDriveFileUrlPEMS_(p.kmlPlanFileId))}" target="_blank" rel="noopener">Buka</a>` : '—'}</div>
               </td>
+              <td>${adminPlanReviewBadgePEMS_(p)}<div class="tiny muted">${Number(p.planWarningCount||0)} warning · ${Number(p.planBlockerCount||0)} blocker</div></td>
               <td><span class="badge ${String(p.setupStatus).toUpperCase()==='PUBLISHED'?'success':'warning'}">${escapeHtml(p.setupStatus || 'DRAFT')}</span>${String(p.setupStatus).toUpperCase()!=='PUBLISHED' ? `<div class="tiny muted" style="margin-top:4px">${pub.ready?'Siap Publish':'Kurang: '+escapeHtml(pub.missing.join(', '))}</div>` : ''}</td>
               <td>${escapeHtml(p.statusProject || '-')}</td>
               <td>${p.slaDays === '' || p.slaDays == null ? '-' : `${escapeHtml(String(p.elapsedDays || 0))} / ${escapeHtml(String(p.slaDays))} hari`}<div class="tiny muted">${p.slaUsagePct === '' || p.slaUsagePct == null ? '' : `${escapeHtml(String(p.slaUsagePct))}%`}</div></td>
               <td>${tcBadge(p)}<div class="tiny muted">${escapeHtml(p.timeCriticalLabel || '')}</div></td>
               <td><div class="row-actions compact"><button class="btn ghost small" data-edit-project="${escapeAttr(p.projectId)}">Edit / Plan</button>${canPublish && String(p.setupStatus).toUpperCase()!=='PUBLISHED' ? `<button class="btn success small" data-publish-project="${escapeAttr(p.projectId)}" ${pub.ready?'':'disabled'}>Publish</button>` : ''}</div></td>
-            </tr>`}).join('') : '<tr><td colspan="9" class="muted">Belum ada project.</td></tr>'}
+            </tr>`}).join('') : '<tr><td colspan="10" class="muted">Belum ada project.</td></tr>'}
           </tbody></table></div>
         </div>
       </section>
@@ -3276,6 +3320,8 @@ async function renderAdmin() {
     document.getElementById('uploadBoqPlanBtn')?.addEventListener('click', () => uploadAdminPlanFile('BOQ'));
     document.getElementById('uploadKmlPlanBtn')?.addEventListener('click', () => uploadAdminPlanFile('KML'));
     document.getElementById('publishProjectBtn')?.addEventListener('click', () => publishAdminProjectPEMS_(value('prjProjectId'), document.getElementById('publishProjectBtn')));
+    document.getElementById('runPlanReviewBtn')?.addEventListener('click', runAdminPlanReviewPEMS_);
+    document.getElementById('viewPlanReviewBtn')?.addEventListener('click', viewAdminPlanReviewPEMS_);
     el.content.querySelectorAll('[data-publish-project]').forEach(btn => btn.addEventListener('click', () => publishAdminProjectPEMS_(btn.dataset.publishProject, btn)));
     el.content.querySelectorAll('[data-edit-project]').forEach(btn => btn.addEventListener('click', () => {
       state.adminSection = 'project-setup';
@@ -3348,8 +3394,35 @@ function adminProjectPublishStatePEMS_(p) {
   if (!String(p?.targetSelesai || '').trim()) missing.push('Target Selesai');
   if (!String(p?.boqPlanFileId || '').trim()) missing.push('BOQ Plan');
   if (!String(p?.kmlPlanFileId || '').trim()) missing.push('KML/KMZ Plan');
+  const review = String(p?.planReviewStatus || '').toUpperCase();
+  if (!['READY','READY_WITH_WARNINGS'].includes(review)) missing.push('Plan Review');
+  if (Number(p?.planBlockerCount || 0) > 0 || review === 'BLOCKED') missing.push('Blocker Plan');
   return { ready: missing.length === 0, missing };
 }
+
+
+function adminPlanReviewBadgePEMS_(p) {
+  const s=String(p?.planReviewStatus||'NOT_REVIEWED').toUpperCase();
+  const tone=s==='READY'?'success':s==='READY_WITH_WARNINGS'?'warning':s==='BLOCKED'?'danger':s==='PENDING_REVIEW'?'info':'neutral';
+  return `<span class="badge ${tone}">${escapeHtml(s)}</span>`;
+}
+function updateAdminPlanReviewPanelPEMS_(p) {
+  const badge=document.getElementById('planReviewBadge'), box=document.getElementById('planReviewSummary'), run=document.getElementById('runPlanReviewBtn'), view=document.getElementById('viewPlanReviewBtn');
+  if(!badge||!box)return; const s=String(p?.planReviewStatus||'NOT_REVIEWED').toUpperCase(); badge.className='badge '+(s==='READY'?'success':s==='READY_WITH_WARNINGS'?'warning':s==='BLOCKED'?'danger':s==='PENDING_REVIEW'?'info':'neutral'); badge.textContent=s;
+  if(!p?.projectId){box.className='status-box neutral';box.innerHTML='Simpan Draft Project, upload BOQ + KML, lalu jalankan Analisis Plan.'; if(run)run.disabled=true; if(view)view.disabled=true; return;}
+  const hasFiles=!!p.boqPlanFileId&&!!p.kmlPlanFileId; if(run)run.disabled=!hasFiles; if(view)view.disabled=!p.planReviewAt;
+  if(!p.planReviewAt){box.className='status-box '+(hasFiles?'warning':'neutral'); box.innerHTML=hasFiles?'<b>Belum direview.</b> File sudah ada; jalankan Analisis Plan.':'Upload BOQ + KML terlebih dahulu.'; return;}
+  box.className='status-box '+(s==='READY'?'success':s==='READY_WITH_WARNINGS'?'warning':'danger');
+  box.innerHTML=`<b>${escapeHtml(s)}</b> · BOQ ${Number(p.planBoqDesignatorCount||0)} designator / ${Number(p.planBoqItemCount||0)} row · KML ${Number(p.planKmlPointCount||0)} point<br><span class="tiny">Unmapped ${Number(p.planUnmappedCount||0)} · Invalid Coordinate ${Number(p.planInvalidCoordCount||0)} · Evidence Rule Missing ${Number(p.planEvidenceRuleMissingCount||0)} · Warning ${Number(p.planWarningCount||0)} · Blocker ${Number(p.planBlockerCount||0)}</span>`;
+}
+function renderPlanReviewFindingsPEMS_(data) {
+  const box=document.getElementById('planReviewFindings'); if(!box)return; const fs=data?.findings||[]; box.classList.remove('hidden'); box.innerHTML=fs.length?`<div class="list">${fs.map(f=>`<div class="list-item"><div><b>${escapeHtml(f.code||'INFO')}</b><div class="small muted">${escapeHtml(f.entityRef||'')}</div><div class="small">${escapeHtml(f.message||'')}</div></div><span class="badge ${String(f.severity).toUpperCase()==='BLOCKER'?'danger':String(f.severity).toUpperCase()==='WARNING'?'warning':'neutral'}">${escapeHtml(f.severity||'INFO')}</span></div>`).join('')}</div>`:'<div class="status-box success">Tidak ada temuan aktif.</div>';
+}
+async function runAdminPlanReviewPEMS_() {
+  const pid=value('prjProjectId'); const btn=document.getElementById('runPlanReviewBtn'); if(!pid){toast('Pilih Project terlebih dahulu.','warning');return;}
+  try{setButtonLoadingPEMS_(btn,true,'Menganalisis BOQ + KML...'); const data=await api(`/admin/projects/${encodeURIComponent(pid)}/plan-review`,{method:'POST',body:{}}); const p=(state.adminProjects||[]).find(x=>x.projectId===pid)||{}; const updated={...p,planReviewStatus:data.status,planReviewAt:new Date().toISOString(),planWarningCount:Number(data.summary?.warnings||0),planBlockerCount:Number(data.summary?.blockers||0),planBoqItemCount:Number(data.summary?.boqItems||0),planBoqDesignatorCount:Number(data.summary?.boqDesignators||0),planKmlPointCount:Number(data.summary?.kmlPoints||0),planUnmappedCount:Number(data.summary?.unmapped||0),planInvalidCoordCount:Number(data.summary?.invalidCoordinates||0),planEvidenceRuleMissingCount:Number(data.summary?.evidenceRuleMissing||0)}; upsertAdminProjectLocalPEMS_(updated); updateAdminPlanReviewPanelPEMS_(updated); updateAdminPublishPanelPEMS_(updated); renderPlanReviewFindingsPEMS_(data); toast(`Plan Review: ${data.status} · ${Number(data.summary?.warnings||0)} warning · ${Number(data.summary?.blockers||0)} blocker.`,data.status==='BLOCKED'?'danger':data.status==='READY_WITH_WARNINGS'?'warning':'success',7000);}catch(err){toast(humanError(err),'danger',8000);}finally{setButtonLoadingPEMS_(btn,false);}
+}
+async function viewAdminPlanReviewPEMS_() {const pid=value('prjProjectId'); if(!pid)return; try{const data=await api(`/admin/projects/${encodeURIComponent(pid)}/plan-review`); renderPlanReviewFindingsPEMS_(data);}catch(err){toast(humanError(err),'danger',6500);}}
 
 function setButtonLoadingPEMS_(btn, loading, label) {
   if (!btn) return;
@@ -3420,10 +3493,15 @@ async function publishAdminProjectPEMS_(projectId, button) {
     toast('Publish hanya dapat dilakukan PM/LEADER.', 'warning', 5000);
     return;
   }
-  if (!window.confirm(`Publish ${projectId}? Setelah Publish, project dinyatakan siap digunakan.`)) return;
+  const warn = Number(project.planWarningCount || 0);
+  const review = String(project.planReviewStatus || '').toUpperCase();
+  const confirmText = warn > 0
+    ? `Publish ${projectId} untuk Field Execution dengan ${warn} warning? Warning tetap disimpan untuk reconciliation akhir.`
+    : `Publish ${projectId} untuk Field Execution? Baseline BOQ V${project.boqVersion || '-'} + KML V${project.kmlPlanVersion || '-'} akan dicatat.`;
+  if (!window.confirm(confirmText)) return;
   try {
     setButtonLoadingPEMS_(button, true, 'Publishing...');
-    await api(`/admin/projects/${encodeURIComponent(projectId)}/publish`, { method:'POST', body:{ note:'Publish dari Admin Web' } });
+    await api(`/admin/projects/${encodeURIComponent(projectId)}/publish`, { method:'POST', body:{ note:`Publish for Field Execution dari Admin Web · Review ${review} · Warning ${warn}` } });
     const updated={...project,setupStatus:'PUBLISHED'};
     upsertAdminProjectLocalPEMS_(updated);
     toast(`${projectId} berhasil PUBLISHED.`, 'success', 5500);
@@ -3591,6 +3669,7 @@ function fillAdminProjectForm(projectId) {
   const id = document.getElementById('prjProjectId'); if (id) id.readOnly = true;
   updateAdminPlanFileStatus(p);
   updateAdminProjectSlaPreview();
+  updateAdminPlanReviewPanelPEMS_(p);
   updateAdminPublishPanelPEMS_(p);
   document.getElementById('prjProjectId')?.scrollIntoView({behavior:'smooth', block:'center'});
 }
