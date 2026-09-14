@@ -61,6 +61,7 @@ const state = {
   adminCanPublish: false,
   adminPlanUploading: false,
   adminCache: {},
+  adminCacheAt: {},
   adminStaleNotice: ''
 };
 
@@ -573,7 +574,7 @@ async function renderHome() {
       <div class="card">
         <div class="section-head"><h2>Mulai / Lanjut Pekerjaan</h2><span class="badge ${navigator.onLine ? 'success' : 'warning'}">${navigator.onLine ? 'ONLINE' : 'OFFLINE'}</span></div>
         <p class="muted">Tidak ada lagi tombol Ambil Project/Material/Point satu-satu. Pilih project, lalu PEMS menyiapkan workspace otomatis.</p>
-        <div class="field"><label>Project</label>${projectSelectHtml(projects, state.selectedProjectId, 'homeProjectSelect')}</div>
+        <div class="field"><label>Project</label><input id="homeProjectSearch" class="input" placeholder="Cari PID / detail pekerjaan..." style="margin-bottom:8px">${projectSelectHtml(projects, state.selectedProjectId, 'homeProjectSelect')}</div>
         <button id="continueWorkBtn" class="btn primary full" style="margin-top:12px" ${projects.length ? '' : 'disabled'}>Lanjut Pekerjaan</button>
       </div>
       <div class="card">
@@ -594,6 +595,7 @@ async function renderHome() {
       </div>` : ''}
   `;
 
+  bindSelectSearchPEMS_('homeProjectSearch', 'homeProjectSelect');
   document.getElementById('homeProjectSelect')?.addEventListener('change', e => selectProject(e.target.value, false));
   document.getElementById('continueWorkBtn')?.addEventListener('click', async () => {
     const select = document.getElementById('homeProjectSelect');
@@ -2956,13 +2958,28 @@ async function renderMonitoring(options = {}) {
   });
 }
 
-async function adminFetchPEMS_(cacheKey, path) {
+async function adminFetchPEMS_(cacheKey, path, options = {}) {
+  const maxAgeMs = Math.max(0, Number(options.maxAgeMs ?? 45_000));
+  const force = options.force === true;
+  const cached = state.adminCache[cacheKey];
+  const cachedAt = Number(state.adminCacheAt?.[cacheKey] || 0);
+  const fresh = !!cached && !force && (Date.now() - cachedAt) <= maxAgeMs;
+
+  if (fresh) {
+    // Cache-first: UI langsung tampil. Refresh server berjalan diam-diam.
+    api(path, { maxAttempts:3, timeoutMs:30000 }).then(data => {
+      state.adminCache[cacheKey] = data;
+      state.adminCacheAt[cacheKey] = Date.now();
+    }).catch(() => {});
+    return cached;
+  }
+
   try {
     const data = await api(path, { maxAttempts:3, timeoutMs:30000 });
     state.adminCache[cacheKey] = data;
+    state.adminCacheAt[cacheKey] = Date.now();
     return data;
   } catch (err) {
-    const cached = state.adminCache[cacheKey];
     if (cached) {
       state.adminStaleNotice = 'Server sempat tidak stabil. Data terakhir tetap ditampilkan.';
       return cached;
@@ -3114,15 +3131,16 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11F:</b> file sumber + versioning aktif. BOQ/KML yang sudah di-upload dapat dibuka langsung dari web. Parsing/mapping isi BOQ dan KML tetap masuk tahap Validasi berikutnya.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11G:</b> file sumber + versioning aktif. BOQ/KML yang sudah di-upload dapat dibuka langsung dari web. Parsing/mapping isi BOQ dan KML tetap masuk tahap Validasi berikutnya.</div>
           </div>
         </div>
       </section>
 
       <section class="admin-section hidden" data-admin-panel="project-list">
         <div class="card"><div class="section-head"><h2>Daftar Project</h2><span class="badge info">${projects.length} project</span></div>
+          <div class="field" style="margin:12px 0"><label>Cari Project</label><input id="adminProjectSearch" class="input" placeholder="Cari PID, stakeholder, detail pekerjaan, STO..."></div>
           <div class="table-wrap"><table><thead><tr><th>PID</th><th>Stakeholder</th><th>Detail Pekerjaan / STO</th><th>Plan File</th><th>Setup</th><th>Status</th><th>SLA</th><th>Time of Critical</th><th>Aksi</th></tr></thead><tbody>
-            ${projects.length ? projects.map(p=>{ const pub=adminProjectPublishStatePEMS_(p); return `<tr>
+            ${projects.length ? projects.map(p=>{ const pub=adminProjectPublishStatePEMS_(p); return `<tr data-project-row data-search="${escapeAttr([p.projectId,p.stakeholder,p.projectType,p.detailProject||p.lop,p.sto,p.statusProject,p.setupStatus].filter(Boolean).join(' ').toLowerCase())}">
               <td><b>${escapeHtml(p.projectId)}</b></td>
               <td>${escapeHtml(p.stakeholder || '-')}<div class="tiny muted">${escapeHtml(p.projectType || '-')}</div></td>
               <td><b>${escapeHtml(p.detailProject || p.lop || '-')}</b><div class="tiny muted">STO: ${escapeHtml(p.sto || '-')}</div></td>
@@ -3151,6 +3169,7 @@ async function renderAdmin() {
             <span class="badge info">${masterItems.filter(m => m.active).length} aktif</span>
           </div>
 
+          <div class="field" style="margin-top:12px"><label>Cari Master Data</label><input id="adminMasterSearch" class="input" placeholder="Cari code, nama, area, type..."></div>
           <input id="masterDataId" type="hidden">
           <div class="grid three" style="margin-top:14px">
             <div class="field">
@@ -3189,7 +3208,7 @@ async function renderAdmin() {
                     <thead><tr><th>Code</th><th>Nama</th><th>Area</th><th>Status</th><th></th></tr></thead>
                     <tbody>
                       ${rows.length ? rows.map(m => `
-                        <tr>
+                        <tr data-master-row data-search="${escapeAttr([m.type,m.code,m.name,m.area].filter(Boolean).join(' ').toLowerCase())}">
                           <td><b>${escapeHtml(m.code)}</b></td>
                           <td>${escapeHtml(m.name || '-')}</td>
                           <td>${escapeHtml(m.area || '-')}</td>
@@ -3238,8 +3257,8 @@ async function renderAdmin() {
         <div class="card">
           <div class="section-head"><h2>Assignment Aktif</h2><span class="badge info">${assignments.length} aktif</span></div>
           <div class="grid two" style="margin-top:12px">
-            <div class="field"><label>User</label><select id="assignUser" class="select">${users.map(u=>`<option value="${escapeAttr(u.email)}">${escapeHtml(u.fullName || u.email)} — ${escapeHtml(u.role)}</option>`).join('')}</select></div>
-            <div class="field"><label>Project</label><select id="assignProject" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}">${escapeHtml(adminProjectLabelPEMS_(p))}</option>`).join('')}</select></div>
+            <div class="field"><label>User</label><input id="assignUserSearch" class="input" placeholder="Cari user..." style="margin-bottom:8px"><select id="assignUser" class="select">${users.map(u=>`<option value="${escapeAttr(u.email)}">${escapeHtml(u.fullName || u.email)} — ${escapeHtml(u.role)}</option>`).join('')}</select></div>
+            <div class="field"><label>Project</label><input id="assignProjectSearch" class="input" placeholder="Cari PID / detail..." style="margin-bottom:8px"><select id="assignProject" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}">${escapeHtml(adminProjectLabelPEMS_(p))}</option>`).join('')}</select></div>
           </div>
           <div class="grid two" style="margin-top:10px"><div class="field"><label>Scope</label><select id="assignScope" class="select"><option>PROJECT</option><option>POINT</option></select></div><div class="field"><label>Scope Value</label><input id="assignScopeValue" class="input" placeholder="Kosong untuk PROJECT / PS-... untuk POINT"></div></div>
           <button id="saveAssignmentBtn" class="btn secondary" style="margin-top:12px">Simpan Assignment</button>
@@ -3271,6 +3290,10 @@ async function renderAdmin() {
     document.getElementById('saveUserBtn')?.addEventListener('click', saveAdminUser);
     document.getElementById('saveAssignmentBtn')?.addEventListener('click', saveAdminAssignment);
     document.getElementById('saveOperationalConfigBtn')?.addEventListener('click', saveOperationalConfig);
+    bindTextFilterPEMS_('adminProjectSearch', '[data-project-row]');
+    bindTextFilterPEMS_('adminMasterSearch', '[data-master-row]');
+    bindSelectSearchPEMS_('assignUserSearch', 'assignUser');
+    bindSelectSearchPEMS_('assignProjectSearch', 'assignProject');
 
     showAdminSection(state.adminSection || 'project-setup');
 
@@ -3401,11 +3424,12 @@ async function publishAdminProjectPEMS_(projectId, button) {
   try {
     setButtonLoadingPEMS_(button, true, 'Publishing...');
     await api(`/admin/projects/${encodeURIComponent(projectId)}/publish`, { method:'POST', body:{ note:'Publish dari Admin Web' } });
-    state.adminCache.projects = null;
+    const updated={...project,setupStatus:'PUBLISHED'};
+    upsertAdminProjectLocalPEMS_(updated);
     toast(`${projectId} berhasil PUBLISHED.`, 'success', 5500);
-    await refreshNotifications(true, true);
-    await renderAdmin();
-    if (state.adminSection === 'project-setup') fillAdminProjectForm(projectId);
+    updateAdminPublishPanelPEMS_(updated);
+    setButtonLoadingPEMS_(button, false);
+    setTimeout(() => refreshNotifications(true, true).catch(() => {}), 50);
   } catch (err) {
     toast(humanError(err), 'danger', 7000);
     setButtonLoadingPEMS_(button, false);
@@ -3582,13 +3606,14 @@ async function saveAdminProject() {
       startDate: value('prjStartDate'), targetSelesai: value('prjTargetSelesai'), realisasiSelesai: value('prjRealisasiSelesai'),
       statusProject: value('prjStatusProject'), notes: value('prjNotes'), active: true
     };
-    await api('/admin/projects/upsert', {method:'POST', body});
-    state.adminCache.projects = null;
-    toast('Project disimpan. SLA dihitung otomatis.', 'success');
-    await refreshNotifications(true, true);
-    state.adminSection = 'project-setup';
-    await renderAdmin();
+    const result = await api('/admin/projects/upsert', {method:'POST', body});
+    const saved = result?.project || { ...body, setupStatus:'DRAFT', active:true };
+    upsertAdminProjectLocalPEMS_(saved);
+    toast('Project disimpan.', 'success');
     fillAdminProjectForm(body.projectId);
+    setButtonLoadingPEMS_(btn, false);
+    // Refresh tambahan tidak menghambat user.
+    setTimeout(() => refreshNotifications(true, true).catch(() => {}), 50);
   } catch(err) {
     toast(humanError(err), 'danger', 6000);
     setButtonLoadingPEMS_(btn, false);
@@ -3638,11 +3663,12 @@ async function saveAdminMasterData() {
       sortOrder: Number(value('masterDataSort') || 0),
       active: value('masterDataActive') === 'TRUE'
     };
-    await api('/admin/master-data', { method:'POST', body });
-    state.adminCache.master = null; state.adminCache.projects = null;
-    toast('Master Data disimpan. Dropdown Project Setup ikut diperbarui.', 'success', 5000);
+    const result = await api('/admin/master-data', { method:'POST', body });
+    if (result?.item) upsertAdminMasterLocalPEMS_(result.item);
+    toast('Master Data disimpan.', 'success', 4000);
+    resetAdminMasterForm();
     state.adminSection = 'master-data';
-    await renderAdmin();
+    await renderAdmin(); // cache lokal -> render instan; refresh server di background
     showAdminSection('master-data');
   } catch(err) {
     toast(humanError(err), 'danger', 6500);
@@ -3682,11 +3708,17 @@ async function saveAdminUser() {
   const btn = document.getElementById('saveUserBtn');
   try {
     setButtonLoadingPEMS_(btn, true, 'Menyimpan...');
-    await api('/admin/users/upsert', {method:'POST', body:{email:value('adminUserEmail'),fullName:value('adminUserName'),role:value('adminUserRole'),area:value('adminUserArea'),active:true}});
-    state.adminCache.users = null;
+    const body={email:value('adminUserEmail'),fullName:value('adminUserName'),role:value('adminUserRole'),area:value('adminUserArea'),active:true};
+    const result=await api('/admin/users/upsert', {method:'POST', body});
+    const cache=state.adminCache.users || {users:[]};
+    const users=[...(cache.users||[])];
+    const idx=users.findIndex(u=>String(u.email).toLowerCase()===String(body.email).toLowerCase());
+    const row={...(idx>=0?users[idx]:{}),...body,userId:result?.userId||users[idx]?.userId||''};
+    if(idx>=0) users[idx]=row; else users.push(row);
+    state.adminCache.users={...cache,users}; state.adminCacheAt.users=Date.now();
     toast('User disimpan.', 'success');
-    await refreshNotifications(true, true);
-    await renderAdmin();
+    setButtonLoadingPEMS_(btn, false);
+    setTimeout(()=>refreshNotifications(true,true).catch(()=>{}),50);
   } catch(err){
     toast(humanError(err),'danger',6000);
     setButtonLoadingPEMS_(btn, false);
@@ -3697,11 +3729,18 @@ async function saveAdminAssignment() {
   const btn = document.getElementById('saveAssignmentBtn');
   try {
     setButtonLoadingPEMS_(btn, true, 'Menyimpan...');
-    await api('/admin/assignments/upsert', {method:'POST', body:{userEmail:value('assignUser'),projectId:value('assignProject'),scopeType:value('assignScope'),scopeValue:value('assignScopeValue'),status:'ACTIVE',active:true}});
-    state.adminCache.assignments = null;
+    const body={userEmail:value('assignUser'),projectId:value('assignProject'),scopeType:value('assignScope'),scopeValue:value('assignScopeValue'),status:'ACTIVE',active:true};
+    const result=await api('/admin/assignments/upsert', {method:'POST', body});
+    const cache=state.adminCache.assignments || {assignments:[]};
+    let rows=[...(cache.assignments||[])];
+    const key=a=>[String(a.userEmail||'').toLowerCase(),a.projectId,a.scopeType,a.scopeValue||''].join('|');
+    const idx=rows.findIndex(a=>key(a)===key(body));
+    const row={...(idx>=0?rows[idx]:{}),...body,assignmentId:result?.assignmentId||rows[idx]?.assignmentId||''};
+    if(idx>=0) rows[idx]=row; else rows.push(row);
+    state.adminCache.assignments={...cache,assignments:rows}; state.adminCacheAt.assignments=Date.now();
     toast('Assignment disimpan.', 'success');
-    await refreshNotifications(true, true);
-    await renderAdmin();
+    setButtonLoadingPEMS_(btn, false);
+    setTimeout(()=>refreshNotifications(true,true).catch(()=>{}),50);
   } catch(err){
     toast(humanError(err),'danger',6000);
     setButtonLoadingPEMS_(btn, false);
@@ -3717,17 +3756,13 @@ async function saveOperationalConfig() {
       ['GPS_FIELD_BLOCK_M', value('cfgGpsBlock')],
       ['POINT_DISTANCE_WARNING_M', value('cfgDistanceWarn')]
     ];
-    for (const [key, val] of updates) {
-      await api('/admin/config', { method:'POST', body:{ key, value:val } });
-    }
-    const boot = await api('/bootstrap');
-    state.bootstrap = boot;
-    state.user = boot.user;
-    state.config = boot.config || {};
-    await cachePut('bootstrap', boot);
-    state.adminCache.config = null;
+    await Promise.all(updates.map(([key,val]) => api('/admin/config', { method:'POST', body:{key,value:val} })));
+    const next={...(state.config||{})}; updates.forEach(([k,v])=>next[k]=v); state.config=next;
+    if(state.bootstrap) state.bootstrap.config=next;
+    state.adminCache.config={config:next}; state.adminCacheAt.config=Date.now();
+    await cachePut('bootstrap', state.bootstrap);
     toast('Config operasional disimpan.', 'success');
-    await renderAdmin();
+    setButtonLoadingPEMS_(btn, false);
   } catch (err) {
     toast(humanError(err), 'danger', 6000);
     setButtonLoadingPEMS_(btn, false);
@@ -4870,6 +4905,50 @@ function stopNotificationPolling() {
 function hasPermission(p) { return (state.user?.permissions || []).includes(p); }
 function configNumber(key, fallback) { const n=Number(state.config?.[key]); return Number.isFinite(n)?n:fallback; }
 function truthyConfig(key, fallback) { const v=state.config?.[key]; if(v===undefined||v===null||v==='')return fallback; return ['TRUE','1','YES','ON'].includes(String(v).toUpperCase()); }
+
+function bindSelectSearchPEMS_(searchId, selectId) {
+  const input=document.getElementById(searchId); const select=document.getElementById(selectId);
+  if(!input||!select) return;
+  input.addEventListener('input',()=>{
+    const q=String(input.value||'').trim().toLowerCase();
+    Array.from(select.options).forEach(opt=>{ opt.hidden=!!q && !String(opt.textContent||'').toLowerCase().includes(q); });
+    const first=Array.from(select.options).find(o=>!o.hidden);
+    if(q && select.selectedOptions[0]?.hidden && first){ select.value=first.value; select.dispatchEvent(new Event('change',{bubbles:true})); }
+  });
+}
+function bindTextFilterPEMS_(inputId, rowSelector) {
+  const input=document.getElementById(inputId); if(!input) return;
+  input.addEventListener('input',()=>{
+    const q=String(input.value||'').trim().toLowerCase();
+    el.content.querySelectorAll(rowSelector).forEach(row=>{ const hay=String(row.dataset.search||row.textContent||'').toLowerCase(); row.hidden=!!q && !hay.includes(q); });
+  });
+}
+function rebuildAdminMasterOptionsLocalPEMS_(){
+  const rows=state.adminMasterData||[];
+  state.adminMasterOptions={
+    stakeholders:rows.filter(r=>r.type==='STAKEHOLDER'&&r.active).sort((a,b)=>(a.sortOrder||0)-(b.sortOrder||0)).map(r=>r.code),
+    projectTypes:rows.filter(r=>r.type==='PROJECT_TYPE'&&r.active).sort((a,b)=>(a.sortOrder||0)-(b.sortOrder||0)).map(r=>r.code),
+    stos:rows.filter(r=>r.type==='STO'&&r.active).sort((a,b)=>(a.sortOrder||0)-(b.sortOrder||0)).map(r=>r.code)
+  };
+}
+function upsertAdminMasterLocalPEMS_(item){
+  if(!item) return;
+  const rows=[...(state.adminMasterData||[])]; const idx=rows.findIndex(r=>r.masterId===item.masterId || (r.type===item.type&&r.code===item.code));
+  if(idx>=0) rows[idx]={...rows[idx],...item}; else rows.push(item);
+  state.adminMasterData=rows; rebuildAdminMasterOptionsLocalPEMS_();
+  state.adminCache.master={types:['STAKEHOLDER','PROJECT_TYPE','STO'],items:rows,activeOptions:state.adminMasterOptions};
+  state.adminCacheAt.master=Date.now();
+  if(state.adminCache.projects){ state.adminCache.projects={...state.adminCache.projects,masterOptions:state.adminMasterOptions}; state.adminCacheAt.projects=Date.now(); }
+}
+function upsertAdminProjectLocalPEMS_(project){
+  if(!project?.projectId) return;
+  const rows=[...(state.adminProjects||[])]; const idx=rows.findIndex(p=>p.projectId===project.projectId);
+  if(idx>=0) rows[idx]={...rows[idx],...project}; else rows.push(project);
+  state.adminProjects=rows;
+  state.adminCache.projects={...(state.adminCache.projects||{}),projects:rows,masterOptions:state.adminMasterOptions,canPublish:state.adminCanPublish};
+  state.adminCacheAt.projects=Date.now();
+  if(state.bootstrap) state.bootstrap.projects=rows;
+}
 
 function projectSelectHtml(projects, selected, id) {
   return `<select id="${escapeAttr(id)}" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}" ${p.projectId===selected?'selected':''}>${escapeHtml(adminProjectLabelPEMS_(p))}</option>`).join('')}</select>`;
