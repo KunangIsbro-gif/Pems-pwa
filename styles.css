@@ -305,3 +305,12 @@ body.modal-open{overflow:hidden}
 .plan-upload-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff}
 .admin-section.hidden{display:none!important}
 @media(max-width:900px){.admin-subnav{display:none!important}.plan-files-box{padding:12px}}
+
+/* V15.4.5 R11F - action feedback & admin plan links */
+.btn.is-loading{display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:wait}
+.btn-spinner{width:15px;height:15px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;display:inline-block;animation:pemsBtnSpin .75s linear infinite;flex:0 0 auto}
+@keyframes pemsBtnSpin{to{transform:rotate(360deg)}}
+.inline-link{font-weight:800;text-decoration:none;color:var(--navy-2);white-space:nowrap}
+.inline-link:hover{text-decoration:underline}
+.plan-file-row{line-height:1.65}
+.row-actions.compact{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
