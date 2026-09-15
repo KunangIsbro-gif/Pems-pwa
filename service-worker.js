@@ -1,11 +1,12 @@
-const CACHE_NAME = 'pems-v15-6-1-boq-hybrid-r11m-p1-qty-filter';
+const CACHE_NAME = 'pems-v15-7-0-proactive-bridge-r11n-p0';
 const STATIC_ASSETS = [
   './',
   './index.html',
   './styles.css',
   './config.js',
   './app.js',
-  './manifest.webmanifest'
+  './manifest.webmanifest',
+  './proactive-bridge.js'
 ];
 
 self.addEventListener('install', event => {

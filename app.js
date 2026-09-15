@@ -8,6 +8,7 @@ const DEVICE_KEY = 'PEMS_V15_DEVICE_ID';
 const LAST_GPS_KEY = 'PEMS_V15_LAST_GPS';
 const SELECTED_PROJECT_KEY = 'PEMS_V15_SELECTED_PROJECT';
 const ACTIVE_DRAFT_KEY = 'PEMS_V15_ACTIVE_DRAFT_ID';
+const PROACTIVE_BRIDGE_KEY = 'PEMS_V15_PROACTIVE_BRIDGE_PAYLOAD';
 
 const DB_NAME = 'PEMS_V15_DB';
 const DB_VERSION = 1;
@@ -66,7 +67,8 @@ const state = {
   adminBoqSearch: '',
   adminCache: {},
   adminCacheAt: {},
-  adminStaleNotice: ''
+  adminStaleNotice: '',
+  proactiveImportPayload: null
 };
 
 const el = {
@@ -130,6 +132,7 @@ async function init() {
   await openDb();
   state.apiBase = resolveApiBase();
   await refreshLocalState();
+  restoreProactiveBridgePayloadPEMS_();
   updateNetworkUi();
 
   if (!state.apiBase) {
@@ -181,6 +184,7 @@ function wireStaticEvents() {
   };
   window.addEventListener('hashchange', syncRouteFromLocation);
   window.addEventListener('popstate', syncRouteFromLocation);
+  window.addEventListener('message', receiveProactiveBridgeMessagePEMS_);
 }
 
 function setupNetworkListeners() {
@@ -198,7 +202,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-6-1-r11m');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-7-0-r11n-p0');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -433,6 +437,7 @@ function renderNavigation() {
   const adminSubItems = [
     ['project-setup', 'Project Setup'],
     ['project-list', 'Daftar Project'],
+    ['proactive-import', 'Proactive Import'],
     ['master-data', 'Master Data'],
     ['users', 'Daftar User'],
     ['config', 'App Config Operasional'],
@@ -3079,8 +3084,196 @@ async function adminFetchPEMS_(cacheKey, path, options = {}) {
   }
 }
 
+
+function restoreProactiveBridgePayloadPEMS_() {
+  try {
+    const raw = sessionStorage.getItem(PROACTIVE_BRIDGE_KEY);
+    if (raw) state.proactiveImportPayload = JSON.parse(raw);
+  } catch (_) {}
+}
+
+function receiveProactiveBridgeMessagePEMS_(event) {
+  if (event.origin !== 'https://apps.telkomakses.co.id') return;
+  const msg = event.data || {};
+  if (msg.type !== 'PEMS_PROACTIVE_IMPORT_V1' || !msg.payload) return;
+  state.proactiveImportPayload = msg.payload;
+  try { sessionStorage.setItem(PROACTIVE_BRIDGE_KEY, JSON.stringify(msg.payload)); } catch (_) {}
+  toast(`Data Proactive diterima: ${Number(msg.payload?.boq?.length || 0)} item BOQ.`, 'success', 6000);
+  if (state.bootstrap && sessionIsUsable()) {
+    state.adminMenuOpen = true;
+    navigate('admin', { adminSection:'proactive-import' });
+  }
+}
+
+function proactiveBookmarkletPEMS_() {
+  const scriptUrl = new URL('./proactive-bridge.js?v=v15-7-0-r11n-p0', window.location.href).href;
+  return `javascript:(()=>{var s=document.createElement('script');s.src=${JSON.stringify(scriptUrl)};s.async=true;document.documentElement.appendChild(s)})()`;
+}
+
+async function copyProactiveBookmarkletPEMS_() {
+  const text = proactiveBookmarkletPEMS_();
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Bookmarklet Proactive Bridge disalin. Buat bookmark baru lalu paste ke kolom URL.', 'success', 6500);
+  } catch (_) {
+    window.prompt('Copy URL bookmarklet ini:', text);
+  }
+}
+
+function clearProactiveBridgePayloadPEMS_() {
+  state.proactiveImportPayload = null;
+  try { sessionStorage.removeItem(PROACTIVE_BRIDGE_KEY); } catch (_) {}
+  if (state.currentPage === 'admin' && state.adminSection === 'proactive-import') renderAdmin();
+}
+
+function parseProactivePayloadTextareaPEMS_() {
+  const raw = String(document.getElementById('proactivePayloadJson')?.value || '').trim();
+  if (!raw) { toast('Paste payload JSON dulu.', 'warning'); return; }
+  try {
+    const parsed = JSON.parse(raw);
+    state.proactiveImportPayload = Array.isArray(parsed) ? { project:{}, boq:parsed, capturedAt:new Date().toISOString() } : parsed;
+    sessionStorage.setItem(PROACTIVE_BRIDGE_KEY, JSON.stringify(state.proactiveImportPayload));
+    renderAdmin();
+    toast('Payload Proactive berhasil dibaca.', 'success');
+  } catch (err) {
+    toast('JSON tidak valid: ' + humanError(err), 'danger', 6500);
+  }
+}
+
+function proactiveNormPEMS_(v) {
+  return String(v || '').trim().toUpperCase().replace(/\s+/g,' ');
+}
+
+function proactiveGuessOptionPEMS_(options, candidates) {
+  const list = (options || []).map(v => String(v || '').trim()).filter(Boolean);
+  const cands = (candidates || []).map(proactiveNormPEMS_).filter(Boolean);
+  for (const c of cands) {
+    const exact = list.find(v => proactiveNormPEMS_(v) === c);
+    if (exact) return exact;
+  }
+  return '';
+}
+
+function proactiveExtractStoPEMS_(projectName) {
+  const s = String(projectName || '').toUpperCase();
+  const m = s.match(/(?:MD\d{4}|HEMO?\d{2}|HEM\d{2})[-\s]+([A-Z0-9]{3})[-\s]/);
+  return m ? m[1] : '';
+}
+
+function proactiveNumPEMS_(v) {
+  const raw = String(v ?? '').trim();
+  if (!raw) return 0;
+  const n = Number(raw.replace(/,/g,''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function renderProactiveImportPanelPEMS_(masterOptions) {
+  const payload = state.proactiveImportPayload || null;
+  const p = payload?.project || {};
+  const boq = Array.isArray(payload?.boq) ? payload.boq : [];
+  const stoGuess = proactiveExtractStoPEMS_(p.projectName);
+  const stakeholderGuess = proactiveGuessOptionPEMS_(masterOptions?.stakeholders, [p.program, p.customer]);
+  const projectTypeGuess = proactiveGuessOptionPEMS_(masterOptions?.projectTypes, [p.projectType, p.portfolio]);
+  const stoSelected = proactiveGuessOptionPEMS_(masterOptions?.stos, [stoGuess]);
+  const optionHtml = (items, selected, placeholder) => `<option value="">${escapeHtml(placeholder)}</option>${(items||[]).map(v=>`<option value="${escapeAttr(v)}" ${String(v)===String(selected)?'selected':''}>${escapeHtml(v)}</option>`).join('')}`;
+  const totalQty = boq.reduce((n,x)=>n+proactiveNumPEMS_(x.qty ?? x.volume),0);
+  const tableRows = boq.slice(0,120).map((x,i)=>`<tr><td>${i+1}</td><td><b>${escapeHtml(x.designator||'')}</b></td><td>${escapeHtml(x.uraian||x.description||'')}</td><td>${escapeHtml(x.satuan||x.unit||'')}</td><td>${escapeHtml(x.harga_material||x.material_price||'')}</td><td>${escapeHtml(x.harga_jasa||x.service_price||'')}</td><td>${escapeHtml(x.qty??x.volume??'')}</td></tr>`).join('');
+  return `
+      <section class="admin-section hidden" data-admin-panel="proactive-import">
+        <div class="card">
+          <div class="section-head">
+            <div><h2>Proactive → PEMS Import</h2><div class="small muted">Browser Bridge membaca project + BOQ dari sesi Proactive yang sudah login. Password, cookie, session, dan CSRF Proactive tidak dikirim ke PEMS.</div></div>
+            <span class="badge info">R11N-P0</span>
+          </div>
+          <div class="status-box neutral" style="margin-top:12px">
+            <b>Pasang sekali:</b> seret tombol <b>PEMS ← Proactive</b> ke Bookmark Bar Chrome. Setelah itu buka Detail Project → Step 2 BoQ di Proactive, lalu klik bookmark tersebut.
+            <div class="row-actions" style="margin-top:10px;align-items:center">
+              <a id="proactiveBridgeBookmark" class="btn secondary" href="#">PEMS ← Proactive</a>
+              <button id="copyProactiveBookmarkletBtn" class="btn ghost" type="button">Copy Bookmarklet</button>
+            </div>
+          </div>
+          ${payload ? `
+            <div class="status-box success" style="margin-top:12px"><b>Payload diterima.</b> ${escapeHtml(String(boq.length))} item BOQ · Qty total ${escapeHtml(String(totalQty))} · capture ${escapeHtml(formatDateTime(payload.capturedAt || new Date().toISOString()))}</div>
+            <div class="grid three" style="margin-top:12px">
+              <div class="field"><label>Project ID Proactive *</label><input id="proactiveProjectId" class="input" value="${escapeAttr(p.proactiveProjectId||p.projectId||'')}"></div>
+              <div class="field"><label>Project ID SAP</label><input id="proactiveProjectIdSap" class="input" value="${escapeAttr(p.projectIdSap||'')}"></div>
+              <div class="field"><label>Nimon ID / WO</label><input id="proactiveNimonId" class="input" value="${escapeAttr(p.nimonId||'')}"></div>
+            </div>
+            <div class="field" style="margin-top:10px"><label>Nama Project *</label><input id="proactiveProjectName" class="input" value="${escapeAttr(p.projectName||'')}"></div>
+            <div class="grid three" style="margin-top:10px">
+              <div class="field"><label>Program Proactive</label><input id="proactiveProgram" class="input" value="${escapeAttr(p.program||'')}" readonly></div>
+              <div class="field"><label>Customer Proactive</label><input id="proactiveCustomer" class="input" value="${escapeAttr(p.customer||'')}" readonly></div>
+              <div class="field"><label>Status Proactive</label><input id="proactiveStatus" class="input" value="${escapeAttr(p.proactiveStatus||'')}" readonly></div>
+            </div>
+            <div class="grid three" style="margin-top:10px">
+              <div class="field"><label>Stakeholder PEMS *</label><select id="proactivePemsStakeholder" class="select">${optionHtml(masterOptions?.stakeholders, stakeholderGuess, 'Pilih Stakeholder')}</select></div>
+              <div class="field"><label>Project Type PEMS</label><select id="proactivePemsProjectType" class="select">${optionHtml(masterOptions?.projectTypes, projectTypeGuess, 'Pilih Project Type')}</select></div>
+              <div class="field"><label>STO</label><select id="proactivePemsSto" class="select">${optionHtml(masterOptions?.stos, stoSelected, 'Pilih STO')}</select></div>
+            </div>
+            <div class="grid three" style="margin-top:10px">
+              <div class="field"><label>Regional</label><input id="proactivePemsRegional" class="input" value="REGIONAL IV"></div>
+              <div class="field"><label>Witel / Branch</label><input id="proactivePemsWitel" class="input" value="PONTIANAK / KALBAR"></div>
+              <div class="field"><label>Area</label><input id="proactivePemsArea" class="input" value="Pontianak"></div>
+            </div>
+            <div class="row-actions" style="margin-top:12px">
+              <button id="importProactiveBtn" class="btn secondary">Import Project + ${boq.length} BOQ ke PEMS</button>
+              <button id="clearProactivePayloadBtn" class="btn ghost">Buang Preview</button>
+            </div>
+            <div class="table-wrap" style="margin-top:16px;max-height:520px;overflow:auto"><table><thead><tr><th>#</th><th>Designator</th><th>Uraian</th><th>Unit</th><th>Harga Material</th><th>Harga Jasa</th><th>Qty</th></tr></thead><tbody>${tableRows || '<tr><td colspan="7">BOQ belum ditemukan.</td></tr>'}</tbody></table></div>
+            ${boq.length>120?`<div class="tiny muted" style="margin-top:6px">Preview menampilkan 120 dari ${boq.length} item. Semua item tetap akan diimport.</div>`:''}
+          ` : `
+            <div class="status-box warning" style="margin-top:12px"><b>Belum ada payload.</b> Buka project di Proactive → Step 2 BoQ → klik bookmark <b>PEMS ← Proactive</b>. PEMS akan membuka halaman ini otomatis.</div>
+          `}
+          <details style="margin-top:16px"><summary class="small"><b>Fallback: Paste JSON manual</b></summary><div class="field" style="margin-top:10px"><textarea id="proactivePayloadJson" class="input" rows="8" placeholder="Paste payload JSON bridge di sini..."></textarea></div><button id="parseProactivePayloadBtn" class="btn ghost" style="margin-top:8px">Baca JSON</button></details>
+        </div>
+      </section>`;
+}
+
+async function importProactivePayloadPEMS_() {
+  const payload = state.proactiveImportPayload || {};
+  const boq = Array.isArray(payload.boq) ? payload.boq : [];
+  const btn = document.getElementById('importProactiveBtn');
+  const source = {
+    ...(payload.project || {}),
+    proactiveProjectId: value('proactiveProjectId'),
+    projectIdSap: value('proactiveProjectIdSap'),
+    nimonId: value('proactiveNimonId'),
+    projectName: value('proactiveProjectName'),
+    program: value('proactiveProgram') || payload.project?.program || '',
+    customer: value('proactiveCustomer') || payload.project?.customer || '',
+    proactiveStatus: value('proactiveStatus') || payload.project?.proactiveStatus || '',
+    sourceUrl: payload.sourceUrl || payload.project?.sourceUrl || ''
+  };
+  const pems = {
+    stakeholder: value('proactivePemsStakeholder'),
+    projectType: value('proactivePemsProjectType'),
+    sto: value('proactivePemsSto'),
+    regional: value('proactivePemsRegional'),
+    witelBranch: value('proactivePemsWitel'),
+    area: value('proactivePemsArea')
+  };
+  if (!source.proactiveProjectId || !source.projectName) { toast('Project ID Proactive dan Nama Project wajib ada.', 'warning'); return; }
+  if (!pems.stakeholder) { toast('Pilih Stakeholder PEMS dulu.', 'warning'); return; }
+  if (!boq.length) { toast('BOQ Proactive belum terbaca.', 'warning'); return; }
+  try {
+    setButtonLoadingPEMS_(btn, true, `Import ${boq.length} BOQ...`);
+    const data = await api('/admin/proactive-import', { method:'POST', body:{ source, pems, boq } });
+    if (data?.project) upsertAdminProjectLocalPEMS_(data.project);
+    state.adminCache = {};
+    state.adminCacheAt = {};
+    toast(`${source.proactiveProjectId} berhasil diimport · BOQ V${data.boqVersion} · ${data.boqItems} item.`, 'success', 7500);
+    state.adminSection = 'project-setup';
+    await renderAdmin();
+    fillAdminProjectForm(source.proactiveProjectId);
+  } catch (err) {
+    toast(humanError(err), 'danger', 8500);
+  } finally {
+    setButtonLoadingPEMS_(btn, false);
+  }
+}
+
 function adminLoadingLabelPEMS_(section) {
-  return ({'project-setup':'Project Setup','project-list':'Daftar Project','master-data':'Master Data','users':'Daftar User','config':'App Config Operasional','assignments':'Assignment Aktif'})[section] || 'Admin';
+  return ({'project-setup':'Project Setup','project-list':'Daftar Project','proactive-import':'Proactive Import','master-data':'Master Data','users':'Daftar User','config':'App Config Operasional','assignments':'Assignment Aktif'})[section] || 'Admin';
 }
 
 async function renderAdmin() {
@@ -3098,7 +3291,7 @@ async function renderAdmin() {
     el.content.innerHTML = `<div class="empty">Memuat ${escapeHtml(adminLoadingLabelPEMS_(section))}...</div>`;
 
     const needProjects = ['project-setup','project-list','assignments'].includes(section);
-    const needMaster = ['project-setup','master-data'].includes(section);
+    const needMaster = ['project-setup','proactive-import','master-data'].includes(section);
     const needUsers = ['users','assignments'].includes(section);
     const needAssignments = section === 'assignments';
     const needConfig = section === 'config';
@@ -3141,7 +3334,7 @@ async function renderAdmin() {
               <h2>Project Setup</h2>
               <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
             </div>
-            <span class="badge info">R11M-P1</span>
+            <span class="badge info">R11N-P0</span>
           </div>
 
           <div class="status-box neutral" style="margin-top:12px">
@@ -3222,7 +3415,7 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11M-P1:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11N-P0:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
             <div class="plan-review-box" style="margin-top:14px">
               <div class="section-head"><div><h3>Plan Review — BOQ vs KML/KMZ</h3><div class="small muted">AUTO REVIEW = analisis sistem. ADMIN REVIEW = mapping & pengecekan plan. PM REVIEW = keputusan Publish for Field Execution.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
               <div class="grid three" style="margin-top:10px">
@@ -3381,6 +3574,8 @@ async function renderAdmin() {
         </div>
       </section>
 
+      ${renderProactiveImportPanelPEMS_(masterOptions)}
+
       <section class="admin-section hidden" data-admin-panel="users">
         <div class="card">
           <div class="section-head"><h2>User & Role</h2><span class="badge info">${users.length} user</span></div>
@@ -3443,6 +3638,12 @@ async function renderAdmin() {
       renderNavigation();
       fillAdminProjectForm(btn.dataset.editProject);
     }));
+    document.getElementById('parseProactivePayloadBtn')?.addEventListener('click', parseProactivePayloadTextareaPEMS_);
+    document.getElementById('clearProactivePayloadBtn')?.addEventListener('click', clearProactiveBridgePayloadPEMS_);
+    document.getElementById('copyProactiveBookmarkletBtn')?.addEventListener('click', copyProactiveBookmarkletPEMS_);
+    document.getElementById('importProactiveBtn')?.addEventListener('click', importProactivePayloadPEMS_);
+    const proactiveBookmark = document.getElementById('proactiveBridgeBookmark');
+    if (proactiveBookmark) proactiveBookmark.setAttribute('href', proactiveBookmarkletPEMS_());
     document.getElementById('saveMasterDataBtn')?.addEventListener('click', saveAdminMasterData);
     document.getElementById('resetMasterDataBtn')?.addEventListener('click', resetAdminMasterForm);
     el.content.querySelectorAll('[data-edit-master]').forEach(btn => btn.addEventListener('click', () => fillAdminMasterForm(btn.dataset.editMaster)));
@@ -3468,7 +3669,7 @@ async function renderAdmin() {
 }
 
 function showAdminSection(section) {
-  const valid = ['project-setup','project-list','master-data','users','config','assignments'];
+  const valid = ['project-setup','project-list','proactive-import','master-data','users','config','assignments'];
   section = valid.includes(section) ? section : 'project-setup';
   state.adminSection = section;
   el.content?.querySelectorAll('[data-admin-panel]').forEach(panel => {
@@ -3477,6 +3678,7 @@ function showAdminSection(section) {
   const labels = {
     'project-setup': 'Project Setup',
     'project-list': 'Daftar Project',
+    'proactive-import': 'Proactive Import',
     'master-data': 'Master Data',
     'users': 'Daftar User',
     'config': 'App Config Operasional',
