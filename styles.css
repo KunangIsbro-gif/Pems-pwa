@@ -323,6 +323,11 @@ body.modal-open{overflow:hidden}
 
 /* R11L anchors/hash routing */
 .nav-btn,.admin-subnav-btn{text-decoration:none}
+
+.grid.five{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media(max-width:1200px){.grid.five{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.grid.five{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.grid.five{grid-template-columns:1fr}}
 .grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media(max-width:980px){.grid.four{grid-template-columns:1fr 1fr}}
 @media(max-width:640px){.grid.four{grid-template-columns:1fr}}

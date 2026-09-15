@@ -195,7 +195,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-6-0-r11l');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-6-1-r11m');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -2625,7 +2625,7 @@ function hydrateVerifierPhotoPreviews() {
 
   if (!images.length) return;
 
-  // R11L: preload beberapa legacy thumbnail yang tampil paling awal secara
+  // R11M: preload beberapa legacy thumbnail yang tampil paling awal secara
   // paralel. Ini menghindari card ke-2 tertahan oleh lazy observer / full Drive.
   const eagerCount = Math.min(4, images.length);
   images.slice(0, eagerCount).forEach(img => {
@@ -3138,7 +3138,7 @@ async function renderAdmin() {
               <h2>Project Setup</h2>
               <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
             </div>
-            <span class="badge info">R11L</span>
+            <span class="badge info">R11M</span>
           </div>
 
           <div class="status-box neutral" style="margin-top:12px">
@@ -3219,7 +3219,7 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11L:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11M:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
             <div class="plan-review-box" style="margin-top:14px">
               <div class="section-head"><div><h3>Plan Review — BOQ vs KML/KMZ</h3><div class="small muted">AUTO REVIEW = analisis sistem. ADMIN REVIEW = mapping & pengecekan plan. PM REVIEW = keputusan Publish for Field Execution.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
               <div class="grid three" style="margin-top:10px">
@@ -3235,15 +3235,41 @@ async function renderAdmin() {
                 <button id="viewPlanReviewBtn" class="btn ghost" type="button">Lihat Temuan</button>
               </div>
               <div id="boqMappingPanel" class="hidden status-box neutral" style="margin-top:10px">
-                <b>Mapping Kolom BOQ</b><div class="tiny muted">Mapping disimpan per Stakeholder + Project Type dan dapat dipakai lagi pada project berikutnya.</div>
+                <b>Profile & Mapping BOQ</b><div class="tiny muted">Satu stakeholder dapat punya beberapa format BOQ. Simpan profile per Stakeholder + Project Type, lalu reuse untuk file berikutnya.</div>
+                <div class="grid three" style="margin-top:10px">
+                  <div class="field"><label>Nama Profile</label><input id="boqProfileName" class="input" list="boqProfileList" placeholder="Contoh: TIF HEM / MITRATEL WO / MYREP"><datalist id="boqProfileList"></datalist></div>
+                  <div class="field"><label>Sheet Excel</label><select id="boqMapSheet" class="select"></select></div>
+                  <div class="field"><label>Header Row</label><input id="boqMapHeaderRow" class="input" type="number" min="1" placeholder="Auto"></div>
+                </div>
                 <div class="grid four" style="margin-top:10px">
                   <div class="field"><label>Designator</label><select id="boqMapDesignator" class="select"></select></div>
                   <div class="field"><label>Description/Uraian</label><select id="boqMapDescription" class="select"></select></div>
                   <div class="field"><label>QTY/Volume</label><select id="boqMapQty" class="select"></select></div>
                   <div class="field"><label>Unit/Satuan</label><select id="boqMapUnit" class="select"></select></div>
                 </div>
-                <button id="saveBoqMappingBtn" class="btn secondary" type="button" style="margin-top:10px">Simpan Mapping & Analisis Ulang</button>
+                <div class="grid two" style="margin-top:10px">
+                  <div class="field"><label>Harga Satuan (opsional)</label><select id="boqMapUnitPrice" class="select"></select></div>
+                  <div class="field"><label>&nbsp;</label><div class="tiny muted">Jika stakeholder tidak punya harga satuan, biarkan kosong.</div></div>
+                </div>
+                <div class="row-actions" style="margin-top:10px">
+                  <button id="saveBoqMappingBtn" class="btn secondary" type="button">Simpan Profile & Analisis Ulang</button>
+                  <button id="loadBoqItemsBtn" class="btn ghost" type="button">Preview / Koreksi BOQ</button>
+                </div>
                 <div id="boqMappingHint" class="tiny muted" style="margin-top:8px"></div>
+                <div id="boqItemsPanel" class="hidden" style="margin-top:12px">
+                  <div class="section-head"><div><b>BOQ Normalized</b><div class="tiny muted">Hasil Excel dinormalisasi ke Designator · Uraian · Qty · Unit · Harga. Bisa dikoreksi/tambah manual tanpa mengubah file sumber.</div></div><span id="boqItemsCount" class="badge info">0 item</span></div>
+                  <div class="grid five" style="margin-top:10px">
+                    <div class="field"><label>Designator</label><input id="boqItemDesignator" class="input"></div>
+                    <div class="field"><label>Uraian</label><input id="boqItemDescription" class="input"></div>
+                    <div class="field"><label>Qty</label><input id="boqItemQty" class="input" inputmode="decimal"></div>
+                    <div class="field"><label>Unit</label><input id="boqItemUnit" class="input"></div>
+                    <div class="field"><label>Harga Satuan</label><input id="boqItemUnitPrice" class="input" inputmode="decimal"></div>
+                  </div>
+                  <input id="boqItemManualId" type="hidden"><input id="boqItemSourceRowNo" type="hidden">
+                  <div class="row-actions" style="margin-top:8px"><button id="saveBoqItemBtn" class="btn secondary" type="button">Simpan Item Manual/Koreksi</button><button id="resetBoqItemBtn" class="btn ghost" type="button">Item Baru</button></div>
+                  <div id="boqItemsHint" class="tiny muted" style="margin-top:8px"></div>
+                  <div id="boqItemsTable" class="table-wrap" style="margin-top:10px"></div>
+                </div>
               </div>
               <div id="planReviewFindings" class="hidden" style="margin-top:10px"></div>
             </div>
@@ -3396,6 +3422,9 @@ async function renderAdmin() {
     document.getElementById('runPlanReviewBtn')?.addEventListener('click', runAdminPlanReviewPEMS_);
     document.getElementById('loadBoqMappingBtn')?.addEventListener('click', loadAdminBoqMappingPEMS_);
     document.getElementById('saveBoqMappingBtn')?.addEventListener('click', saveAdminBoqMappingPEMS_);
+    document.getElementById('loadBoqItemsBtn')?.addEventListener('click', loadAdminBoqItemsPEMS_);
+    document.getElementById('saveBoqItemBtn')?.addEventListener('click', saveAdminBoqItemPEMS_);
+    document.getElementById('resetBoqItemBtn')?.addEventListener('click', resetAdminBoqItemFormPEMS_);
     document.getElementById('completeAdminReviewBtn')?.addEventListener('click', completeAdminPlanReviewPEMS_);
     document.getElementById('viewPlanReviewBtn')?.addEventListener('click', viewAdminPlanReviewPEMS_);
     el.content.querySelectorAll('[data-publish-project]').forEach(btn => btn.addEventListener('click', () => publishAdminProjectPEMS_(btn.dataset.publishProject, btn)));
@@ -3513,9 +3542,35 @@ async function runAdminPlanReviewPEMS_() {
   try{setButtonLoadingPEMS_(btn,true,'Menganalisis BOQ + KML/KMZ...'); const data=await api(`/admin/projects/${encodeURIComponent(pid)}/plan-review`,{method:'POST',body:{}}); const p=(state.adminProjects||[]).find(x=>x.projectId===pid)||{}; const updated={...p,planReviewStatus:data.status,planReviewAt:new Date().toISOString(),planAdminReviewStatus:data.adminReviewStatus||'PENDING',planPmReviewStatus:data.pmReviewStatus||'PENDING',planWarningCount:Number(data.summary?.warnings||0),planBlockerCount:Number(data.summary?.blockers||0),planBoqItemCount:Number(data.summary?.boqItems||0),planBoqDesignatorCount:Number(data.summary?.boqDesignators||0),planKmlPointCount:Number(data.summary?.kmlPoints||0),planUnmappedCount:Number(data.summary?.unmapped||0),planInvalidCoordCount:Number(data.summary?.invalidCoordinates||0),planEvidenceRuleMissingCount:Number(data.summary?.evidenceRuleMissing||0)}; upsertAdminProjectLocalPEMS_(updated); updateAdminPlanReviewPanelPEMS_(updated); updateAdminPublishPanelPEMS_(updated); renderPlanReviewFindingsPEMS_(data); if(data.boqHeaders?.length && (!data.boqParseOk || data.status==='INCOMPLETE')) renderBoqMappingPanelPEMS_({headers:data.boqHeaders,mapping:data.boqMapping||{}}); toast(`Auto Review: ${data.status} · ${Number(data.summary?.warnings||0)} warning · ${Number(data.summary?.blockers||0)} blocker.`,data.status==='BLOCKED'?'danger':data.status==='READY_WITH_WARNINGS'||data.status==='INCOMPLETE'?'warning':'success',7000);}catch(err){toast(humanError(err),'danger',8000);}finally{setButtonLoadingPEMS_(btn,false);}
 }
 async function viewAdminPlanReviewPEMS_(){const pid=value('prjProjectId');if(!pid)return;try{const data=await api(`/admin/projects/${encodeURIComponent(pid)}/plan-review`);renderPlanReviewFindingsPEMS_(data);}catch(err){toast(humanError(err),'danger',6500);}}
-function renderBoqMappingPanelPEMS_(data){const panel=document.getElementById('boqMappingPanel');if(!panel)return;panel.classList.remove('hidden');const headers=(data?.headers||[]).filter(Boolean),mapping=data?.mapping||{};const build=(selected)=>`<option value="">-- tidak dipakai --</option>${headers.map(h=>`<option value="${escapeAttr(h)}" ${String(h)===String(selected||'')?'selected':''}>${escapeHtml(h)}</option>`).join('')}`; const pairs=[['boqMapDesignator',mapping.designatorHeader],['boqMapDescription',mapping.descriptionHeader],['boqMapQty',mapping.qtyHeader],['boqMapUnit',mapping.unitHeader]];pairs.forEach(([id,val])=>{const x=document.getElementById(id);if(x)x.innerHTML=build(val);});const hint=document.getElementById('boqMappingHint');if(hint)hint.textContent=data?.previewError?`Preview BOQ: ${data.previewError}`:`Header terdeteksi: ${headers.join(' | ') || 'belum ditemukan'}`;}
+function renderBoqMappingPanelPEMS_(data){
+  const panel=document.getElementById('boqMappingPanel');if(!panel)return;panel.classList.remove('hidden');
+  const headers=(data?.headers||[]).filter(Boolean),mapping=data?.mapping||{},profiles=data?.profiles||[],sheets=data?.sheetNames||[];
+  const build=(selected)=>`<option value="">-- tidak dipakai --</option>${headers.map(h=>`<option value="${escapeAttr(h)}" ${String(h)===String(selected||'')?'selected':''}>${escapeHtml(h)}</option>`).join('')}`;
+  [['boqMapDesignator',mapping.designatorHeader],['boqMapDescription',mapping.descriptionHeader],['boqMapQty',mapping.qtyHeader],['boqMapUnit',mapping.unitHeader],['boqMapUnitPrice',mapping.unitPriceHeader]].forEach(([id,val])=>{const x=document.getElementById(id);if(x)x.innerHTML=build(val);});
+  const profile=document.getElementById('boqProfileName');if(profile)profile.value=data?.selectedProfileName||mapping.profileName||'DEFAULT';
+  const dl=document.getElementById('boqProfileList');if(dl)dl.innerHTML=profiles.map(p=>`<option value="${escapeAttr(p.profileName||'DEFAULT')}">${escapeHtml((p.sheetName||'')+(p.headerRow?' · row '+p.headerRow:''))}</option>`).join('');
+  const sh=document.getElementById('boqMapSheet');if(sh)sh.innerHTML=`<option value="">-- auto detect --</option>${sheets.map(n=>`<option value="${escapeAttr(n)}" ${String(n)===String(mapping.sheetName||data?.sheetName||'')?'selected':''}>${escapeHtml(n)}</option>`).join('')}`;
+  const hr=document.getElementById('boqMapHeaderRow');if(hr)hr.value=Number(mapping.headerRow||data?.headerRow||0)||'';
+  const hint=document.getElementById('boqMappingHint');if(hint)hint.textContent=data?.previewError?`Preview BOQ: ${data.previewError}`:`Sheet: ${data?.sheetName||mapping.sheetName||'auto'} · Header row: ${data?.headerRow||mapping.headerRow||'auto'} · Kolom: ${headers.join(' | ') || 'belum ditemukan'}`;
+}
 async function loadAdminBoqMappingPEMS_(){const pid=value('prjProjectId');if(!pid){toast('Pilih Project terlebih dahulu.','warning');return;}try{const data=await api(`/admin/projects/${encodeURIComponent(pid)}/boq-mapping`);renderBoqMappingPanelPEMS_(data);}catch(err){toast(humanError(err),'danger',7000);}}
-async function saveAdminBoqMappingPEMS_(){const pid=value('prjProjectId'),btn=document.getElementById('saveBoqMappingBtn');if(!pid)return;try{setButtonLoadingPEMS_(btn,true,'Menyimpan Mapping...');await api(`/admin/projects/${encodeURIComponent(pid)}/boq-mapping`,{method:'POST',body:{designatorHeader:value('boqMapDesignator'),descriptionHeader:value('boqMapDescription'),qtyHeader:value('boqMapQty'),unitHeader:value('boqMapUnit')}});toast('Mapping BOQ tersimpan. Menjalankan Auto Review ulang...','success',3500);await runAdminPlanReviewPEMS_();}catch(err){toast(humanError(err),'danger',7000);}finally{setButtonLoadingPEMS_(btn,false);}}
+async function saveAdminBoqMappingPEMS_(){
+  const pid=value('prjProjectId'),btn=document.getElementById('saveBoqMappingBtn');if(!pid)return;
+  try{setButtonLoadingPEMS_(btn,true,'Menyimpan Profile...');await api(`/admin/projects/${encodeURIComponent(pid)}/boq-mapping`,{method:'POST',body:{profileName:value('boqProfileName')||'DEFAULT',sheetName:value('boqMapSheet'),headerRow:Number(value('boqMapHeaderRow')||0),designatorHeader:value('boqMapDesignator'),descriptionHeader:value('boqMapDescription'),qtyHeader:value('boqMapQty'),unitHeader:value('boqMapUnit'),unitPriceHeader:value('boqMapUnitPrice')}});toast('Profile BOQ tersimpan. Menjalankan Auto Review ulang...','success',3500);await runAdminPlanReviewPEMS_();}catch(err){toast(humanError(err),'danger',7000);}finally{setButtonLoadingPEMS_(btn,false);}
+}
+function resetAdminBoqItemFormPEMS_(){['boqItemDesignator','boqItemDescription','boqItemQty','boqItemUnit','boqItemUnitPrice','boqItemManualId','boqItemSourceRowNo'].forEach(id=>{const x=document.getElementById(id);if(x)x.value='';});}
+function renderAdminBoqItemsPEMS_(data){
+  const panel=document.getElementById('boqItemsPanel'),table=document.getElementById('boqItemsTable'),count=document.getElementById('boqItemsCount'),hint=document.getElementById('boqItemsHint');if(!panel||!table)return;panel.classList.remove('hidden');state.adminBoqItems=data?.items||[];
+  if(count)count.textContent=`${Number(data?.totalItems||state.adminBoqItems.length)} item`;
+  if(hint)hint.textContent=data?.parseError?`Parser file: ${data.parseError} · Manual item tetap bisa dipakai.`:`Profile: ${data?.profileName||'DEFAULT'} · Manual/override: ${Number(data?.manualCount||0)}. Menampilkan maksimal 1000 item.`;
+  table.innerHTML=state.adminBoqItems.length?`<table><thead><tr><th>Row</th><th>Designator</th><th>Uraian</th><th>Qty</th><th>Unit</th><th>Harga</th><th>Sumber</th><th>Aksi</th></tr></thead><tbody>${state.adminBoqItems.map((x,i)=>`<tr><td>${escapeHtml(String(x.rowNo||'-'))}</td><td><b>${escapeHtml(x.designator||'')}</b></td><td>${escapeHtml(x.description||'')}</td><td>${escapeHtml(String(x.qtyPlan??''))}</td><td>${escapeHtml(x.unit||'')}</td><td>${escapeHtml(String(x.unitPrice??''))}</td><td><span class="badge neutral">${escapeHtml(x.sourceType||'IMPORT')}</span></td><td><button class="btn ghost btn-sm" type="button" data-boq-edit="${i}">Edit</button> <button class="btn ghost btn-sm" type="button" data-boq-delete="${i}">Hapus</button></td></tr>`).join('')}</tbody></table>`:'<div class="status-box warning">Belum ada item BOQ terbaca. Admin dapat input manual.</div>';
+  table.querySelectorAll('[data-boq-edit]').forEach(b=>b.addEventListener('click',()=>editAdminBoqItemPEMS_(Number(b.dataset.boqEdit))));
+  table.querySelectorAll('[data-boq-delete]').forEach(b=>b.addEventListener('click',()=>deleteAdminBoqItemPEMS_(Number(b.dataset.boqDelete))));
+}
+function editAdminBoqItemPEMS_(i){const x=(state.adminBoqItems||[])[i];if(!x)return;document.getElementById('boqItemDesignator').value=x.designator||'';document.getElementById('boqItemDescription').value=x.description||'';document.getElementById('boqItemQty').value=x.qtyPlan??'';document.getElementById('boqItemUnit').value=x.unit||'';document.getElementById('boqItemUnitPrice').value=x.unitPrice??'';document.getElementById('boqItemManualId').value=x.manualId||'';document.getElementById('boqItemSourceRowNo').value=x.rowNo||0;document.getElementById('boqItemDesignator').focus();}
+async function loadAdminBoqItemsPEMS_(){const pid=value('prjProjectId'),btn=document.getElementById('loadBoqItemsBtn');if(!pid)return;try{setButtonLoadingPEMS_(btn,true,'Memuat BOQ...');const data=await api(`/admin/projects/${encodeURIComponent(pid)}/boq-items`);renderAdminBoqItemsPEMS_(data);}catch(err){toast(humanError(err),'danger',7000);}finally{setButtonLoadingPEMS_(btn,false);}}
+async function saveAdminBoqItemPEMS_(){const pid=value('prjProjectId'),btn=document.getElementById('saveBoqItemBtn');if(!pid)return;const body={manualId:value('boqItemManualId'),sourceRowNo:Number(value('boqItemSourceRowNo')||0),designator:value('boqItemDesignator'),description:value('boqItemDescription'),qtyPlan:value('boqItemQty'),unit:value('boqItemUnit'),unitPrice:value('boqItemUnitPrice'),action:'UPSERT'};if(!body.designator&&!body.description){toast('Isi Designator atau Uraian.','warning');return;}try{setButtonLoadingPEMS_(btn,true,'Menyimpan Item...');await api(`/admin/projects/${encodeURIComponent(pid)}/boq-items`,{method:'POST',body});resetAdminBoqItemFormPEMS_();await loadAdminBoqItemsPEMS_();toast('BOQ manual/koreksi tersimpan. Jalankan Auto Review untuk memakai perubahan.','success',5000);}catch(err){toast(humanError(err),'danger',7000);}finally{setButtonLoadingPEMS_(btn,false);}}
+async function deleteAdminBoqItemPEMS_(i){const x=(state.adminBoqItems||[])[i],pid=value('prjProjectId');if(!x||!pid)return;if(!confirm(`Hapus/nonaktifkan item ${x.designator||x.description||''} dari BOQ normalized?`))return;try{await api(`/admin/projects/${encodeURIComponent(pid)}/boq-items`,{method:'POST',body:{manualId:x.manualId||'',sourceRowNo:Number(x.rowNo||0),designator:x.designator||'',description:x.description||'',qtyPlan:x.qtyPlan??'',unit:x.unit||'',unitPrice:x.unitPrice??'',action:'DELETE'}});await loadAdminBoqItemsPEMS_();toast('Item BOQ dinonaktifkan dari BOQ normalized.','success',3500);}catch(err){toast(humanError(err),'danger',7000);}}
 async function completeAdminPlanReviewPEMS_(){const pid=value('prjProjectId'),btn=document.getElementById('completeAdminReviewBtn');if(!pid)return;const note=window.prompt('Catatan Admin Review (opsional):','')||'';try{setButtonLoadingPEMS_(btn,true,'Menyimpan Review...');await api(`/admin/projects/${encodeURIComponent(pid)}/admin-review-complete`,{method:'POST',body:{note}});const p=(state.adminProjects||[]).find(x=>x.projectId===pid)||{};const updated={...p,planAdminReviewStatus:'COMPLETE',planAdminReviewAt:new Date().toISOString(),planAdminReviewBy:state.user?.email||''};upsertAdminProjectLocalPEMS_(updated);updateAdminPlanReviewPanelPEMS_(updated);updateAdminPublishPanelPEMS_(updated);toast('Admin Review = COMPLETE. Menunggu keputusan PM/LEADER.','success',5000);}catch(err){toast(humanError(err),'danger',7000);}finally{setButtonLoadingPEMS_(btn,false);}}
 
 function setButtonLoadingPEMS_(btn, loading, label) {
