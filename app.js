@@ -61,6 +61,9 @@ const state = {
   adminMasterData: [],
   adminCanPublish: false,
   adminPlanUploading: false,
+  adminBoqItems: [],
+  adminBoqFilter: 'HAS_QTY',
+  adminBoqSearch: '',
   adminCache: {},
   adminCacheAt: {},
   adminStaleNotice: ''
@@ -3138,7 +3141,7 @@ async function renderAdmin() {
               <h2>Project Setup</h2>
               <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
             </div>
-            <span class="badge info">R11M</span>
+            <span class="badge info">R11M-P1</span>
           </div>
 
           <div class="status-box neutral" style="margin-top:12px">
@@ -3219,7 +3222,7 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11M:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11M-P1:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
             <div class="plan-review-box" style="margin-top:14px">
               <div class="section-head"><div><h3>Plan Review — BOQ vs KML/KMZ</h3><div class="small muted">AUTO REVIEW = analisis sistem. ADMIN REVIEW = mapping & pengecekan plan. PM REVIEW = keputusan Publish for Field Execution.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
               <div class="grid three" style="margin-top:10px">
@@ -3258,6 +3261,10 @@ async function renderAdmin() {
                 <div id="boqMappingHint" class="tiny muted" style="margin-top:8px"></div>
                 <div id="boqItemsPanel" class="hidden" style="margin-top:12px">
                   <div class="section-head"><div><b>BOQ Normalized</b><div class="tiny muted">Hasil Excel dinormalisasi ke Designator · Uraian · Qty · Unit · Harga. Bisa dikoreksi/tambah manual tanpa mengubah file sumber.</div></div><span id="boqItemsCount" class="badge info">0 item</span></div>
+                  <div class="grid two" style="margin-top:10px">
+                    <div class="field"><label>Tampilkan</label><select id="boqItemsFilter" class="select"><option value="HAS_QTY">Ada Qty/Volume</option><option value="ALL">Semua Item</option><option value="POSITIVE">Qty &gt; 0</option><option value="EMPTY_ZERO">Qty kosong / 0</option><option value="MANUAL">Manual / Koreksi</option></select></div>
+                    <div class="field"><label>Cari Designator / Uraian</label><input id="boqItemsSearch" class="input" placeholder="Contoh: AC-OF-SM-24D"></div>
+                  </div>
                   <div class="grid five" style="margin-top:10px">
                     <div class="field"><label>Designator</label><input id="boqItemDesignator" class="input"></div>
                     <div class="field"><label>Uraian</label><input id="boqItemDescription" class="input"></div>
@@ -3423,6 +3430,8 @@ async function renderAdmin() {
     document.getElementById('loadBoqMappingBtn')?.addEventListener('click', loadAdminBoqMappingPEMS_);
     document.getElementById('saveBoqMappingBtn')?.addEventListener('click', saveAdminBoqMappingPEMS_);
     document.getElementById('loadBoqItemsBtn')?.addEventListener('click', loadAdminBoqItemsPEMS_);
+    document.getElementById('boqItemsFilter')?.addEventListener('change', e => { state.adminBoqFilter = String(e.target.value || 'HAS_QTY'); renderAdminBoqItemsTablePEMS_(); });
+    document.getElementById('boqItemsSearch')?.addEventListener('input', e => { state.adminBoqSearch = String(e.target.value || ''); renderAdminBoqItemsTablePEMS_(); });
     document.getElementById('saveBoqItemBtn')?.addEventListener('click', saveAdminBoqItemPEMS_);
     document.getElementById('resetBoqItemBtn')?.addEventListener('click', resetAdminBoqItemFormPEMS_);
     document.getElementById('completeAdminReviewBtn')?.addEventListener('click', completeAdminPlanReviewPEMS_);
@@ -3559,13 +3568,64 @@ async function saveAdminBoqMappingPEMS_(){
   try{setButtonLoadingPEMS_(btn,true,'Menyimpan Profile...');await api(`/admin/projects/${encodeURIComponent(pid)}/boq-mapping`,{method:'POST',body:{profileName:value('boqProfileName')||'DEFAULT',sheetName:value('boqMapSheet'),headerRow:Number(value('boqMapHeaderRow')||0),designatorHeader:value('boqMapDesignator'),descriptionHeader:value('boqMapDescription'),qtyHeader:value('boqMapQty'),unitHeader:value('boqMapUnit'),unitPriceHeader:value('boqMapUnitPrice')}});toast('Profile BOQ tersimpan. Menjalankan Auto Review ulang...','success',3500);await runAdminPlanReviewPEMS_();}catch(err){toast(humanError(err),'danger',7000);}finally{setButtonLoadingPEMS_(btn,false);}
 }
 function resetAdminBoqItemFormPEMS_(){['boqItemDesignator','boqItemDescription','boqItemQty','boqItemUnit','boqItemUnitPrice','boqItemManualId','boqItemSourceRowNo'].forEach(id=>{const x=document.getElementById(id);if(x)x.value='';});}
-function renderAdminBoqItemsPEMS_(data){
-  const panel=document.getElementById('boqItemsPanel'),table=document.getElementById('boqItemsTable'),count=document.getElementById('boqItemsCount'),hint=document.getElementById('boqItemsHint');if(!panel||!table)return;panel.classList.remove('hidden');state.adminBoqItems=data?.items||[];
-  if(count)count.textContent=`${Number(data?.totalItems||state.adminBoqItems.length)} item`;
-  if(hint)hint.textContent=data?.parseError?`Parser file: ${data.parseError} · Manual item tetap bisa dipakai.`:`Profile: ${data?.profileName||'DEFAULT'} · Manual/override: ${Number(data?.manualCount||0)}. Menampilkan maksimal 1000 item.`;
-  table.innerHTML=state.adminBoqItems.length?`<table><thead><tr><th>Row</th><th>Designator</th><th>Uraian</th><th>Qty</th><th>Unit</th><th>Harga</th><th>Sumber</th><th>Aksi</th></tr></thead><tbody>${state.adminBoqItems.map((x,i)=>`<tr><td>${escapeHtml(String(x.rowNo||'-'))}</td><td><b>${escapeHtml(x.designator||'')}</b></td><td>${escapeHtml(x.description||'')}</td><td>${escapeHtml(String(x.qtyPlan??''))}</td><td>${escapeHtml(x.unit||'')}</td><td>${escapeHtml(String(x.unitPrice??''))}</td><td><span class="badge neutral">${escapeHtml(x.sourceType||'IMPORT')}</span></td><td><button class="btn ghost btn-sm" type="button" data-boq-edit="${i}">Edit</button> <button class="btn ghost btn-sm" type="button" data-boq-delete="${i}">Hapus</button></td></tr>`).join('')}</tbody></table>`:'<div class="status-box warning">Belum ada item BOQ terbaca. Admin dapat input manual.</div>';
+function boqQtyFilledPEMS_(v){
+  return v !== null && v !== undefined && String(v).trim() !== '';
+}
+function boqQtyNumberPEMS_(v){
+  if(!boqQtyFilledPEMS_(v)) return null;
+  if(typeof v === 'number') return Number.isFinite(v) ? v : null;
+  let x=String(v).trim().replace(/\s/g,'');
+  if(/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(x)) x=x.replace(/\./g,'').replace(',','.');
+  else if(/^-?\d+(,\d+)$/.test(x)) x=x.replace(',','.');
+  const n=Number(x);return Number.isFinite(n)?n:null;
+}
+function getFilteredAdminBoqItemsPEMS_(){
+  const filter=String(state.adminBoqFilter||'HAS_QTY').toUpperCase();
+  const q=String(state.adminBoqSearch||'').trim().toLowerCase();
+  return (state.adminBoqItems||[]).map((x,i)=>({x,i})).filter(({x})=>{
+    const filled=boqQtyFilledPEMS_(x.qtyPlan),num=boqQtyNumberPEMS_(x.qtyPlan);
+    let pass=true;
+    if(filter==='HAS_QTY') pass=filled;
+    else if(filter==='POSITIVE') pass=num!==null&&num>0;
+    else if(filter==='EMPTY_ZERO') pass=!filled||(num!==null&&num===0);
+    else if(filter==='MANUAL') pass=String(x.sourceType||'').toUpperCase()!=='IMPORT';
+    if(!pass)return false;
+    if(!q)return true;
+    return [x.designator,x.description,x.unit,x.rowNo].some(v=>String(v??'').toLowerCase().includes(q));
+  });
+}
+function renderAdminBoqItemsTablePEMS_(){
+  const table=document.getElementById('boqItemsTable'),count=document.getElementById('boqItemsCount'),hint=document.getElementById('boqItemsHint');
+  if(!table)return;
+  const total=Number(state.adminBoqTotalItems||state.adminBoqItems?.length||0),filtered=getFilteredAdminBoqItemsPEMS_(),visible=filtered.length;
+  if(count)count.textContent=`${visible} / ${total} item`;
+  const filter=String(state.adminBoqFilter||'HAS_QTY').toUpperCase();
+  if(hint){
+    const parse=state.adminBoqParseError?`Parser file: ${state.adminBoqParseError} · `:'';
+    hint.textContent=`${parse}Profile: ${state.adminBoqProfileName||'DEFAULT'} · Manual/override: ${Number(state.adminBoqManualCount||0)} · Menampilkan ${visible} dari ${total} item.`;
+  }
+  if(!visible){
+    const msg=filter==='HAS_QTY'&&total>0
+      ? `Tidak ada item dengan Qty/Volume pada hasil BOQ ini. Total ${total} item tetap tersimpan dan dapat dilihat lewat filter “Semua Item”.`
+      : `Tidak ada item yang cocok dengan filter/pencarian saat ini. Total BOQ: ${total} item.`;
+    table.innerHTML=`<div class="status-box ${total?'neutral':'warning'}">${escapeHtml(msg)}</div>`;
+    return;
+  }
+  table.innerHTML=`<table><thead><tr><th>Row</th><th>Designator</th><th>Uraian</th><th>Qty</th><th>Unit</th><th>Harga</th><th>Sumber</th><th>Aksi</th></tr></thead><tbody>${filtered.map(({x,i})=>`<tr><td>${escapeHtml(String(x.rowNo||'-'))}</td><td><b>${escapeHtml(x.designator||'')}</b></td><td>${escapeHtml(x.description||'')}</td><td>${escapeHtml(String(x.qtyPlan??''))}</td><td>${escapeHtml(x.unit||'')}</td><td>${escapeHtml(String(x.unitPrice??''))}</td><td><span class="badge neutral">${escapeHtml(x.sourceType||'IMPORT')}</span></td><td><button class="btn ghost btn-sm" type="button" data-boq-edit="${i}">Edit</button> <button class="btn ghost btn-sm" type="button" data-boq-delete="${i}">Hapus</button></td></tr>`).join('')}</tbody></table>`;
   table.querySelectorAll('[data-boq-edit]').forEach(b=>b.addEventListener('click',()=>editAdminBoqItemPEMS_(Number(b.dataset.boqEdit))));
   table.querySelectorAll('[data-boq-delete]').forEach(b=>b.addEventListener('click',()=>deleteAdminBoqItemPEMS_(Number(b.dataset.boqDelete))));
+}
+function renderAdminBoqItemsPEMS_(data){
+  const panel=document.getElementById('boqItemsPanel');if(!panel)return;panel.classList.remove('hidden');
+  state.adminBoqItems=data?.items||[];
+  state.adminBoqTotalItems=Number(data?.totalItems||state.adminBoqItems.length);
+  state.adminBoqParseError=String(data?.parseError||'');
+  state.adminBoqProfileName=String(data?.profileName||'DEFAULT');
+  state.adminBoqManualCount=Number(data?.manualCount||0);
+  const filter=document.getElementById('boqItemsFilter'),search=document.getElementById('boqItemsSearch');
+  if(filter)filter.value=state.adminBoqFilter||'HAS_QTY';
+  if(search)search.value=state.adminBoqSearch||'';
+  renderAdminBoqItemsTablePEMS_();
 }
 function editAdminBoqItemPEMS_(i){const x=(state.adminBoqItems||[])[i];if(!x)return;document.getElementById('boqItemDesignator').value=x.designator||'';document.getElementById('boqItemDescription').value=x.description||'';document.getElementById('boqItemQty').value=x.qtyPlan??'';document.getElementById('boqItemUnit').value=x.unit||'';document.getElementById('boqItemUnitPrice').value=x.unitPrice??'';document.getElementById('boqItemManualId').value=x.manualId||'';document.getElementById('boqItemSourceRowNo').value=x.rowNo||0;document.getElementById('boqItemDesignator').focus();}
 async function loadAdminBoqItemsPEMS_(){const pid=value('prjProjectId'),btn=document.getElementById('loadBoqItemsBtn');if(!pid)return;try{setButtonLoadingPEMS_(btn,true,'Memuat BOQ...');const data=await api(`/admin/projects/${encodeURIComponent(pid)}/boq-items`);renderAdminBoqItemsPEMS_(data);}catch(err){toast(humanError(err),'danger',7000);}finally{setButtonLoadingPEMS_(btn,false);}}

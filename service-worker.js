@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-6-1-boq-hybrid-r11m';
+const CACHE_NAME = 'pems-v15-6-1-boq-hybrid-r11m-p1-qty-filter';
 const STATIC_ASSETS = [
   './',
   './index.html',
