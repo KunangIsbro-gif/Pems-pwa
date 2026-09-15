@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-7-3-proactive-direct-boq-r11n-p3';
+const CACHE_NAME = 'pems-v15-7-4-kml-family-resolver-r11n-p4';
 const STATIC_ASSETS = [
   './',
   './index.html',
