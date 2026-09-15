@@ -1,5 +1,5 @@
 window.PEMS_CONFIG = {
-  APP_VERSION: 'V15.7.2-PROACTIVE-BRIDGE-R11N-P2',
+  APP_VERSION: 'V15.7.2-PROACTIVE-BRIDGE-R11N-P2-HF1',
   GOOGLE_CLIENT_ID: '1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com',
   API_BASE: 'https://pems-gateway.siikunang.workers.dev/api/v15'
 };

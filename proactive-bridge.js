@@ -1,7 +1,7 @@
 (async () => {
   'use strict';
 
-  const BRIDGE_VERSION = 'R11N-P2';
+  const BRIDGE_VERSION = 'R11N-P2-HF1';
   if (!/^(?:https?:\/\/)?apps\.telkomakses\.co\.id$/i.test(location.host) && location.hostname !== 'apps.telkomakses.co.id') {
     alert('PEMS Proactive Bridge hanya dijalankan pada apps.telkomakses.co.id/proactive.');
     return;
