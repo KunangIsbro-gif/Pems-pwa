@@ -5396,6 +5396,7 @@ function formatNumber(v) { const n=Number(v); return Number.isFinite(n)?(Math.ro
 function formatCoord(v) { const n=Number(v); return Number.isFinite(n)?n.toFixed(6):'-'; }
 function formatBytes(bytes) { const n=Number(bytes)||0; if(n<1024)return `${n} B`; if(n<1024*1024)return `${(n/1024).toFixed(1)} KB`; return `${(n/1024/1024).toFixed(2)} MB`; }
 function formatDate(v) { if(!v)return '-'; const d=new Date(v); return isNaN(d)?escapeHtml(String(v)):d.toLocaleString('id-ID'); }
+function formatDateTime(v) { return formatDate(v); }
 function value(id) { return document.getElementById(id)?.value || ''; }
 function safeJson(v) { try{return JSON.parse(v)}catch{return null} }
 function uid() { return `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
