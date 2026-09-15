@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-7-0-proactive-bridge-r11n-p0-hf1';
+const CACHE_NAME = 'pems-v15-7-1-proactive-bridge-r11n-p1';
 const STATIC_ASSETS = [
   './',
   './index.html',

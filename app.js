@@ -3183,7 +3183,7 @@ function renderProactiveImportPanelPEMS_(masterOptions) {
         <div class="card">
           <div class="section-head">
             <div><h2>Proactive → PEMS Import</h2><div class="small muted">Browser Bridge membaca project + BOQ dari sesi Proactive yang sudah login. Password, cookie, session, dan CSRF Proactive tidak dikirim ke PEMS.</div></div>
-            <span class="badge info">R11N-P0</span>
+            <span class="badge info">R11N-P1</span>
           </div>
           <div class="status-box neutral" style="margin-top:12px">
             <b>Pasang sekali:</b> seret tombol <b>PEMS ← Proactive</b> ke Bookmark Bar Chrome. Setelah itu buka Detail Project → Step 2 BoQ di Proactive, lalu klik bookmark tersebut.
@@ -3195,9 +3195,9 @@ function renderProactiveImportPanelPEMS_(masterOptions) {
           ${payload ? `
             <div class="status-box success" style="margin-top:12px"><b>Payload diterima.</b> ${escapeHtml(String(boq.length))} item BOQ · Qty total ${escapeHtml(String(totalQty))} · capture ${escapeHtml(formatDateTime(payload.capturedAt || new Date().toISOString()))}</div>
             <div class="grid three" style="margin-top:12px">
-              <div class="field"><label>Project ID Proactive *</label><input id="proactiveProjectId" class="input" value="${escapeAttr(p.proactiveProjectId||p.projectId||'')}"></div>
-              <div class="field"><label>Project ID SAP</label><input id="proactiveProjectIdSap" class="input" value="${escapeAttr(p.projectIdSap||'')}"></div>
-              <div class="field"><label>Nimon ID / WO</label><input id="proactiveNimonId" class="input" value="${escapeAttr(p.nimonId||'')}"></div>
+              <div class="field"><label>PID / Project ID Proactive (master) *</label><input id="proactiveProjectId" class="input" value="${escapeAttr(p.proactiveProjectId||p.projectId||'')}"></div>
+              <div class="field"><label>Project ID PEMS (SAP 26KT...) *</label><input id="proactiveProjectIdSap" class="input" value="${escapeAttr(p.projectIdSap||'')}"></div>
+              <div class="field"><label>Nimon ID</label><input id="proactiveNimonId" class="input" value="${escapeAttr(p.nimonId||'')}"></div>
             </div>
             <div class="field" style="margin-top:10px"><label>Nama Project *</label><input id="proactiveProjectName" class="input" value="${escapeAttr(p.projectName||'')}"></div>
             <div class="grid three" style="margin-top:10px">
@@ -3252,7 +3252,7 @@ async function importProactivePayloadPEMS_() {
     witelBranch: value('proactivePemsWitel'),
     area: value('proactivePemsArea')
   };
-  if (!source.proactiveProjectId || !source.projectName) { toast('Project ID Proactive dan Nama Project wajib ada.', 'warning'); return; }
+  if (!source.projectIdSap || !source.proactiveProjectId || !source.projectName) { toast('Project ID SAP 26KT..., PID/Project ID Proactive, dan Nama Project wajib ada.', 'warning'); return; }
   if (!pems.stakeholder) { toast('Pilih Stakeholder PEMS dulu.', 'warning'); return; }
   if (!boq.length) { toast('BOQ Proactive belum terbaca.', 'warning'); return; }
   try {
@@ -3261,10 +3261,10 @@ async function importProactivePayloadPEMS_() {
     if (data?.project) upsertAdminProjectLocalPEMS_(data.project);
     state.adminCache = {};
     state.adminCacheAt = {};
-    toast(`${source.proactiveProjectId} berhasil diimport · BOQ V${data.boqVersion} · ${data.boqItems} item.`, 'success', 7500);
+    toast(`${source.projectIdSap} berhasil diimport · source ${source.proactiveProjectId} · BOQ V${data.boqVersion} · ${data.boqItems} item.`, 'success', 7500);
     state.adminSection = 'project-setup';
     await renderAdmin();
-    fillAdminProjectForm(source.proactiveProjectId);
+    fillAdminProjectForm(source.projectIdSap);
   } catch (err) {
     toast(humanError(err), 'danger', 8500);
   } finally {
@@ -3334,7 +3334,7 @@ async function renderAdmin() {
               <h2>Project Setup</h2>
               <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
             </div>
-            <span class="badge info">R11N-P0</span>
+            <span class="badge info">R11N-P1</span>
           </div>
 
           <div class="status-box neutral" style="margin-top:12px">
@@ -3415,7 +3415,7 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11N-P0:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11N-P1:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
             <div class="plan-review-box" style="margin-top:14px">
               <div class="section-head"><div><h3>Plan Review — BOQ vs KML/KMZ</h3><div class="small muted">AUTO REVIEW = analisis sistem. ADMIN REVIEW = mapping & pengecekan plan. PM REVIEW = keputusan Publish for Field Execution.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
               <div class="grid three" style="margin-top:10px">
