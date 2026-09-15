@@ -3183,7 +3183,7 @@ function renderProactiveImportPanelPEMS_(masterOptions) {
         <div class="card">
           <div class="section-head">
             <div><h2>Proactive → PEMS Import</h2><div class="small muted">Browser Bridge membaca project + BOQ dari sesi Proactive yang sudah login. Password, cookie, session, dan CSRF Proactive tidak dikirim ke PEMS.</div></div>
-            <span class="badge info">R11N-P1</span>
+            <span class="badge info">R11N-P2</span>
           </div>
           <div class="status-box neutral" style="margin-top:12px">
             <b>Pasang sekali:</b> seret tombol <b>PEMS ← Proactive</b> ke Bookmark Bar Chrome. Setelah itu buka Detail Project → Step 2 BoQ di Proactive, lalu klik bookmark tersebut.
@@ -3334,7 +3334,7 @@ async function renderAdmin() {
               <h2>Project Setup</h2>
               <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
             </div>
-            <span class="badge info">R11N-P1</span>
+            <span class="badge info">R11N-P2</span>
           </div>
 
           <div class="status-box neutral" style="margin-top:12px">
@@ -3415,7 +3415,7 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11N-P1:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11N-P2:</b> file sumber + versioning aktif. Auto Review dibaca sistem, Admin menyiapkan/mapping, PM/LEADER memberi keputusan Publish.</div>
             <div class="plan-review-box" style="margin-top:14px">
               <div class="section-head"><div><h3>Plan Review — BOQ vs KML/KMZ</h3><div class="small muted">AUTO REVIEW = analisis sistem. ADMIN REVIEW = mapping & pengecekan plan. PM REVIEW = keputusan Publish for Field Execution.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
               <div class="grid three" style="margin-top:10px">
