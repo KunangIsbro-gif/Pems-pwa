@@ -4237,7 +4237,7 @@ async function renderOutput() {
       <div class="section-head">
         <div>
           <h2>Output Generation Layer</h2>
-          <div class="small muted">Verified Evidence → KML Realisasi → KMZ Evidence. Word/PDF menjadi increment berikutnya.</div>
+          <div class="small muted">Verified Evidence → 3 output realisasi: KMZ + PHOTO, KML + PHOTO, dan KML NONPHOTO. Word/PDF menjadi increment berikutnya.</div>
         </div>
         <span class="badge ${mode==='FINAL'?'success':'warning'}">${mode}</span>
       </div>
@@ -4258,14 +4258,15 @@ async function renderOutput() {
       <div class="grid two" style="margin-top:14px">
         <div class="card compact">
           <h3>KML / KMZ Realisasi</h3>
-          <div class="small muted">KML berisi titik realisasi VERIFIED + metadata audit. KMZ menambahkan thumbnail evidence ringan bila tersedia.</div>
-          <button id="generateKmlKmzBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate KML + KMZ</button>
+          <div class="small muted">Generate sekaligus 3 file: KMZ + PHOTO, KML + PHOTO, dan KML NONPHOTO. Struktur folder/icon mengikuti pola final Apps Script lama; popup tetap membawa metadata audit.</div>
+          <button id="generateKmlKmzBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate 3 Output KML/KMZ</button>
         </div>
         <div class="card compact">
           <h3>Roadmap Output</h3>
           <div class="list">
-            ${statusRow('KML Realisasi', caps.kmlRealization || 'READY', 'success')}
-            ${statusRow('KMZ Evidence', caps.kmzEvidence || 'READY', 'success')}
+            ${statusRow('KMZ + PHOTO', caps.kmzEvidence || 'READY', 'success')}
+            ${statusRow('KML + PHOTO', caps.kmlRealization || 'READY', 'success')}
+            ${statusRow('KML NONPHOTO', caps.kmlRealization || 'READY', 'success')}
             ${statusRow('Word Evidence Report', caps.wordEvidence || caps.word || 'NEXT_INCREMENT', 'warning')}
             ${statusRow('PDF Evidence Report', caps.pdfEvidence || caps.pdf || 'NEXT_INCREMENT', 'warning')}
           </div>
@@ -4277,7 +4278,7 @@ async function renderOutput() {
         <div id="outputFilesList" class="small muted" style="margin-top:10px">Belum dibaca.</div>
       </div>
 
-      <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> output ini tidak membaca KML Plan sebagai sumber realisasi. Sumber output adalah latest <b>VERIFIED evidence</b> per evidence root. Foto asli tetap di Drive; KMZ memakai thumbnail ringan dan link ke file evidence asli.</div>
+      <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> sumber output adalah latest <b>VERIFIED evidence</b> per evidence root. KML Plan tidak dipakai sebagai sumber realisasi. R12B menghasilkan 3 file sekaligus; KMZ/KML PHOTO memakai preview foto evidence dari Drive, KML NONPHOTO tetap ringan.</div>
     </div>`;
 
   document.getElementById('outputProjectSelect')?.addEventListener('change', async (event) => {
@@ -4324,14 +4325,14 @@ function renderOutputProjectStatusPEMS_(data) {
   const finalMode = hasPermission('output.final');
   const canGenerate = finalMode ? !!data.canGenerateFinal : !!data.canGeneratePreview;
   btn.disabled = !canGenerate || eligible <= 0 || state.outputGenerating;
-  btn.textContent = finalMode ? 'Generate FINAL KML + KMZ' : 'Generate PREVIEW KML + KMZ';
+  btn.textContent = finalMode ? 'Generate FINAL · 3 Output' : 'Generate PREVIEW · 3 Output';
 
   box.className = `status-box ${eligible>0?'success':verified>0?'warning':'neutral'}`;
   box.innerHTML = `<b>${escapeHtml(data.projectId || '')}</b> · ${escapeHtml(data.projectName || '')}<br><span class="tiny">VERIFIED Evidence ${verified} · Eligible Coordinate ${eligible} · Invalid/Skipped ${invalid}</span>`;
 
   const files = data.files || [];
   if (!files.length) {
-    list.innerHTML = 'Belum ada file KML/KMZ yang di-generate untuk project ini.';
+    list.innerHTML = 'Belum ada output KML/KMZ untuk project ini.';
     return;
   }
   list.innerHTML = `<div class="list">${files.map(f => `
@@ -4378,18 +4379,18 @@ async function generateOutputKmlKmzPEMS_() {
     toast('Belum ada VERIFIED evidence dengan koordinat valid.', 'warning', 6000);
     return;
   }
-  if (!window.confirm(`Generate ${mode} KML + KMZ dari ${Number(status.eligiblePointCount||0)} VERIFIED evidence point?`)) return;
+  if (!window.confirm(`Generate ${mode} 3 output (KMZ + PHOTO, KML + PHOTO, KML NONPHOTO) dari ${Number(status.eligiblePointCount||0)} VERIFIED evidence point?`)) return;
 
   state.outputGenerating = true;
   try {
-    setButtonLoadingPEMS_(btn, true, 'Generating KML + KMZ...');
+    setButtonLoadingPEMS_(btn, true, 'Generating 3 output...');
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/kml-kmz`, {
       method:'POST',
-      body:{ mode, note:'Output Center R12A' },
+      body:{ mode, note:'Output Center R12B Triple Output' },
       timeoutMs:120000,
       maxAttempts:1
     });
-    toast(`KML + KMZ ${data.mode || mode} selesai · ${Number(data.generatedPointCount||0)} point · ${Number(data.embeddedThumbnailCount||0)} thumbnail.`, 'success', 8000);
+    toast(`3 output ${data.mode || mode} selesai · ${Number(data.generatedPointCount||0)} point · ${Number(data.embeddedPhotoCount||0)} photo preview.`, 'success', 8000);
     await loadOutputProjectStatusPEMS_(projectId, true);
   } catch (err) {
     toast(humanError(err), 'danger', 9000);

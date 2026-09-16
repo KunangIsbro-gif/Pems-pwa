@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-8-0-output-kml-kmz-r12a';
+const CACHE_NAME = 'pems-v15-8-1-output-triple-kml-r12b';
 const STATIC_ASSETS = [
   './',
   './index.html',
