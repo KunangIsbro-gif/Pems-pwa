@@ -4289,7 +4289,7 @@ async function renderOutput() {
           <h3>Word / PDF Evidence Report</h3>
           <div class="small muted">Template MITRATEL A4 · visual LOCK R13E · 3×2 evidence · checkpoint per halaman · persistent worker · DOCX + PDF per material + PDF FINAL tanpa render ulang foto.</div>
           <button id="generateWordPdfBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate Word + PDF</button>
-          <div id="reportJobStatus" class="status-box neutral" style="margin-top:12px">Belum ada R13F Performance Job.</div>
+          <div id="reportJobStatus" class="status-box neutral" style="margin-top:12px">Belum ada R13F-HF1 HQ Job.</div>
           <div id="reportJobActions" class="toolbar compact" style="margin-top:8px;display:none">
             <button id="resumeReportJobBtn" class="btn secondary" type="button" style="display:none">Resume Job</button>
             <button id="cancelReportJobBtn" class="btn outline" type="button" style="display:none">Batalkan Job</button>
@@ -4473,7 +4473,7 @@ async function generateWordPdfPEMS_() {
     setButtonLoadingPEMS_(btn, true, 'Membuat Background Job...');
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
       method:'POST',
-      body:{ mode, jobAction:'START', note:'Output Center R13F Performance Background Job' },
+      body:{ mode, jobAction:'START', note:'Output Center R13F-HF1 HQ Background Job' },
       timeoutMs:90000,
       maxAttempts:1
     });
@@ -4502,10 +4502,12 @@ function startReportJobPollPEMS_() {
   stopReportJobPollPEMS_();
   const job = state.outputReportJob || {};
   if (!['QUEUED','PROCESSING','CANCEL_REQUESTED'].includes(String(job.status || '').toUpperCase())) return;
+  // R13F-HF1: polling diperlambat agar browser/gateway tidak sibuk terus.
+  // Worker backend tetap jalan setiap menit; polling hanya untuk tampilan status.
   state.outputReportPollTimer = setTimeout(async () => {
     state.outputReportPollTimer = null;
     await loadReportJobStatusPEMS_(state.outputSelectedProjectId, true);
-  }, 5000);
+  }, 10000);
 }
 
 function reportJobPhaseTextPEMS_(phase) {
@@ -4620,7 +4622,7 @@ async function resumeWordPdfJobPEMS_() {
   if (!projectId || !job.jobId) return;
   try {
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
-      method:'POST', body:{ jobAction:'RESUME', jobId:job.jobId, note:'Resume R13F Performance Background Job' }, timeoutMs:45000, maxAttempts:1
+      method:'POST', body:{ jobAction:'RESUME', jobId:job.jobId, note:'Resume R13F-HF1 HQ Background Job' }, timeoutMs:45000, maxAttempts:1
     });
     renderReportJobStatusPEMS_(data?.job || job);
     toast('Job masuk antrean kembali dan akan melanjutkan dari checkpoint terakhir.', 'success', 8000);
@@ -4635,7 +4637,7 @@ async function cancelWordPdfJobPEMS_() {
   if (!window.confirm(`Batalkan ${job.jobId}? Folder output parsial job ini akan dipindahkan ke Trash.`)) return;
   try {
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
-      method:'POST', body:{ jobAction:'CANCEL', jobId:job.jobId, note:'Cancel R13F Performance Background Job' }, timeoutMs:45000, maxAttempts:1
+      method:'POST', body:{ jobAction:'CANCEL', jobId:job.jobId, note:'Cancel R13F-HF1 HQ Background Job' }, timeoutMs:45000, maxAttempts:1
     });
     renderReportJobStatusPEMS_(data?.job || null);
     toast('Background Report Job dibatalkan.', 'warning', 7000);
