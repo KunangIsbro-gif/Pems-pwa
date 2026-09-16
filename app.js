@@ -4287,12 +4287,9 @@ async function renderOutput() {
         </div>
         <div class="card compact">
           <h3>Word / PDF Evidence Report</h3>
-          <div class="small muted">Template MITRATEL A4 · 3×2 evidence · photo contain/no crop · DOCX + PDF per material + PDF FINAL gabungan.</div>
-          <button id="generateWordPdfBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate LEGACY R13E · Word + PDF</button>
-          <div class="status-box warning" style="margin-top:10px"><b>R13E Legacy</b> · engine Google Docs tetap tersedia sebagai rollback, tetapi jangan dipakai untuk benchmark performa.</div>
-          <button id="fastReportTestBtn" class="btn secondary full" style="margin-top:10px" type="button" disabled>FAST TEST R14 · 1 Material / max 6 Evidence</button>
-          <div id="fastReportTestStatus" class="status-box neutral" style="margin-top:8px">R14-P0 belum dites. Test ini membuat PDF langsung tanpa Google Docs.</div>
-          <div id="reportJobStatus" class="status-box neutral" style="margin-top:12px">Belum ada Background Report Job.</div>
+          <div class="small muted">Template MITRATEL A4 · visual LOCK R13E · 3×2 evidence · checkpoint per halaman · persistent worker · DOCX + PDF per material + PDF FINAL tanpa render ulang foto.</div>
+          <button id="generateWordPdfBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate Word + PDF</button>
+          <div id="reportJobStatus" class="status-box neutral" style="margin-top:12px">Belum ada R13F Performance Job.</div>
           <div id="reportJobActions" class="toolbar compact" style="margin-top:8px;display:none">
             <button id="resumeReportJobBtn" class="btn secondary" type="button" style="display:none">Resume Job</button>
             <button id="cancelReportJobBtn" class="btn outline" type="button" style="display:none">Batalkan Job</button>
@@ -4331,7 +4328,6 @@ async function renderOutput() {
   document.getElementById('syncOutputDriveAccessBtn')?.addEventListener('click', syncOutputDriveAccessPEMS_);
   document.getElementById('generateKmlKmzBtn')?.addEventListener('click', generateOutputKmlKmzPEMS_);
   document.getElementById('generateWordPdfBtn')?.addEventListener('click', generateWordPdfPEMS_);
-  document.getElementById('fastReportTestBtn')?.addEventListener('click', generateFastReportTestPEMS_);
   document.getElementById('resumeReportJobBtn')?.addEventListener('click', resumeWordPdfJobPEMS_);
   document.getElementById('cancelReportJobBtn')?.addEventListener('click', cancelWordPdfJobPEMS_);
 
@@ -4355,7 +4351,6 @@ function renderOutputProjectStatusPEMS_(data) {
   const list = document.getElementById('outputFilesList');
   const btn = document.getElementById('generateKmlKmzBtn');
   const reportBtn = document.getElementById('generateWordPdfBtn');
-  const fastBtn = document.getElementById('fastReportTestBtn');
   if (!box || !list || !btn) return;
 
   if (!data) {
@@ -4363,7 +4358,6 @@ function renderOutputProjectStatusPEMS_(data) {
     box.innerHTML = 'Status output tidak tersedia.';
     btn.disabled = true;
     if (reportBtn) reportBtn.disabled = true;
-    if (fastBtn) fastBtn.disabled = true;
     list.innerHTML = '—';
     return;
   }
@@ -4377,11 +4371,7 @@ function renderOutputProjectStatusPEMS_(data) {
   btn.textContent = finalMode ? 'Generate FINAL · 3 Output' : 'Generate PREVIEW · 3 Output';
   if (reportBtn) {
     reportBtn.disabled = !canGenerate || verified <= 0 || state.outputReportGenerating;
-    reportBtn.textContent = finalMode ? 'Generate LEGACY R13E · Word + PDF' : 'Generate LEGACY R13E · Word + PDF';
-  }
-  if (fastBtn) {
-    fastBtn.disabled = verified <= 0 || !!state.outputFastTesting;
-    fastBtn.textContent = state.outputFastTesting ? 'FAST TEST sedang berjalan...' : 'FAST TEST R14 · 1 Material / max 6 Evidence';
+    reportBtn.textContent = finalMode ? 'Generate FINAL · Word + PDF' : 'Generate PREVIEW · Word + PDF';
   }
 
   box.className = `status-box ${eligible>0?'success':verified>0?'warning':'neutral'}`;
@@ -4460,57 +4450,6 @@ async function generateOutputKmlKmzPEMS_() {
 }
 
 
-async function generateFastReportTestPEMS_() {
-  const projectId = String(state.outputSelectedProjectId || '').trim();
-  const btn = document.getElementById('fastReportTestBtn');
-  const box = document.getElementById('fastReportTestStatus');
-  if (!projectId || !btn || state.outputFastTesting) return;
-  const verified = Number(state.outputProjectStatus?.verifiedEvidenceCount || 0);
-  if (verified <= 0) {
-    toast('Belum ada VERIFIED evidence untuk FAST TEST.', 'warning', 6000);
-    return;
-  }
-  if (!window.confirm('FAST TEST R14-P0 akan memilih material dengan VERIFIED evidence terbanyak dan membuat maksimal 6 evidence / 1 halaman PDF langsung.\n\nR13E tidak diubah. Lanjut test kecepatan?')) return;
-
-  state.outputFastTesting = true;
-  const started = performance.now();
-  try {
-    setButtonLoadingPEMS_(btn, true, 'FAST TEST R14...');
-    if (box) {
-      box.className = 'status-box warning';
-      box.innerHTML = '<b>R14-P0 running...</b><br><span class="tiny">Direct PDF · tanpa Google Docs · max 6 evidence.</span>';
-    }
-    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/fast-report-test`, {
-      method:'POST',
-      body:{ maxEvidence:6, benchmark:'ONE_PAGE' },
-      timeoutMs:90000,
-      maxAttempts:1
-    });
-    const browserSec = Math.round((performance.now() - started) / 100) / 10;
-    const backendSec = Number(data?.elapsedSeconds || 0);
-    const warn = Array.isArray(data?.warnings) ? data.warnings.length : 0;
-    if (box) {
-      box.className = 'status-box success';
-      box.innerHTML = `<b>FAST TEST PASS · ${escapeHtml(data.designator || '-')}</b><br>` +
-        `<span>${Number(data.evidenceCount||0)} evidence · ${Number(data.pageCount||0)} halaman · ${Number(data.photoCount||0)} foto</span><br>` +
-        `<span class="tiny">Backend ${backendSec}s · Browser ${browserSec}s · Warning ${warn}</span>` +
-        (data.fileUrl ? `<br><a href="${escapeAttr(data.fileUrl)}" target="_blank" rel="noopener">Buka PDF FAST R14</a>` : '');
-    }
-    toast(`FAST R14 selesai · ${Number(data.evidenceCount||0)} evidence · backend ${backendSec}s.`, 'success', 9000);
-    await loadOutputProjectStatusPEMS_(projectId, true);
-  } catch (err) {
-    if (box) {
-      box.className = 'status-box danger';
-      box.innerHTML = `<b>FAST TEST gagal</b><br>${escapeHtml(humanError(err))}`;
-    }
-    toast(humanError(err), 'danger', 12000);
-  } finally {
-    state.outputFastTesting = false;
-    setButtonLoadingPEMS_(btn, false);
-    if (state.outputProjectStatus) renderOutputProjectStatusPEMS_(state.outputProjectStatus);
-  }
-}
-
 async function generateWordPdfPEMS_() {
   const projectId = String(state.outputSelectedProjectId || '').trim();
   const btn = document.getElementById('generateWordPdfBtn');
@@ -4534,7 +4473,7 @@ async function generateWordPdfPEMS_() {
     setButtonLoadingPEMS_(btn, true, 'Membuat Background Job...');
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
       method:'POST',
-      body:{ mode, jobAction:'START', note:'Output Center R13E Background Report Job' },
+      body:{ mode, jobAction:'START', note:'Output Center R13F Performance Background Job' },
       timeoutMs:90000,
       maxAttempts:1
     });
@@ -4600,7 +4539,7 @@ function renderReportJobStatusPEMS_(job) {
     box.innerHTML = 'Belum ada Background Report Job untuk project ini.';
     if (actions) actions.style.display = 'none';
     generateBtn.disabled = !canGenerate || verified <= 0 || state.outputReportGenerating;
-    generateBtn.textContent = 'Generate LEGACY R13E · Word + PDF';
+    generateBtn.textContent = finalMode ? 'Generate FINAL · Word + PDF' : 'Generate PREVIEW · Word + PDF';
     return;
   }
 
@@ -4626,7 +4565,7 @@ function renderReportJobStatusPEMS_(job) {
   state.outputReportGenerating = false;
   stopReportJobPollPEMS_();
   generateBtn.disabled = !canGenerate || verified <= 0;
-  generateBtn.textContent = 'Generate LEGACY R13E · Word + PDF';
+  generateBtn.textContent = finalMode ? 'Generate FINAL · Word + PDF' : 'Generate PREVIEW · Word + PDF';
 
   if (status === 'COMPLETED') {
     const finalUrl = job.result?.finalPdfUrl || '';
@@ -4681,7 +4620,7 @@ async function resumeWordPdfJobPEMS_() {
   if (!projectId || !job.jobId) return;
   try {
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
-      method:'POST', body:{ jobAction:'RESUME', jobId:job.jobId, note:'Resume R13E Background Report Job' }, timeoutMs:45000, maxAttempts:1
+      method:'POST', body:{ jobAction:'RESUME', jobId:job.jobId, note:'Resume R13F Performance Background Job' }, timeoutMs:45000, maxAttempts:1
     });
     renderReportJobStatusPEMS_(data?.job || job);
     toast('Job masuk antrean kembali dan akan melanjutkan dari checkpoint terakhir.', 'success', 8000);
@@ -4696,7 +4635,7 @@ async function cancelWordPdfJobPEMS_() {
   if (!window.confirm(`Batalkan ${job.jobId}? Folder output parsial job ini akan dipindahkan ke Trash.`)) return;
   try {
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
-      method:'POST', body:{ jobAction:'CANCEL', jobId:job.jobId, note:'Cancel R13E Background Report Job' }, timeoutMs:45000, maxAttempts:1
+      method:'POST', body:{ jobAction:'CANCEL', jobId:job.jobId, note:'Cancel R13F Performance Background Job' }, timeoutMs:45000, maxAttempts:1
     });
     renderReportJobStatusPEMS_(data?.job || null);
     toast('Background Report Job dibatalkan.', 'warning', 7000);
