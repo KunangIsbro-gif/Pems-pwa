@@ -4258,7 +4258,7 @@ async function renderOutput() {
       <div class="section-head">
         <div>
           <h2>Output Generation Layer</h2>
-          <div class="small muted">Verified Material Evidence → 3 output realisasi: KMZ + PHOTO, KML + PHOTO, dan KML NONPHOTO. Satu Point Session dapat menghasilkan beberapa placemark material.</div>
+          <div class="small muted">Verified Material Evidence → KML/KMZ Realisasi + Word/PDF Evidence Report. Satu Point Session dapat menghasilkan beberapa material/output item.</div>
         </div>
         <span class="badge ${mode==='FINAL'?'success':'warning'}">${mode}</span>
       </div>
@@ -4283,13 +4283,13 @@ async function renderOutput() {
           <button id="generateKmlKmzBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate 3 Output KML/KMZ</button>
         </div>
         <div class="card compact">
-          <h3>Roadmap Output</h3>
-          <div class="list">
-            ${statusRow('KMZ + PHOTO', caps.kmzEvidence || 'READY', 'success')}
-            ${statusRow('KML + PHOTO', caps.kmlRealization || 'READY', 'success')}
-            ${statusRow('KML NONPHOTO', caps.kmlRealization || 'READY', 'success')}
-            ${statusRow('Word Evidence Report', caps.wordEvidence || caps.word || 'NEXT_INCREMENT', 'warning')}
-            ${statusRow('PDF Evidence Report', caps.pdfEvidence || caps.pdf || 'NEXT_INCREMENT', 'warning')}
+          <h3>Word / PDF Evidence Report</h3>
+          <div class="small muted">Template MITRATEL A4 · 3×2 evidence · photo contain/no crop · DOCX + PDF per material + PDF FINAL gabungan.</div>
+          <button id="generateWordPdfBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate Word + PDF</button>
+          <div class="list" style="margin-top:12px">
+            ${statusRow('Word Evidence Report', caps.wordEvidence || caps.word || 'READY', 'success')}
+            ${statusRow('PDF Evidence Report', caps.pdfEvidence || caps.pdf || 'READY', 'success')}
+            ${statusRow('PDF FINAL Gabungan', caps.pdfEvidence || caps.pdf || 'READY', 'success')}
           </div>
         </div>
       </div>
@@ -4305,7 +4305,7 @@ async function renderOutput() {
         <div id="outputFilesList" class="small muted" style="margin-top:10px">Belum dibaca.</div>
       </div>
 
-      <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> satu Point Session boleh punya beberapa material. Generator membaca latest <b>VERIFIED Material Evidence</b>; setiap material menjadi placemark di folder kategorinya. KML/KMZ PHOTO membawa foto tertanam, KML NONPHOTO tanpa foto. Akses file Drive disinkronkan untuk user output PEMS dan tidak dibuat public.</div>
+      <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> satu Point Session boleh punya beberapa material. Generator membaca latest <b>VERIFIED Material Evidence</b>; setiap material menjadi placemark di folder kategorinya. KML/KMZ PHOTO membawa foto tertanam, KML NONPHOTO tanpa foto. Akses semua file KML/KMZ/Word/PDF disinkronkan untuk user output PEMS dan tidak dibuat public.</div>
     </div>`;
 
   document.getElementById('outputProjectSelect')?.addEventListener('change', async (event) => {
@@ -4317,6 +4317,7 @@ async function renderOutput() {
   });
   document.getElementById('syncOutputDriveAccessBtn')?.addEventListener('click', syncOutputDriveAccessPEMS_);
   document.getElementById('generateKmlKmzBtn')?.addEventListener('click', generateOutputKmlKmzPEMS_);
+  document.getElementById('generateWordPdfBtn')?.addEventListener('click', generateWordPdfPEMS_);
 
   if (!selected) {
     document.getElementById('outputProjectSummary').innerHTML = 'Belum ada project yang dapat dipilih.';
@@ -4337,12 +4338,14 @@ function renderOutputProjectStatusPEMS_(data) {
   const box = document.getElementById('outputProjectSummary');
   const list = document.getElementById('outputFilesList');
   const btn = document.getElementById('generateKmlKmzBtn');
+  const reportBtn = document.getElementById('generateWordPdfBtn');
   if (!box || !list || !btn) return;
 
   if (!data) {
     box.className = 'status-box danger';
     box.innerHTML = 'Status output tidak tersedia.';
     btn.disabled = true;
+    if (reportBtn) reportBtn.disabled = true;
     list.innerHTML = '—';
     return;
   }
@@ -4354,13 +4357,17 @@ function renderOutputProjectStatusPEMS_(data) {
   const canGenerate = finalMode ? !!data.canGenerateFinal : !!data.canGeneratePreview;
   btn.disabled = !canGenerate || eligible <= 0 || state.outputGenerating;
   btn.textContent = finalMode ? 'Generate FINAL · 3 Output' : 'Generate PREVIEW · 3 Output';
+  if (reportBtn) {
+    reportBtn.disabled = !canGenerate || verified <= 0 || state.outputReportGenerating;
+    reportBtn.textContent = finalMode ? 'Generate FINAL · Word + PDF' : 'Generate PREVIEW · Word + PDF';
+  }
 
   box.className = `status-box ${eligible>0?'success':verified>0?'warning':'neutral'}`;
   box.innerHTML = `<b>${escapeHtml(data.projectId || '')}</b> · ${escapeHtml(data.projectName || '')}<br><span class="tiny">VERIFIED Material Evidence ${verified} · Placemark Eligible ${eligible} · Invalid/Skipped ${invalid}</span>`;
 
   const files = data.files || [];
   if (!files.length) {
-    list.innerHTML = 'Belum ada output KML/KMZ untuk project ini.';
+    list.innerHTML = 'Belum ada output KML/KMZ/Word/PDF untuk project ini.';
     return;
   }
   list.innerHTML = `<div class="list">${files.map(f => `
@@ -4414,7 +4421,7 @@ async function generateOutputKmlKmzPEMS_() {
     setButtonLoadingPEMS_(btn, true, 'Generating 3 output...');
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/kml-kmz`, {
       method:'POST',
-      body:{ mode, note:'Output Center R12C Material Evidence Triple Output' },
+      body:{ mode, note:'Output Center R13C Material Evidence Triple Output' },
       timeoutMs:120000,
       maxAttempts:1
     });
@@ -4424,6 +4431,41 @@ async function generateOutputKmlKmzPEMS_() {
     toast(humanError(err), 'danger', 9000);
   } finally {
     state.outputGenerating = false;
+    setButtonLoadingPEMS_(btn, false);
+    if (state.outputProjectStatus) renderOutputProjectStatusPEMS_(state.outputProjectStatus);
+  }
+}
+
+
+async function generateWordPdfPEMS_() {
+  const projectId = String(state.outputSelectedProjectId || '').trim();
+  const btn = document.getElementById('generateWordPdfBtn');
+  if (!projectId || !btn || state.outputReportGenerating) return;
+  const finalMode = hasPermission('output.final');
+  const mode = finalMode ? 'FINAL' : 'PREVIEW';
+  const status = state.outputProjectStatus || {};
+  if (Number(status.verifiedEvidenceCount || 0) <= 0) {
+    toast('Belum ada VERIFIED Material Evidence untuk dibuat report.', 'warning', 6000);
+    return;
+  }
+  if (!window.confirm(`Generate ${mode} Word/PDF Evidence Report dari ${Number(status.verifiedEvidenceCount||0)} VERIFIED material evidence?`)) return;
+
+  state.outputReportGenerating = true;
+  try {
+    setButtonLoadingPEMS_(btn, true, 'Generating Word/PDF...');
+    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
+      method:'POST',
+      body:{ mode, note:'Output Center R13C Word/PDF Evidence Report' },
+      timeoutMs:300000,
+      maxAttempts:1
+    });
+    const warningCount = Array.isArray(data.warnings) ? data.warnings.length : 0;
+    toast(`Word/PDF ${data.mode || mode} selesai · ${Number(data.materialOutputs||0)} material · ${Number(data.verifiedEvidenceCount||0)} evidence${warningCount?` · ${warningCount} warning`:''}.`, warningCount?'warning':'success', 10000);
+    await loadOutputProjectStatusPEMS_(projectId, true);
+  } catch (err) {
+    toast(humanError(err), 'danger', 12000);
+  } finally {
+    state.outputReportGenerating = false;
     setButtonLoadingPEMS_(btn, false);
     if (state.outputProjectStatus) renderOutputProjectStatusPEMS_(state.outputProjectStatus);
   }
