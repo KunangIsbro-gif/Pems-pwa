@@ -4421,7 +4421,7 @@ async function generateOutputKmlKmzPEMS_() {
     setButtonLoadingPEMS_(btn, true, 'Generating 3 output...');
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/kml-kmz`, {
       method:'POST',
-      body:{ mode, note:'Output Center R13C Material Evidence Triple Output' },
+      body:{ mode, note:'Output Center R13D Material Evidence Triple Output' },
       timeoutMs:120000,
       maxAttempts:1
     });
@@ -4448,21 +4448,82 @@ async function generateWordPdfPEMS_() {
     toast('Belum ada VERIFIED Material Evidence untuk dibuat report.', 'warning', 6000);
     return;
   }
-  if (!window.confirm(`Generate ${mode} Word/PDF Evidence Report dari ${Number(status.verifiedEvidenceCount||0)} VERIFIED material evidence?`)) return;
+  if (!window.confirm(`Generate ${mode} Word/PDF Evidence Report dari ${Number(status.verifiedEvidenceCount||0)} VERIFIED material evidence?\n\nPEMS akan memproses material satu per satu agar tidak terkena gateway timeout.`)) return;
 
   state.outputReportGenerating = true;
+  let jobId = '';
   try {
-    setButtonLoadingPEMS_(btn, true, 'Generating Word/PDF...');
-    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
+    setButtonLoadingPEMS_(btn, true, 'Menyiapkan batch report...');
+    const endpoint = `/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`;
+
+    const startData = await api(endpoint, {
       method:'POST',
-      body:{ mode, note:'Output Center R13C Word/PDF Evidence Report' },
-      timeoutMs:300000,
+      body:{ mode, batchAction:'START', note:'Output Center R13D Word/PDF Batch Report' },
+      timeoutMs:90000,
       maxAttempts:1
     });
-    const warningCount = Array.isArray(data.warnings) ? data.warnings.length : 0;
+
+    jobId = String(startData.jobId || '').trim();
+    const total = Number(startData.totalMaterials || 0);
+    if (!jobId || total <= 0) throw new Error('Batch report gagal dimulai: job/material kosong.');
+
+    const localWarnings = [];
+
+    for (let i = 0; i < total; i++) {
+      setButtonLoadingPEMS_(btn, true, `Material ${i + 1}/${total} · membuat Word/PDF...`);
+      const step = await api(endpoint, {
+        method:'POST',
+        body:{ mode, batchAction:'MATERIAL', jobId, note:'R13D material batch step' },
+        timeoutMs:105000,
+        maxAttempts:1
+      });
+      if (step.warning) localWarnings.push(step.warning);
+    }
+
+    setButtonLoadingPEMS_(btn, true, 'Menyiapkan PDF FINAL...');
+    await api(endpoint, {
+      method:'POST',
+      body:{ mode, batchAction:'COMBINE_START', jobId, note:'R13D final PDF combine start' },
+      timeoutMs:90000,
+      maxAttempts:1
+    });
+
+    for (let i = 0; i < total; i++) {
+      setButtonLoadingPEMS_(btn, true, `PDF FINAL ${i + 1}/${total} · menyusun material...`);
+      await api(endpoint, {
+        method:'POST',
+        body:{ mode, batchAction:'COMBINE', jobId, note:'R13D final PDF combine step' },
+        timeoutMs:105000,
+        maxAttempts:1
+      });
+    }
+
+    setButtonLoadingPEMS_(btn, true, 'Finalizing PDF + akses Drive...');
+    const data = await api(endpoint, {
+      method:'POST',
+      body:{ mode, batchAction:'FINALIZE', jobId, note:'Output Center R13D Word/PDF Batch Report' },
+      timeoutMs:105000,
+      maxAttempts:1
+    });
+
+    jobId = '';
+    const warningCount = Math.max(
+      localWarnings.length,
+      Array.isArray(data.warnings) ? data.warnings.length : 0
+    );
     toast(`Word/PDF ${data.mode || mode} selesai · ${Number(data.materialOutputs||0)} material · ${Number(data.verifiedEvidenceCount||0)} evidence${warningCount?` · ${warningCount} warning`:''}.`, warningCount?'warning':'success', 10000);
     await loadOutputProjectStatusPEMS_(projectId, true);
   } catch (err) {
+    if (jobId) {
+      try {
+        await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
+          method:'POST',
+          body:{ mode, batchAction:'ABORT', jobId, note:'Auto cleanup R13D partial batch after failure' },
+          timeoutMs:30000,
+          maxAttempts:1
+        });
+      } catch (_) {}
+    }
     toast(humanError(err), 'danger', 12000);
   } finally {
     state.outputReportGenerating = false;
