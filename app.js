@@ -613,7 +613,7 @@ async function renderHome() {
     <div class="grid two" style="margin-top:16px">
       <div class="card">
         <div class="section-head"><h2>Mulai / Lanjut Pekerjaan</h2><span class="badge ${navigator.onLine ? 'success' : 'warning'}">${navigator.onLine ? 'ONLINE' : 'OFFLINE'}</span></div>
-        <p class="muted">Tidak ada lagi tombol Ambil Project/Material/Point satu-satu. Pilih project, lalu PEMS menyiapkan workspace otomatis.</p>
+        <p class="muted">Alur lapangan: pilih Project → pilih Titik → pilih Material/Aset yang akan difoto → Ambil Foto + GPS.</p>
         <div class="field"><label>Project</label><input id="homeProjectSearch" class="input" placeholder="Cari PID / detail pekerjaan..." style="margin-bottom:8px">${projectSelectHtml(projects, state.selectedProjectId, 'homeProjectSelect')}</div>
         <button id="continueWorkBtn" class="btn primary full" style="margin-top:12px" ${projects.length ? '' : 'disabled'}>Lanjut Pekerjaan</button>
       </div>
@@ -759,12 +759,12 @@ async function renderWork() {
     </div>
     <div class="split-layout">
       <div class="card">
-        <div class="section-head"><h2>Pilih Titik</h2><span class="tiny muted">otomatis dari workspace</span></div>
+        <div class="section-head"><h2>1. Pilih Titik</h2><span class="tiny muted">dari KML Plan / workspace</span></div>
         <input id="sessionSearch" class="input" placeholder="Cari PS-000001 / label / role...">
         <div id="sessionList" class="list" style="margin-top:12px"></div>
       </div>
       <div id="workRight" class="card sticky-card">
-        <div class="empty">Pilih satu titik. Requirement material akan dimuat otomatis.</div>
+        <div class="empty"><b>Langkah berikutnya:</b><br>Pilih satu titik. Setelah itu pilih <b>Material / Aset yang akan difoto</b>.</div>
       </div>
     </div>
   `;
@@ -1084,10 +1084,21 @@ function renderRequirementsPanel() {
   if (!right || !state.requirements || !state.selectedSession) return;
   const reqs = state.requirements.requirements || [];
   right.innerHTML = `
-    <div class="section-head"><div><h2>${escapeHtml(state.selectedSession.anchorLabel || state.selectedSession.sessionId)}</h2><div class="small muted">${escapeHtml(state.selectedSession.sessionId)} • ${escapeHtml(state.selectedSession.anchorRole || '-')}</div></div><span class="badge info">${reqs.length} material valid</span></div>
+    <div class="selected-point-summary">
+      <span class="tiny">TITIK TERPILIH</span>
+      <b>${escapeHtml(state.selectedSession.anchorLabel || state.selectedSession.sessionId)}</b>
+      <small>${escapeHtml(state.selectedSession.sessionId)} • ${escapeHtml(state.selectedSession.anchorRole || '-')}</small>
+    </div>
+    <div class="section-head material-step-head">
+      <div>
+        <h2>2. Pilih Material / Aset yang akan difoto</h2>
+        <div class="small muted">Satu titik dapat memiliki beberapa material. Pilih satu material, ambil evidence, lalu lanjut material berikutnya.</div>
+      </div>
+      <span class="badge info">${reqs.length} pilihan</span>
+    </div>
     ${state.requirements.warnings?.length ? `<div class="warning-strip">${escapeHtml(state.requirements.warnings.map(w => w.message || w.code).join(' • '))}</div>` : ''}
     ${selectedRequirementStatusBannerHtml()}
-    <div id="requirementList" class="list"></div>
+    <div id="requirementList" class="list material-choice-list"></div>
     <div id="capturePanel" style="margin-top:16px"></div>
   `;
 
@@ -1206,20 +1217,30 @@ function renderRequirementsPanel() {
       }
     }
 
+    const isSelected =
+      state.selectedRequirement?.projectMaterialId ===
+      r.projectMaterialId;
+
     return `
-      <div class="list-item clickable material-card ${state.selectedRequirement?.projectMaterialId === r.projectMaterialId ? 'selected' : ''}" data-pm="${escapeAttr(r.projectMaterialId)}">
-        <div>
+      <div class="list-item clickable material-card ${isSelected ? 'selected' : ''}" data-pm="${escapeAttr(r.projectMaterialId)}">
+        <div class="material-choice-main">
           <div class="item-title">${escapeHtml(r.designator || r.materialName || r.projectMaterialId)}</div>
           <div class="item-sub">
-            ${escapeHtml(r.materialName || '')}<br>
+            ${escapeHtml(r.materialName || '')}
+            ${r.category ? ` • ${escapeHtml(r.category)}` : ''}<br>
             ${escapeHtml(r.requirementCode || 'MATERIAL')} •
             ${r.required ? 'WAJIB' : 'OPSIONAL'} •
             Evidence ${serverCount}/${target}${escapeHtml(label)}
           </div>
         </div>
-        <span class="badge ${badgeClass}">${escapeHtml(badgeText)}</span>
+        <div class="material-choice-side">
+          <span class="badge ${badgeClass}">${escapeHtml(badgeText)}</span>
+          <span class="material-select-cta ${isSelected ? 'selected' : ''}">
+            ${isSelected ? '✓ TERPILIH' : 'PILIH MATERIAL'}
+          </span>
+        </div>
       </div>`;
-  }).join('') : '<div class="empty">Tidak ada material valid pada titik ini.</div>';
+  }).join('') : '<div class="empty">Tidak ada Material / Aset yang dapat dipilih pada titik ini. Cek requirement/mapping point.</div>';
   list.querySelectorAll('[data-pm]').forEach(node => node.addEventListener('click', () => selectRequirement(node.dataset.pm)));
   if (state.selectedRequirement) renderCapturePanel();
 }
@@ -1558,7 +1579,7 @@ async function renderCapturePanel() {
       </div>
     ` : ''}
 
-    <h3>Realisasi Evidence</h3>
+    <h3>3. Ambil Evidence untuk Material Terpilih</h3>
     <div class="grid two">
       <div class="field"><label>Quantity Realisasi</label><input id="qtyRealInput" class="input" type="number" step="any" value="${escapeAttr(draft?.qtyReal ?? '')}" placeholder="Opsional" ${locked ? 'disabled' : ''}></div>
       <div class="field"><label>Target Foto</label><input class="input" disabled value="${target} foto"></div>
@@ -4237,7 +4258,7 @@ async function renderOutput() {
       <div class="section-head">
         <div>
           <h2>Output Generation Layer</h2>
-          <div class="small muted">Verified Evidence → 3 output realisasi: KMZ + PHOTO, KML + PHOTO, dan KML NONPHOTO. Word/PDF menjadi increment berikutnya.</div>
+          <div class="small muted">Verified Material Evidence → 3 output realisasi: KMZ + PHOTO, KML + PHOTO, dan KML NONPHOTO. Satu Point Session dapat menghasilkan beberapa placemark material.</div>
         </div>
         <span class="badge ${mode==='FINAL'?'success':'warning'}">${mode}</span>
       </div>
@@ -4258,7 +4279,7 @@ async function renderOutput() {
       <div class="grid two" style="margin-top:14px">
         <div class="card compact">
           <h3>KML / KMZ Realisasi</h3>
-          <div class="small muted">Generate sekaligus 3 file: KMZ + PHOTO, KML + PHOTO, dan KML NONPHOTO. Struktur folder/icon mengikuti pola final Apps Script lama; popup tetap membawa metadata audit.</div>
+          <div class="small muted">Generate 3 file dari VERIFIED Material Evidence. Grouping mengikuti material: Tiang, ODP, ODC, Closure, Slack, Aksesoris/Helical/Corong, Riser, Splicing, dst.</div>
           <button id="generateKmlKmzBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate 3 Output KML/KMZ</button>
         </div>
         <div class="card compact">
@@ -4274,11 +4295,17 @@ async function renderOutput() {
       </div>
 
       <div class="card" style="margin-top:14px">
-        <div class="section-head"><h3>Generated Files</h3><button id="refreshOutputBtn" class="btn secondary" type="button">Refresh</button></div>
+        <div class="section-head">
+          <h3>Generated Files</h3>
+          <div class="toolbar compact">
+            <button id="syncOutputDriveAccessBtn" class="btn outline" type="button">Perbaiki Akses Drive</button>
+            <button id="refreshOutputBtn" class="btn secondary" type="button">Refresh</button>
+          </div>
+        </div>
         <div id="outputFilesList" class="small muted" style="margin-top:10px">Belum dibaca.</div>
       </div>
 
-      <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> sumber output adalah latest <b>VERIFIED evidence</b> per evidence root. KML Plan tidak dipakai sebagai sumber realisasi. R12B menghasilkan 3 file sekaligus; KMZ/KML PHOTO memakai preview foto evidence dari Drive, KML NONPHOTO tetap ringan.</div>
+      <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> satu Point Session boleh punya beberapa material. Generator membaca latest <b>VERIFIED Material Evidence</b>; setiap material menjadi placemark di folder kategorinya. KML/KMZ PHOTO membawa foto tertanam, KML NONPHOTO tanpa foto. Akses file Drive disinkronkan untuk user output PEMS dan tidak dibuat public.</div>
     </div>`;
 
   document.getElementById('outputProjectSelect')?.addEventListener('change', async (event) => {
@@ -4288,6 +4315,7 @@ async function renderOutput() {
   document.getElementById('refreshOutputBtn')?.addEventListener('click', async () => {
     await loadOutputProjectStatusPEMS_(state.outputSelectedProjectId, true);
   });
+  document.getElementById('syncOutputDriveAccessBtn')?.addEventListener('click', syncOutputDriveAccessPEMS_);
   document.getElementById('generateKmlKmzBtn')?.addEventListener('click', generateOutputKmlKmzPEMS_);
 
   if (!selected) {
@@ -4328,7 +4356,7 @@ function renderOutputProjectStatusPEMS_(data) {
   btn.textContent = finalMode ? 'Generate FINAL · 3 Output' : 'Generate PREVIEW · 3 Output';
 
   box.className = `status-box ${eligible>0?'success':verified>0?'warning':'neutral'}`;
-  box.innerHTML = `<b>${escapeHtml(data.projectId || '')}</b> · ${escapeHtml(data.projectName || '')}<br><span class="tiny">VERIFIED Evidence ${verified} · Eligible Coordinate ${eligible} · Invalid/Skipped ${invalid}</span>`;
+  box.innerHTML = `<b>${escapeHtml(data.projectId || '')}</b> · ${escapeHtml(data.projectName || '')}<br><span class="tiny">VERIFIED Material Evidence ${verified} · Placemark Eligible ${eligible} · Invalid/Skipped ${invalid}</span>`;
 
   const files = data.files || [];
   if (!files.length) {
@@ -4379,18 +4407,18 @@ async function generateOutputKmlKmzPEMS_() {
     toast('Belum ada VERIFIED evidence dengan koordinat valid.', 'warning', 6000);
     return;
   }
-  if (!window.confirm(`Generate ${mode} 3 output (KMZ + PHOTO, KML + PHOTO, KML NONPHOTO) dari ${Number(status.eligiblePointCount||0)} VERIFIED evidence point?`)) return;
+  if (!window.confirm(`Generate ${mode} 3 output (KMZ + PHOTO, KML + PHOTO, KML NONPHOTO) dari ${Number(status.eligiblePointCount||0)} VERIFIED material evidence?`)) return;
 
   state.outputGenerating = true;
   try {
     setButtonLoadingPEMS_(btn, true, 'Generating 3 output...');
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/kml-kmz`, {
       method:'POST',
-      body:{ mode, note:'Output Center R12B Triple Output' },
+      body:{ mode, note:'Output Center R12C Material Evidence Triple Output' },
       timeoutMs:120000,
       maxAttempts:1
     });
-    toast(`3 output ${data.mode || mode} selesai · ${Number(data.generatedPointCount||0)} point · ${Number(data.embeddedPhotoCount||0)} photo preview.`, 'success', 8000);
+    toast(`3 output ${data.mode || mode} selesai · ${Number(data.generatedPointCount||0)} placemark material · ${Number(data.embeddedPhotoCount||0)} photo preview.`, 'success', 8000);
     await loadOutputProjectStatusPEMS_(projectId, true);
   } catch (err) {
     toast(humanError(err), 'danger', 9000);
@@ -4398,6 +4426,59 @@ async function generateOutputKmlKmzPEMS_() {
     state.outputGenerating = false;
     setButtonLoadingPEMS_(btn, false);
     if (state.outputProjectStatus) renderOutputProjectStatusPEMS_(state.outputProjectStatus);
+  }
+}
+
+
+async function syncOutputDriveAccessPEMS_() {
+  const projectId = String(state.outputSelectedProjectId || '').trim();
+  const btn = document.getElementById('syncOutputDriveAccessBtn');
+
+  if (!projectId || !btn) return;
+
+  if (!navigator.onLine) {
+    toast('Sinkron akses Drive membutuhkan koneksi server.', 'warning', 6000);
+    return;
+  }
+
+  try {
+    setButtonLoadingPEMS_(btn, true, 'Sinkron akses...');
+    const data = await api(
+      `/outputs/projects/${encodeURIComponent(projectId)}/drive-access`,
+      {
+        method: 'POST',
+        body: {},
+        timeoutMs: 90000,
+        maxAttempts: 1
+      }
+    );
+
+    const failed = Number(data.failedCount || 0);
+    const viewers = Array.isArray(data.viewerEmails)
+      ? data.viewerEmails.length
+      : 0;
+
+    if (failed > 0) {
+      toast(
+        `Akses Drive disinkronkan ke ${viewers} user, tetapi ada ${failed} grant yang gagal. Cek policy Google Drive/domain.`,
+        'warning',
+        9000
+      );
+    } else {
+      toast(
+        `Akses Drive selesai · ${Number(data.fileCount || 0)} file · ${viewers} user privileged PEMS.`,
+        'success',
+        7000
+      );
+    }
+
+    await loadOutputProjectStatusPEMS_(projectId, true);
+  }
+  catch (err) {
+    toast(humanError(err), 'danger', 9000);
+  }
+  finally {
+    setButtonLoadingPEMS_(btn, false);
   }
 }
 
