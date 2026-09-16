@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-1-word-pdf-batch-r13d-hf1';
+const CACHE_NAME = 'pems-v15-9-2-word-pdf-job-r13e';
 const STATIC_ASSETS = [
   './',
   './index.html',

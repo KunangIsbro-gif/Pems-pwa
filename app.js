@@ -71,7 +71,10 @@ const state = {
   proactiveImportPayload: null,
   outputSelectedProjectId: '',
   outputProjectStatus: null,
-  outputGenerating: false
+  outputGenerating: false,
+  outputReportGenerating: false,
+  outputReportJob: null,
+  outputReportPollTimer: null
 };
 
 const el = {
@@ -4286,6 +4289,11 @@ async function renderOutput() {
           <h3>Word / PDF Evidence Report</h3>
           <div class="small muted">Template MITRATEL A4 · 3×2 evidence · photo contain/no crop · DOCX + PDF per material + PDF FINAL gabungan.</div>
           <button id="generateWordPdfBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate Word + PDF</button>
+          <div id="reportJobStatus" class="status-box neutral" style="margin-top:12px">Belum ada Background Report Job.</div>
+          <div id="reportJobActions" class="toolbar compact" style="margin-top:8px;display:none">
+            <button id="resumeReportJobBtn" class="btn secondary" type="button" style="display:none">Resume Job</button>
+            <button id="cancelReportJobBtn" class="btn outline" type="button" style="display:none">Batalkan Job</button>
+          </div>
           <div class="list" style="margin-top:12px">
             ${statusRow('Word Evidence Report', caps.wordEvidence || caps.word || 'READY', 'success')}
             ${statusRow('PDF Evidence Report', caps.pdfEvidence || caps.pdf || 'READY', 'success')}
@@ -4309,6 +4317,8 @@ async function renderOutput() {
     </div>`;
 
   document.getElementById('outputProjectSelect')?.addEventListener('change', async (event) => {
+    stopReportJobPollPEMS_();
+    state.outputReportJob = null;
     state.outputSelectedProjectId = String(event.target.value || '');
     await loadOutputProjectStatusPEMS_(state.outputSelectedProjectId);
   });
@@ -4318,6 +4328,8 @@ async function renderOutput() {
   document.getElementById('syncOutputDriveAccessBtn')?.addEventListener('click', syncOutputDriveAccessPEMS_);
   document.getElementById('generateKmlKmzBtn')?.addEventListener('click', generateOutputKmlKmzPEMS_);
   document.getElementById('generateWordPdfBtn')?.addEventListener('click', generateWordPdfPEMS_);
+  document.getElementById('resumeReportJobBtn')?.addEventListener('click', resumeWordPdfJobPEMS_);
+  document.getElementById('cancelReportJobBtn')?.addEventListener('click', cancelWordPdfJobPEMS_);
 
   if (!selected) {
     document.getElementById('outputProjectSummary').innerHTML = 'Belum ada project yang dapat dipilih.';
@@ -4397,6 +4409,7 @@ async function loadOutputProjectStatusPEMS_(projectId, force = false) {
     if (box) { box.className='status-box neutral'; box.innerHTML='Membaca VERIFIED evidence dan output terakhir...'; }
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}`, { timeoutMs:45000, maxAttempts: force?1:2 });
     renderOutputProjectStatusPEMS_(data);
+    await loadReportJobStatusPEMS_(projectId, true);
   } catch (err) {
     if (box) { box.className='status-box danger'; box.innerHTML=escapeHtml(humanError(err)); }
     if (btn) btn.disabled = true;
@@ -4440,96 +4453,194 @@ async function generateOutputKmlKmzPEMS_() {
 async function generateWordPdfPEMS_() {
   const projectId = String(state.outputSelectedProjectId || '').trim();
   const btn = document.getElementById('generateWordPdfBtn');
-  if (!projectId || !btn || state.outputReportGenerating) return;
+  if (!projectId || !btn) return;
   const finalMode = hasPermission('output.final');
   const mode = finalMode ? 'FINAL' : 'PREVIEW';
   const status = state.outputProjectStatus || {};
+  const activeJob = state.outputReportJob || {};
+  if (['QUEUED','PROCESSING','CANCEL_REQUESTED'].includes(String(activeJob.status || '').toUpperCase())) {
+    toast('Background Report Job masih berjalan. PEMS akan melanjutkannya tanpa menahan browser.', 'warning', 7000);
+    return;
+  }
   if (Number(status.verifiedEvidenceCount || 0) <= 0) {
     toast('Belum ada VERIFIED Material Evidence untuk dibuat report.', 'warning', 6000);
     return;
   }
-  if (!window.confirm(`Generate ${mode} Word/PDF Evidence Report dari ${Number(status.verifiedEvidenceCount||0)} VERIFIED material evidence?\n\nPEMS akan memproses material satu per satu agar tidak terkena gateway timeout.`)) return;
+  if (!window.confirm(`Mulai ${mode} Word/PDF Evidence Report dari ${Number(status.verifiedEvidenceCount||0)} VERIFIED material evidence?\n\nProses akan berjalan di background. Tab boleh ditutup setelah job masuk antrean.`)) return;
 
   state.outputReportGenerating = true;
-  let jobId = '';
   try {
-    setButtonLoadingPEMS_(btn, true, 'Menyiapkan batch report...');
-    const endpoint = `/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`;
-
-    const startData = await api(endpoint, {
+    setButtonLoadingPEMS_(btn, true, 'Membuat Background Job...');
+    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
       method:'POST',
-      body:{ mode, batchAction:'START', note:'Output Center R13D Word/PDF Batch Report' },
+      body:{ mode, jobAction:'START', note:'Output Center R13E Background Report Job' },
       timeoutMs:90000,
       maxAttempts:1
     });
-
-    jobId = String(startData.jobId || '').trim();
-    const total = Number(startData.totalMaterials || 0);
-    if (!jobId || total <= 0) throw new Error('Batch report gagal dimulai: job/material kosong.');
-
-    const localWarnings = [];
-
-    for (let i = 0; i < total; i++) {
-      setButtonLoadingPEMS_(btn, true, `Material ${i + 1}/${total} · membuat Word/PDF...`);
-      const step = await api(endpoint, {
-        method:'POST',
-        body:{ mode, batchAction:'MATERIAL', jobId, note:'R13D material batch step' },
-        timeoutMs:105000,
-        maxAttempts:1
-      });
-      if (step.warning) localWarnings.push(step.warning);
+    const job = data && data.job ? data.job : null;
+    state.outputReportJob = job;
+    renderReportJobStatusPEMS_(job);
+    if (job) {
+      toast(data.reused ? `Job ${job.jobId} masih aktif · dilanjutkan di background.` : `Job ${job.jobId} masuk antrean background. Browser boleh ditutup.`, 'success', 9000);
+      startReportJobPollPEMS_();
     }
-
-    setButtonLoadingPEMS_(btn, true, 'Menyiapkan PDF FINAL...');
-    await api(endpoint, {
-      method:'POST',
-      body:{ mode, batchAction:'COMBINE_START', jobId, note:'R13D final PDF combine start' },
-      timeoutMs:90000,
-      maxAttempts:1
-    });
-
-    for (let i = 0; i < total; i++) {
-      setButtonLoadingPEMS_(btn, true, `PDF FINAL ${i + 1}/${total} · menyusun material...`);
-      await api(endpoint, {
-        method:'POST',
-        body:{ mode, batchAction:'COMBINE', jobId, note:'R13D final PDF combine step' },
-        timeoutMs:105000,
-        maxAttempts:1
-      });
-    }
-
-    setButtonLoadingPEMS_(btn, true, 'Finalizing PDF + akses Drive...');
-    const data = await api(endpoint, {
-      method:'POST',
-      body:{ mode, batchAction:'FINALIZE', jobId, note:'Output Center R13D Word/PDF Batch Report' },
-      timeoutMs:105000,
-      maxAttempts:1
-    });
-
-    jobId = '';
-    const warningCount = Math.max(
-      localWarnings.length,
-      Array.isArray(data.warnings) ? data.warnings.length : 0
-    );
-    toast(`Word/PDF ${data.mode || mode} selesai · ${Number(data.materialOutputs||0)} material · ${Number(data.verifiedEvidenceCount||0)} evidence${warningCount?` · ${warningCount} warning`:''}.`, warningCount?'warning':'success', 10000);
-    await loadOutputProjectStatusPEMS_(projectId, true);
   } catch (err) {
-    if (jobId) {
-      try {
-        await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
-          method:'POST',
-          body:{ mode, batchAction:'ABORT', jobId, note:'Auto cleanup R13D partial batch after failure' },
-          timeoutMs:30000,
-          maxAttempts:1
-        });
-      } catch (_) {}
-    }
     toast(humanError(err), 'danger', 12000);
   } finally {
     state.outputReportGenerating = false;
     setButtonLoadingPEMS_(btn, false);
-    if (state.outputProjectStatus) renderOutputProjectStatusPEMS_(state.outputProjectStatus);
+    renderReportJobStatusPEMS_(state.outputReportJob);
   }
+}
+
+function stopReportJobPollPEMS_() {
+  if (state.outputReportPollTimer) clearTimeout(state.outputReportPollTimer);
+  state.outputReportPollTimer = null;
+}
+
+function startReportJobPollPEMS_() {
+  stopReportJobPollPEMS_();
+  const job = state.outputReportJob || {};
+  if (!['QUEUED','PROCESSING','CANCEL_REQUESTED'].includes(String(job.status || '').toUpperCase())) return;
+  state.outputReportPollTimer = setTimeout(async () => {
+    state.outputReportPollTimer = null;
+    await loadReportJobStatusPEMS_(state.outputSelectedProjectId, true);
+  }, 5000);
+}
+
+function reportJobPhaseTextPEMS_(phase) {
+  const map = {
+    MATERIALS:'Membuat Word/PDF per material',
+    COMBINE_SETUP:'Menyiapkan PDF FINAL',
+    COMBINING:'Menyusun PDF FINAL',
+    FINALIZE:'Finalisasi output & akses Drive',
+    COMPLETE:'Selesai',
+    CANCELLED:'Dibatalkan'
+  };
+  return map[String(phase || '').toUpperCase()] || String(phase || '-');
+}
+
+function renderReportJobStatusPEMS_(job) {
+  state.outputReportJob = job || null;
+  const box = document.getElementById('reportJobStatus');
+  const actions = document.getElementById('reportJobActions');
+  const resumeBtn = document.getElementById('resumeReportJobBtn');
+  const cancelBtn = document.getElementById('cancelReportJobBtn');
+  const generateBtn = document.getElementById('generateWordPdfBtn');
+  if (!box || !generateBtn) return;
+
+  const status = String(job?.status || '').toUpperCase();
+  const finalMode = hasPermission('output.final');
+  const canGenerate = finalMode ? !!state.outputProjectStatus?.canGenerateFinal : !!state.outputProjectStatus?.canGeneratePreview;
+  const verified = Number(state.outputProjectStatus?.verifiedEvidenceCount || 0);
+
+  if (!job) {
+    box.className = 'status-box neutral';
+    box.innerHTML = 'Belum ada Background Report Job untuk project ini.';
+    if (actions) actions.style.display = 'none';
+    generateBtn.disabled = !canGenerate || verified <= 0 || state.outputReportGenerating;
+    generateBtn.textContent = finalMode ? 'Generate FINAL · Word + PDF' : 'Generate PREVIEW · Word + PDF';
+    return;
+  }
+
+  const pct = Math.max(0, Math.min(100, Number(job.progressPct || 0)));
+  const jobId = escapeHtml(job.jobId || '-');
+  const current = escapeHtml(job.currentItem || reportJobPhaseTextPEMS_(job.phase));
+  const counts = `Material ${Number(job.completedMaterials||0)}/${Number(job.totalMaterials||0)} · PDF Final ${Number(job.combinedMaterials||0)}/${Number(job.totalMaterials||0)}`;
+  const bar = `<div style="height:9px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin:8px 0"><div style="width:${pct}%;height:100%;background:#0f766e;transition:width .25s"></div></div>`;
+
+  if (status === 'QUEUED' || status === 'PROCESSING' || status === 'CANCEL_REQUESTED') {
+    state.outputReportGenerating = true;
+    box.className = 'status-box warning';
+    box.innerHTML = `<b>${status === 'QUEUED' ? 'QUEUED' : 'GENERATING'} · ${jobId}</b>${bar}<div>${pct}% · ${current}</div><div class="tiny muted">${escapeHtml(counts)} · Proses berjalan di backend; tab boleh ditutup.</div>`;
+    generateBtn.disabled = true;
+    generateBtn.textContent = status === 'QUEUED' ? 'Report menunggu worker...' : status === 'CANCEL_REQUESTED' ? 'Membatalkan job...' : `Background Report ${pct}%`;
+    if (actions) actions.style.display = 'flex';
+    if (resumeBtn) resumeBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = status === 'CANCEL_REQUESTED' ? 'none' : '';
+    startReportJobPollPEMS_();
+    return;
+  }
+
+  state.outputReportGenerating = false;
+  stopReportJobPollPEMS_();
+  generateBtn.disabled = !canGenerate || verified <= 0;
+  generateBtn.textContent = finalMode ? 'Generate FINAL · Word + PDF' : 'Generate PREVIEW · Word + PDF';
+
+  if (status === 'COMPLETED') {
+    const finalUrl = job.result?.finalPdfUrl || '';
+    const finalLink = finalUrl ? ` · <a href="${escapeAttr(finalUrl)}" target="_blank" rel="noopener">Buka PDF FINAL</a>` : '';
+    box.className = 'status-box success';
+    box.innerHTML = `<b>COMPLETED · ${jobId}</b>${bar}<div>100% · Word/PDF selesai${finalLink}</div><div class="tiny muted">${escapeHtml(counts)}</div>`;
+    if (actions) actions.style.display = 'none';
+  } else if (status === 'FAILED') {
+    box.className = 'status-box danger';
+    box.innerHTML = `<b>FAILED · ${jobId}</b>${bar}<div>${pct}% · ${current}</div><div class="tiny">${escapeHtml(job.lastError || 'Background job gagal.')}</div>`;
+    if (actions) actions.style.display = 'flex';
+    if (resumeBtn) resumeBtn.style.display = '';
+    if (cancelBtn) cancelBtn.style.display = '';
+  } else if (status === 'CANCELLED') {
+    box.className = 'status-box neutral';
+    box.innerHTML = `<b>CANCELLED · ${jobId}</b><div class="tiny muted">Job dibatalkan. Anda dapat membuat job baru.</div>`;
+    if (actions) actions.style.display = 'none';
+  } else {
+    box.className = 'status-box neutral';
+    box.innerHTML = `<b>${escapeHtml(status || 'JOB')} · ${jobId}</b>${bar}<div>${pct}% · ${current}</div>`;
+    if (actions) actions.style.display = 'none';
+  }
+}
+
+async function loadReportJobStatusPEMS_(projectId, silent = false) {
+  projectId = String(projectId || '').trim();
+  if (!projectId || !navigator.onLine) return;
+  const previousStatus = String(state.outputReportJob?.status || '').toUpperCase();
+  try {
+    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/report-job`, {
+      timeoutMs:30000,
+      maxAttempts:1
+    });
+    const job = data?.job || null;
+    renderReportJobStatusPEMS_(job);
+    const nextStatus = String(job?.status || '').toUpperCase();
+    if (['QUEUED','PROCESSING','CANCEL_REQUESTED'].includes(previousStatus) && nextStatus === 'COMPLETED') {
+      toast('Background Word/PDF selesai. Output sudah tersedia.', 'success', 9000);
+      await loadOutputProjectStatusPEMS_(projectId, true);
+    } else if (['QUEUED','PROCESSING','CANCEL_REQUESTED'].includes(previousStatus) && nextStatus === 'FAILED') {
+      toast('Background Word/PDF berhenti. Gunakan Resume Job setelah melihat error.', 'danger', 10000);
+    }
+  } catch (err) {
+    if (!silent) toast(humanError(err), 'danger', 7000);
+    startReportJobPollPEMS_();
+  }
+}
+
+async function resumeWordPdfJobPEMS_() {
+  const projectId = String(state.outputSelectedProjectId || '').trim();
+  const job = state.outputReportJob || {};
+  if (!projectId || !job.jobId) return;
+  try {
+    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
+      method:'POST', body:{ jobAction:'RESUME', jobId:job.jobId, note:'Resume R13E Background Report Job' }, timeoutMs:45000, maxAttempts:1
+    });
+    renderReportJobStatusPEMS_(data?.job || job);
+    toast('Job masuk antrean kembali dan akan melanjutkan dari checkpoint terakhir.', 'success', 8000);
+    startReportJobPollPEMS_();
+  } catch (err) { toast(humanError(err), 'danger', 9000); }
+}
+
+async function cancelWordPdfJobPEMS_() {
+  const projectId = String(state.outputSelectedProjectId || '').trim();
+  const job = state.outputReportJob || {};
+  if (!projectId || !job.jobId) return;
+  if (!window.confirm(`Batalkan ${job.jobId}? Folder output parsial job ini akan dipindahkan ke Trash.`)) return;
+  try {
+    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
+      method:'POST', body:{ jobAction:'CANCEL', jobId:job.jobId, note:'Cancel R13E Background Report Job' }, timeoutMs:45000, maxAttempts:1
+    });
+    renderReportJobStatusPEMS_(data?.job || null);
+    toast('Background Report Job dibatalkan.', 'warning', 7000);
+    await loadOutputProjectStatusPEMS_(projectId, true);
+  } catch (err) { toast(humanError(err), 'danger', 9000); }
 }
 
 
