@@ -68,7 +68,10 @@ const state = {
   adminCache: {},
   adminCacheAt: {},
   adminStaleNotice: '',
-  proactiveImportPayload: null
+  proactiveImportPayload: null,
+  outputSelectedProjectId: '',
+  outputProjectStatus: null,
+  outputGenerating: false
 };
 
 const el = {
@@ -3183,7 +3186,7 @@ function renderProactiveImportPanelPEMS_(masterOptions) {
         <div class="card">
           <div class="section-head">
             <div><h2>Proactive → PEMS Import</h2><div class="small muted">Browser Bridge membaca project + BOQ dari sesi Proactive yang sudah login. Password, cookie, session, dan CSRF Proactive tidak dikirim ke PEMS.</div></div>
-            <span class="badge info">R11N-P4</span>
+            <span class="badge info">R11N-P5</span>
           </div>
           <div class="status-box neutral" style="margin-top:12px">
             <b>Pasang sekali:</b> seret tombol <b>PEMS ← Proactive</b> ke Bookmark Bar Chrome. Setelah itu buka Detail Project → Step 2 BoQ di Proactive, lalu klik bookmark tersebut.
@@ -3334,7 +3337,7 @@ async function renderAdmin() {
               <h2>Project Setup</h2>
               <div class="small muted">Buat master project dari web. Sheet 01_PROJECTS hanya menjadi storage backend.</div>
             </div>
-            <span class="badge info">R11N-P4</span>
+            <span class="badge info">R11N-P5</span>
           </div>
 
           <div class="status-box neutral" style="margin-top:12px">
@@ -3415,7 +3418,7 @@ async function renderAdmin() {
                 <button id="uploadKmlPlanBtn" class="btn secondary full" style="margin-top:10px" type="button">Upload KML/KMZ Plan</button>
               </div>
             </div>
-            <div class="status-box neutral" style="margin-top:12px"><b>R11N-P4:</b> BOQ Proactive dibaca direct; KML dipetakan ke physical BOQ family (M/J satu family). Point referensi seperti DEMAND tidak dianggap mismatch.</div>
+            <div class="status-box neutral" style="margin-top:12px"><b>R11N-P5:</b> BOQ Proactive dibaca direct; KML dipetakan ke physical BOQ family (M/J satu family). Point referensi seperti DEMAND tidak dianggap mismatch.</div>
             <div class="plan-review-box" style="margin-top:14px">
               <div class="section-head"><div><h3>Plan Review — BOQ vs KML/KMZ</h3><div class="small muted">AUTO REVIEW = analisis sistem. ADMIN REVIEW = mapping & pengecekan plan. PM REVIEW = keputusan Publish for Field Execution.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
               <div class="grid three" style="margin-top:10px">
@@ -4211,16 +4214,190 @@ async function renderOutput() {
   if (navigator.onLine) {
     try { caps = await api('/outputs/capabilities'); } catch {}
   }
+
+  const projects = state.bootstrap?.projects || [];
+  const preferred = state.outputSelectedProjectId || state.selectedProjectId || localStorage.getItem(SELECTED_PROJECT_KEY) || '';
+  const selected = projects.some(p => String(p.projectId||'') === String(preferred))
+    ? preferred
+    : (projects[0]?.projectId || '');
+  state.outputSelectedProjectId = selected;
+
+  const options = projects.map(p => {
+    const label = [p.projectId, p.detailProject || p.projectName].filter(Boolean).join(' — ');
+    return `<option value="${escapeAttr(p.projectId || '')}" ${String(p.projectId||'')===String(selected)?'selected':''}>${escapeHtml(label)}</option>`;
+  }).join('');
+
+  const mode = hasPermission('output.final') ? 'FINAL' : 'PREVIEW';
+  const modeText = mode === 'FINAL'
+    ? 'FINAL · hanya latest VERIFIED evidence'
+    : 'PREVIEW · hanya latest VERIFIED evidence';
+
   el.content.innerHTML = `
-    <div class="card"><h2>Output Generation Layer</h2><p class="muted">Fondasi stakeholder mapping sudah masuk V15. Preview boleh memakai data belum verified dengan penanda DRAFT; output resmi/final hanya memakai VERIFIED evidence.</p>
-      <div class="list">
-        ${statusRow('KML Plan / Realisasi', caps.kmlPlan || caps.kml || 'FOUNDATION_READY', 'success')}
-        ${statusRow('KMZ Evidence', caps.kmzEvidence || 'NEXT_INCREMENT', 'warning')}
-        ${statusRow('Word Evidence Report', caps.wordEvidence || caps.word || 'NEXT_INCREMENT', 'warning')}
-        ${statusRow('PDF Evidence Report', caps.pdfEvidence || caps.pdf || 'NEXT_INCREMENT', 'warning')}
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>Output Generation Layer</h2>
+          <div class="small muted">Verified Evidence → KML Realisasi → KMZ Evidence. Word/PDF menjadi increment berikutnya.</div>
+        </div>
+        <span class="badge ${mode==='FINAL'?'success':'warning'}">${mode}</span>
       </div>
-      <div class="status-box neutral"><b>Rule:</b> Official Output = VERIFIED EVIDENCE. Data stakeholder/material/designator tetap dipisahkan melalui mapping project.</div>
+
+      <div class="grid two" style="margin-top:14px">
+        <div>
+          <label>Project</label>
+          <select id="outputProjectSelect" class="input">${options || '<option value="">Belum ada project</option>'}</select>
+        </div>
+        <div>
+          <label>Mode Output</label>
+          <div class="status-box ${mode==='FINAL'?'success':'warning'}" style="margin-top:6px">${escapeHtml(modeText)}</div>
+        </div>
+      </div>
+
+      <div id="outputProjectSummary" class="status-box neutral" style="margin-top:14px">Pilih project untuk membaca VERIFIED evidence.</div>
+
+      <div class="grid two" style="margin-top:14px">
+        <div class="card compact">
+          <h3>KML / KMZ Realisasi</h3>
+          <div class="small muted">KML berisi titik realisasi VERIFIED + metadata audit. KMZ menambahkan thumbnail evidence ringan bila tersedia.</div>
+          <button id="generateKmlKmzBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate KML + KMZ</button>
+        </div>
+        <div class="card compact">
+          <h3>Roadmap Output</h3>
+          <div class="list">
+            ${statusRow('KML Realisasi', caps.kmlRealization || 'READY', 'success')}
+            ${statusRow('KMZ Evidence', caps.kmzEvidence || 'READY', 'success')}
+            ${statusRow('Word Evidence Report', caps.wordEvidence || caps.word || 'NEXT_INCREMENT', 'warning')}
+            ${statusRow('PDF Evidence Report', caps.pdfEvidence || caps.pdf || 'NEXT_INCREMENT', 'warning')}
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="section-head"><h3>Generated Files</h3><button id="refreshOutputBtn" class="btn secondary" type="button">Refresh</button></div>
+        <div id="outputFilesList" class="small muted" style="margin-top:10px">Belum dibaca.</div>
+      </div>
+
+      <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> output ini tidak membaca KML Plan sebagai sumber realisasi. Sumber output adalah latest <b>VERIFIED evidence</b> per evidence root. Foto asli tetap di Drive; KMZ memakai thumbnail ringan dan link ke file evidence asli.</div>
     </div>`;
+
+  document.getElementById('outputProjectSelect')?.addEventListener('change', async (event) => {
+    state.outputSelectedProjectId = String(event.target.value || '');
+    await loadOutputProjectStatusPEMS_(state.outputSelectedProjectId);
+  });
+  document.getElementById('refreshOutputBtn')?.addEventListener('click', async () => {
+    await loadOutputProjectStatusPEMS_(state.outputSelectedProjectId, true);
+  });
+  document.getElementById('generateKmlKmzBtn')?.addEventListener('click', generateOutputKmlKmzPEMS_);
+
+  if (!selected) {
+    document.getElementById('outputProjectSummary').innerHTML = 'Belum ada project yang dapat dipilih.';
+    return;
+  }
+  await loadOutputProjectStatusPEMS_(selected);
+}
+
+function outputBytesPEMS_(value) {
+  const n = Number(value || 0);
+  if (!n) return '0 KB';
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n/1024))} KB`;
+  return `${(n/(1024*1024)).toFixed(1)} MB`;
+}
+
+function renderOutputProjectStatusPEMS_(data) {
+  state.outputProjectStatus = data || null;
+  const box = document.getElementById('outputProjectSummary');
+  const list = document.getElementById('outputFilesList');
+  const btn = document.getElementById('generateKmlKmzBtn');
+  if (!box || !list || !btn) return;
+
+  if (!data) {
+    box.className = 'status-box danger';
+    box.innerHTML = 'Status output tidak tersedia.';
+    btn.disabled = true;
+    list.innerHTML = '—';
+    return;
+  }
+
+  const verified = Number(data.verifiedEvidenceCount || 0);
+  const eligible = Number(data.eligiblePointCount || 0);
+  const invalid = Number(data.invalidCoordinateCount || 0);
+  const finalMode = hasPermission('output.final');
+  const canGenerate = finalMode ? !!data.canGenerateFinal : !!data.canGeneratePreview;
+  btn.disabled = !canGenerate || eligible <= 0 || state.outputGenerating;
+  btn.textContent = finalMode ? 'Generate FINAL KML + KMZ' : 'Generate PREVIEW KML + KMZ';
+
+  box.className = `status-box ${eligible>0?'success':verified>0?'warning':'neutral'}`;
+  box.innerHTML = `<b>${escapeHtml(data.projectId || '')}</b> · ${escapeHtml(data.projectName || '')}<br><span class="tiny">VERIFIED Evidence ${verified} · Eligible Coordinate ${eligible} · Invalid/Skipped ${invalid}</span>`;
+
+  const files = data.files || [];
+  if (!files.length) {
+    list.innerHTML = 'Belum ada file KML/KMZ yang di-generate untuk project ini.';
+    return;
+  }
+  list.innerHTML = `<div class="list">${files.map(f => `
+    <div class="status-box neutral">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+        <div><b>${escapeHtml(f.type || '')}</b> · ${escapeHtml(f.fileName || '')}<div class="tiny muted">${escapeHtml(outputBytesPEMS_(f.sizeBytes))} · ${escapeHtml(formatDate(f.updatedAt || ''))}</div></div>
+        <a class="btn secondary" href="${escapeAttr(f.url || '')}" target="_blank" rel="noopener">Buka di Drive</a>
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+async function loadOutputProjectStatusPEMS_(projectId, force = false) {
+  projectId = String(projectId || '').trim();
+  const box = document.getElementById('outputProjectSummary');
+  const btn = document.getElementById('generateKmlKmzBtn');
+  if (!projectId) {
+    if (box) box.innerHTML = 'Pilih project.';
+    if (btn) btn.disabled = true;
+    return;
+  }
+  if (!navigator.onLine) {
+    if (box) { box.className='status-box warning'; box.innerHTML='Output Center membutuhkan koneksi ke server.'; }
+    if (btn) btn.disabled = true;
+    return;
+  }
+  try {
+    if (box) { box.className='status-box neutral'; box.innerHTML='Membaca VERIFIED evidence dan output terakhir...'; }
+    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}`, { timeoutMs:45000, maxAttempts: force?1:2 });
+    renderOutputProjectStatusPEMS_(data);
+  } catch (err) {
+    if (box) { box.className='status-box danger'; box.innerHTML=escapeHtml(humanError(err)); }
+    if (btn) btn.disabled = true;
+  }
+}
+
+async function generateOutputKmlKmzPEMS_() {
+  const projectId = String(state.outputSelectedProjectId || '').trim();
+  const btn = document.getElementById('generateKmlKmzBtn');
+  if (!projectId || !btn || state.outputGenerating) return;
+  const finalMode = hasPermission('output.final');
+  const mode = finalMode ? 'FINAL' : 'PREVIEW';
+  const status = state.outputProjectStatus || {};
+  if (Number(status.eligiblePointCount || 0) <= 0) {
+    toast('Belum ada VERIFIED evidence dengan koordinat valid.', 'warning', 6000);
+    return;
+  }
+  if (!window.confirm(`Generate ${mode} KML + KMZ dari ${Number(status.eligiblePointCount||0)} VERIFIED evidence point?`)) return;
+
+  state.outputGenerating = true;
+  try {
+    setButtonLoadingPEMS_(btn, true, 'Generating KML + KMZ...');
+    const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/kml-kmz`, {
+      method:'POST',
+      body:{ mode, note:'Output Center R12A' },
+      timeoutMs:120000,
+      maxAttempts:1
+    });
+    toast(`KML + KMZ ${data.mode || mode} selesai · ${Number(data.generatedPointCount||0)} point · ${Number(data.embeddedThumbnailCount||0)} thumbnail.`, 'success', 8000);
+    await loadOutputProjectStatusPEMS_(projectId, true);
+  } catch (err) {
+    toast(humanError(err), 'danger', 9000);
+  } finally {
+    state.outputGenerating = false;
+    setButtonLoadingPEMS_(btn, false);
+    if (state.outputProjectStatus) renderOutputProjectStatusPEMS_(state.outputProjectStatus);
+  }
 }
 
 async function renderAudit() {
