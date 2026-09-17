@@ -1,5 +1,5 @@
 window.PEMS_CONFIG = {
-  APP_VERSION: 'V15.9.4-WORD-PDF-HQ-R13F-HF1',
+  APP_VERSION: 'V15.9.6-COMPACT-OUTPUT-ETA-R13F-HF4',
   GOOGLE_CLIENT_ID: '1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com',
   API_BASE: 'https://pems-gateway.siikunang.workers.dev/api/v15'
 };

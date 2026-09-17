@@ -4287,9 +4287,9 @@ async function renderOutput() {
         </div>
         <div class="card compact">
           <h3>Word / PDF Evidence Report</h3>
-          <div class="small muted">Template MITRATEL A4 · visual LOCK R13E · 3×2 evidence · checkpoint per halaman · persistent worker · DOCX + PDF per material + PDF FINAL tanpa render ulang foto.</div>
+          <div class="small muted">Template MITRATEL A4 · visual LOCK · 3×2 evidence · HQ original Drive · checkpoint per halaman · persistent worker · DOCX + PDF per material + PDF FINAL HQ.</div>
           <button id="generateWordPdfBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate Word + PDF</button>
-          <div id="reportJobStatus" class="status-box neutral" style="margin-top:12px">Belum ada R13F-HF1 HQ Job.</div>
+          <div id="reportJobStatus" class="status-box neutral" style="margin-top:12px">Belum ada R13F-HF4 Report Job.</div>
           <div id="reportJobActions" class="toolbar compact" style="margin-top:8px;display:none">
             <button id="resumeReportJobBtn" class="btn secondary" type="button" style="display:none">Resume Job</button>
             <button id="cancelReportJobBtn" class="btn outline" type="button" style="display:none">Batalkan Job</button>
@@ -4345,6 +4345,100 @@ function outputBytesPEMS_(value) {
   return `${(n/(1024*1024)).toFixed(1)} MB`;
 }
 
+function outputFileLinkPEMS_(file, label = 'Buka') {
+  if (!file || !file.url) return '';
+  return `<a class="btn secondary" href="${escapeAttr(file.url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+}
+
+function outputFolderLinkPEMS_(url, label = 'Buka Folder') {
+  if (!url) return '';
+  return `<a class="btn secondary" href="${escapeAttr(url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+}
+
+function outputCompactRowPEMS_(title, subtitle, actions = '', extra = '') {
+  return `<div class="status-box neutral" style="margin-top:8px">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+      <div><b>${escapeHtml(title)}</b>${subtitle ? `<div class="tiny muted" style="margin-top:3px">${subtitle}</div>` : ''}</div>
+      <div class="toolbar compact">${actions || ''}</div>
+    </div>${extra || ''}
+  </div>`;
+}
+
+function outputHistoryItemPEMS_(f) {
+  return `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #e2e8f0;flex-wrap:wrap">
+    <div><b>${escapeHtml(f.type || '')}</b> · ${escapeHtml(f.fileName || '')}<div class="tiny muted">${escapeHtml(outputBytesPEMS_(f.sizeBytes))} · ${escapeHtml(formatDate(f.updatedAt || ''))}</div></div>
+    ${outputFileLinkPEMS_(f, 'Buka')}
+  </div>`;
+}
+
+function renderCompactOutputFilesPEMS_(files) {
+  files = Array.isArray(files) ? files.slice() : [];
+  if (!files.length) return 'Belum ada output KML/KMZ/Word/PDF untuk project ini.';
+  files.sort((a,b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+  const firstType = type => files.find(f => String(f.type || '').toUpperCase() === type) || null;
+  const kmlPhoto = firstType('KML + PHOTO');
+  const kmzPhoto = firstType('KMZ + PHOTO');
+  const kmlNonPhoto = firstType('KML NONPHOTO');
+
+  const reportFiles = files.filter(f => ['WORD/DOCX','PDF MATERIAL','PDF FINAL'].includes(String(f.type || '').toUpperCase()));
+  let latestBatch = '';
+  for (const f of reportFiles) {
+    if (f.batchName) { latestBatch = String(f.batchName); break; }
+  }
+  const latestReport = latestBatch ? reportFiles.filter(f => String(f.batchName || '') === latestBatch) : reportFiles.slice(0, 1);
+  const wordFiles = latestReport.filter(f => String(f.type || '').toUpperCase() === 'WORD/DOCX');
+  const pdfMaterial = latestReport.filter(f => String(f.type || '').toUpperCase() === 'PDF MATERIAL');
+  const pdfFinal = latestReport.find(f => String(f.type || '').toUpperCase() === 'PDF FINAL') || null;
+  const batchFolderUrl = latestReport.find(f => f.batchFolderUrl)?.batchFolderUrl || '';
+
+  const currentIds = new Set([kmlPhoto, kmzPhoto, kmlNonPhoto, ...latestReport].filter(Boolean).map(f => String(f.fileId || f.url || f.fileName || '')));
+  const history = files.filter(f => !currentIds.has(String(f.fileId || f.url || f.fileName || '')));
+
+  let html = '';
+  html += `<div class="small muted">Menampilkan output terbaru. File lama disimpan di Riwayat Generate.</div>`;
+
+  const photoActions = `${outputFileLinkPEMS_(kmlPhoto, 'KML')}${outputFileLinkPEMS_(kmzPhoto, 'KMZ')}`;
+  html += outputCompactRowPEMS_('KML / KMZ · Photo', kmlPhoto || kmzPhoto ? 'Output dengan foto evidence' : 'Belum tersedia', photoActions);
+  html += outputCompactRowPEMS_('KML · Non Photo', kmlNonPhoto ? 'Output tanpa foto' : 'Belum tersedia', outputFileLinkPEMS_(kmlNonPhoto, 'KML'));
+
+  const wordDetails = wordFiles.length ? `<details style="margin-top:9px"><summary style="cursor:pointer;font-weight:700">Lihat per Material</summary><div style="margin-top:7px">${wordFiles.map(f => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #e2e8f0;flex-wrap:wrap"><span class="tiny">${escapeHtml(f.fileName || '')}</span>${outputFileLinkPEMS_(f, 'Buka')}</div>`).join('')}</div></details>` : '';
+  html += outputCompactRowPEMS_('WORD', `${wordFiles.length} DOCX Evidence Report${latestBatch ? ' · batch terbaru' : ''}`, outputFolderLinkPEMS_(batchFolderUrl, 'Buka Folder'), wordDetails);
+
+  const pdfActions = `${outputFolderLinkPEMS_(batchFolderUrl, 'Buka Folder')}${outputFileLinkPEMS_(pdfFinal, 'PDF FINAL')}`;
+  html += outputCompactRowPEMS_('PDF', `${pdfMaterial.length} PDF Material${pdfFinal ? ' · PDF FINAL tersedia' : ''}`, pdfActions);
+
+  html += `<details class="status-box neutral" style="margin-top:10px"><summary style="cursor:pointer;font-weight:800">Riwayat Generate (${history.length} file)</summary>${history.length ? `<div style="margin-top:8px">${history.map(outputHistoryItemPEMS_).join('')}</div>` : '<div class="tiny muted" style="margin-top:8px">Belum ada file lama.</div>'}</details>`;
+  return html;
+}
+
+function outputDurationTextPEMS_(seconds) {
+  seconds = Math.max(0, Math.round(Number(seconds || 0)));
+  if (!seconds) return '0s';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h) return `${h}j ${m}m`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function outputJobTimingPEMS_(job, pct) {
+  const now = Date.now();
+  const startMs = Date.parse(job?.startedAt || job?.createdAt || '') || 0;
+  const finishMs = Date.parse(job?.finishedAt || '') || 0;
+  if (!startMs) return { elapsed:'—', eta:'—' };
+  const endMs = finishMs || now;
+  const elapsedSec = Math.max(0, (endMs - startMs) / 1000);
+  let eta = '—';
+  const p = Math.max(0, Math.min(100, Number(pct || 0)));
+  if (!finishMs && p >= 3 && p < 100) {
+    const etaSec = elapsedSec * (100 - p) / p;
+    if (Number.isFinite(etaSec) && etaSec >= 0 && etaSec < 7 * 86400) eta = '±' + outputDurationTextPEMS_(etaSec);
+  }
+  return { elapsed:outputDurationTextPEMS_(elapsedSec), eta:eta };
+}
+
 function renderOutputProjectStatusPEMS_(data) {
   state.outputProjectStatus = data || null;
   const box = document.getElementById('outputProjectSummary');
@@ -4378,17 +4472,7 @@ function renderOutputProjectStatusPEMS_(data) {
   box.innerHTML = `<b>${escapeHtml(data.projectId || '')}</b> · ${escapeHtml(data.projectName || '')}<br><span class="tiny">VERIFIED Material Evidence ${verified} · Placemark Eligible ${eligible} · Invalid/Skipped ${invalid}</span>`;
 
   const files = data.files || [];
-  if (!files.length) {
-    list.innerHTML = 'Belum ada output KML/KMZ/Word/PDF untuk project ini.';
-    return;
-  }
-  list.innerHTML = `<div class="list">${files.map(f => `
-    <div class="status-box neutral">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-        <div><b>${escapeHtml(f.type || '')}</b> · ${escapeHtml(f.fileName || '')}<div class="tiny muted">${escapeHtml(outputBytesPEMS_(f.sizeBytes))} · ${escapeHtml(formatDate(f.updatedAt || ''))}</div></div>
-        <a class="btn secondary" href="${escapeAttr(f.url || '')}" target="_blank" rel="noopener">Buka di Drive</a>
-      </div>
-    </div>`).join('')}</div>`;
+  list.innerHTML = renderCompactOutputFilesPEMS_(files);
 }
 
 async function loadOutputProjectStatusPEMS_(projectId, force = false) {
@@ -4473,7 +4557,7 @@ async function generateWordPdfPEMS_() {
     setButtonLoadingPEMS_(btn, true, 'Membuat Background Job...');
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
       method:'POST',
-      body:{ mode, jobAction:'START', note:'Output Center R13F-HF1 HQ Background Job' },
+      body:{ mode, jobAction:'START', note:'Output Center R13F-HF4 Compact Output + ETA Job' },
       timeoutMs:90000,
       maxAttempts:1
     });
@@ -4502,7 +4586,7 @@ function startReportJobPollPEMS_() {
   stopReportJobPollPEMS_();
   const job = state.outputReportJob || {};
   if (!['QUEUED','PROCESSING','CANCEL_REQUESTED'].includes(String(job.status || '').toUpperCase())) return;
-  // R13F-HF1: polling diperlambat agar browser/gateway tidak sibuk terus.
+  // R13F-HF4: polling diperlambat agar browser/gateway tidak sibuk terus.
   // Worker backend tetap jalan setiap menit; polling hanya untuk tampilan status.
   state.outputReportPollTimer = setTimeout(async () => {
     state.outputReportPollTimer = null;
@@ -4549,12 +4633,22 @@ function renderReportJobStatusPEMS_(job) {
   const jobId = escapeHtml(job.jobId || '-');
   const current = escapeHtml(job.currentItem || reportJobPhaseTextPEMS_(job.phase));
   const counts = `Material ${Number(job.completedMaterials||0)}/${Number(job.totalMaterials||0)} · PDF Final ${Number(job.combinedMaterials||0)}/${Number(job.totalMaterials||0)}`;
+  const evidenceDone = Number(job.evidenceCompleted || 0);
+  const evidenceTotal = Number(job.evidenceTotal || state.outputProjectStatus?.verifiedEvidenceCount || 0);
+  const evidencePass = String(job.evidencePass || 'MATERIAL').toUpperCase();
+  const timing = outputJobTimingPEMS_(job, pct);
+  const detailGrid = `<div class="tiny" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:6px 12px;margin-top:8px">
+    <span><b>Elapsed</b> ${escapeHtml(timing.elapsed)}</span>
+    <span><b>Estimasi sisa</b> ${escapeHtml(timing.eta)}</span>
+    <span><b>Material</b> ${Number(job.completedMaterials||0)}/${Number(job.totalMaterials||0)}</span>
+    <span><b>${evidencePass === 'PDF_FINAL' ? 'Evidence PDF FINAL' : 'Evidence'}</b> ${evidenceDone}/${evidenceTotal}</span>
+  </div>`;
   const bar = `<div style="height:9px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin:8px 0"><div style="width:${pct}%;height:100%;background:#0f766e;transition:width .25s"></div></div>`;
 
   if (status === 'QUEUED' || status === 'PROCESSING' || status === 'CANCEL_REQUESTED') {
     state.outputReportGenerating = true;
     box.className = 'status-box warning';
-    box.innerHTML = `<b>${status === 'QUEUED' ? 'QUEUED' : 'GENERATING'} · ${jobId}</b>${bar}<div>${pct}% · ${current}</div><div class="tiny muted">${escapeHtml(counts)} · Proses berjalan di backend; tab boleh ditutup.</div>`;
+    box.innerHTML = `<b>${status === 'QUEUED' ? 'QUEUED' : 'GENERATING'} · ${jobId}</b>${bar}<div>${pct}% · ${current}</div>${detailGrid}<div class="tiny muted" style="margin-top:7px">${escapeHtml(counts)} · Proses berjalan di backend; tab boleh ditutup.</div>`;
     generateBtn.disabled = true;
     generateBtn.textContent = status === 'QUEUED' ? 'Report menunggu worker...' : status === 'CANCEL_REQUESTED' ? 'Membatalkan job...' : `Background Report ${pct}%`;
     if (actions) actions.style.display = 'flex';
@@ -4573,7 +4667,7 @@ function renderReportJobStatusPEMS_(job) {
     const finalUrl = job.result?.finalPdfUrl || '';
     const finalLink = finalUrl ? ` · <a href="${escapeAttr(finalUrl)}" target="_blank" rel="noopener">Buka PDF FINAL</a>` : '';
     box.className = 'status-box success';
-    box.innerHTML = `<b>COMPLETED · ${jobId}</b>${bar}<div>100% · Word/PDF selesai${finalLink}</div><div class="tiny muted">${escapeHtml(counts)}</div>`;
+    box.innerHTML = `<b>COMPLETED · ${jobId}</b>${bar}<div>100% · Word/PDF selesai${finalLink}</div><div class="tiny muted" style="margin-top:6px">Selesai dalam ${escapeHtml(timing.elapsed)} · ${escapeHtml(counts)}</div>`;
     if (actions) actions.style.display = 'none';
   } else if (status === 'FAILED') {
     box.className = 'status-box danger';
@@ -4622,7 +4716,7 @@ async function resumeWordPdfJobPEMS_() {
   if (!projectId || !job.jobId) return;
   try {
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
-      method:'POST', body:{ jobAction:'RESUME', jobId:job.jobId, note:'Resume R13F-HF1 HQ Background Job' }, timeoutMs:45000, maxAttempts:1
+      method:'POST', body:{ jobAction:'RESUME', jobId:job.jobId, note:'Resume R13F-HF4 Background Job' }, timeoutMs:45000, maxAttempts:1
     });
     renderReportJobStatusPEMS_(data?.job || job);
     toast('Job masuk antrean kembali dan akan melanjutkan dari checkpoint terakhir.', 'success', 8000);
@@ -4637,7 +4731,7 @@ async function cancelWordPdfJobPEMS_() {
   if (!window.confirm(`Batalkan ${job.jobId}? Folder output parsial job ini akan dipindahkan ke Trash.`)) return;
   try {
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/evidence-report`, {
-      method:'POST', body:{ jobAction:'CANCEL', jobId:job.jobId, note:'Cancel R13F-HF1 HQ Background Job' }, timeoutMs:45000, maxAttempts:1
+      method:'POST', body:{ jobAction:'CANCEL', jobId:job.jobId, note:'Cancel R13F-HF4 Background Job' }, timeoutMs:45000, maxAttempts:1
     });
     renderReportJobStatusPEMS_(data?.job || null);
     toast('Background Report Job dibatalkan.', 'warning', 7000);
