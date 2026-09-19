@@ -358,3 +358,63 @@ body.modal-open{overflow:hidden}
   .material-choice-side{min-width:112px}
   .material-select-cta{min-width:100px;font-size:.66rem}
 }
+
+/* ==========================================================
+   V15.9.13 HF11 — FIELD EVIDENCE UX
+   Mobile-first rebuild based on the proven Apps Script flow.
+   Word/PDF/output styles are intentionally untouched.
+   ========================================================== */
+.field-evidence-shell{max-width:820px;margin:0 auto}
+.field-evidence-card{padding:22px}
+.field-evidence-connect-row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}
+.field-evidence-heading{margin-bottom:18px}
+.field-evidence-heading h2{margin:0 0 4px;font-size:1.35rem}
+.field-point-select-wrap{margin-top:16px}
+.field-point-info{margin-top:10px;padding:14px;border:1px solid #dbe3ec;border-radius:10px;background:#f8fafc;font-size:.86rem;line-height:1.45}
+.field-point-info.hidden{display:none}
+.field-point-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.field-point-head>div{display:grid;gap:2px}
+.field-point-head>b,.field-point-head>div>b{font-size:1rem}
+.field-point-head small{color:var(--muted)}
+.field-point-line{margin-top:8px;font-size:.8rem}
+.field-navigate-btn{width:100%;margin-top:10px;background:#e8f1fb;color:#0f3b66;border-color:#d4e4f5;font-weight:800}
+.field-info-section{margin-top:13px;padding-top:11px;border-top:1px solid #dbe3ec}
+.field-info-title{font-weight:800;margin-bottom:7px}
+.field-asset-row{display:grid;grid-template-columns:18px auto 1fr;align-items:baseline;gap:4px;margin:5px 0}
+.field-asset-row small{color:#64748b;font-size:.72rem}
+.field-requirement-row{display:grid;grid-template-columns:20px 1fr;gap:5px;margin:7px 0;align-items:start}
+.field-requirement-row>span{font-weight:900;color:#475569}
+.field-requirement-row>div{display:grid;gap:1px}
+.field-requirement-row small{font-size:.72rem;color:#64748b}
+.field-requirement-row.optional{opacity:.92}
+.field-empty-requirement{color:#b45309;font-size:.78rem}
+.field-optional-title{font-size:.72rem;font-weight:800;color:#475569;margin-top:10px;padding-top:8px;border-top:1px dashed #cbd5e1;text-transform:uppercase;letter-spacing:.03em}
+.field-boq-note{margin-top:10px;padding-top:8px;border-top:1px dashed #cbd5e1;color:#475569;font-size:.75rem}
+.field-warning-strip{margin-top:10px}
+.field-gps-btn{width:100%;margin-top:10px;background:#0f3b66;color:#fff;border-color:#0f3b66;font-weight:800;min-height:44px}
+.field-gps-info{margin-top:6px;min-height:16px}
+.field-material-picker{margin-top:18px;padding-top:15px;border-top:1px solid var(--line)}
+.field-material-picker h3{margin:0 0 3px;font-size:1rem}
+.field-add-material-btn{width:100%;border-style:dashed;font-weight:800;margin-top:4px}
+.field-additional-hint{margin-top:7px}
+.field-capture-panel{margin-top:14px}
+.field-capture-panel:empty{display:none}
+.field-evidence-card .capture-status-strip{position:static;margin:0 0 10px;padding:10px 12px;border-radius:9px;border:1px solid var(--line);box-shadow:none}
+.field-evidence-card .capture-status-strip.success{border-top:4px solid var(--success)}
+.field-evidence-card .capture-status-strip.warning{border-top:4px solid #f59e0b}
+.field-evidence-card .capture-status-strip.danger{border-top:4px solid var(--danger)}
+.field-evidence-card .capture-status-strip.info{border-top:4px solid var(--info)}
+.field-evidence-card .capture-status-strip.neutral{border-top:4px solid #94a3b8}
+
+@media (max-width:720px){
+  .field-evidence-shell{max-width:none;margin:0}
+  .field-evidence-card{padding:14px;border-radius:12px}
+  .field-evidence-heading h2{font-size:1.22rem}
+  .field-point-info{padding:10px}
+  .field-point-head{align-items:center}
+  .field-asset-row{grid-template-columns:18px minmax(0,auto) 1fr}
+  .field-asset-row b,.field-requirement-row b{overflow-wrap:anywhere}
+  .field-gps-btn,.field-add-material-btn{min-height:46px}
+  .field-evidence-card .toolbar{gap:8px}
+  .field-evidence-card .toolbar .btn{flex:1 1 100%;min-height:46px}
+}

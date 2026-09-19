@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-6-compact-output-eta-r13f-hf4';
+const CACHE_NAME = 'pems-v15-9-13-field-evidence-ux-r13f-hf11';
 const STATIC_ASSETS = [
   './',
   './index.html',

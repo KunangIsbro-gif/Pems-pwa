@@ -54,6 +54,8 @@ const state = {
   requirementsInflight: new Map(),
   requirementsRequestSeq: 0,
   gpsWarmupPromise: null,
+  fieldGps: null,
+  fieldShowAdditional: false,
   captureStage: { label: '', percent: 0, active: false },
   adminSection: 'project-setup',
   adminMenuOpen: false,
@@ -741,6 +743,7 @@ async function renderWork() {
 
   await loadWorkspace(state.selectedProjectId);
   primeGpsCache();
+
   const workspace = state.workspace;
   if (!workspace) {
     el.content.innerHTML = '<div class="empty">Workspace project belum tersedia offline. Buka project ini sekali saat online.</div>';
@@ -748,199 +751,296 @@ async function renderWork() {
   }
 
   const sessions = workspace.pointSessions || [];
+  if (
+    state.selectedSession &&
+    !sessions.some(s => s.sessionId === state.selectedSession.sessionId)
+  ) {
+    state.selectedSession = null;
+    state.requirements = null;
+    state.selectedRequirement = null;
+  }
+
   el.content.innerHTML = `
-    <div class="toolbar" style="align-items:flex-end">
-      <div class="grow">
-        <div class="field" style="margin:0">
+    <div class="field-evidence-shell">
+      <div class="card field-evidence-card">
+        <div class="field-evidence-connect-row">
+          <span class="badge ${navigator.onLine ? 'success' : 'warning'}">${navigator.onLine ? '✓ WEB APP CONNECTED' : 'OFFLINE MODE'}</span>
+          <span class="badge neutral">${sessions.length} TITIK</span>
+        </div>
+
+        <div class="field-evidence-heading">
+          <h2>PEMS Field Evidence</h2>
+          <div class="small muted">Project → Titik Evidence → Material → Foto + GPS → Verifikasi</div>
+        </div>
+
+        <div class="field">
           <label>Project</label>
-          <input id="workProjectSearch" class="input" placeholder="Cari PID / detail pekerjaan..." style="margin-bottom:8px">
           ${projectSelectHtml(projects, state.selectedProjectId, 'workProjectSelect')}
         </div>
-      </div>
-      <span class="badge info">${escapeHtml(workspace.project?.stakeholder || '-')}</span>
-      <span class="badge neutral">${sessions.length} Point Session</span>
-    </div>
-    <div class="split-layout">
-      <div class="card">
-        <div class="section-head"><h2>1. Pilih Titik</h2><span class="tiny muted">dari KML Plan / workspace</span></div>
-        <input id="sessionSearch" class="input" placeholder="Cari PS-000001 / label / role...">
-        <div id="sessionList" class="list" style="margin-top:12px"></div>
-      </div>
-      <div id="workRight" class="card sticky-card">
-        <div class="empty"><b>Langkah berikutnya:</b><br>Pilih satu titik. Setelah itu pilih <b>Material / Aset yang akan difoto</b>.</div>
+
+        <div class="field field-point-select-wrap">
+          <label>Titik Evidence Realisasi</label>
+          <select id="fieldPointSelect" class="select"></select>
+        </div>
+
+        <div id="fieldPointInfo" class="field-point-info hidden"></div>
+
+        <button id="fieldGpsBtn" type="button" class="btn field-gps-btn" ${!navigator.geolocation ? 'disabled' : ''}>
+          📍 AMBIL POSISI SAYA
+        </button>
+        <div id="fieldGpsInfo" class="tiny muted field-gps-info"></div>
+
+        <div class="field-material-picker">
+          <h3>Material Evidence</h3>
+          <div class="small muted">Requirement utama + material terkait titik. Material BOQ lain hanya dibuka jika memang direalisasikan di titik ini.</div>
+          <div class="field" style="margin-top:10px">
+            <select id="fieldMaterialSelect" class="select" disabled>
+              <option value="">Pilih Material Evidence</option>
+            </select>
+          </div>
+          <button id="fieldAddMaterialBtn" type="button" class="btn outline field-add-material-btn" disabled>
+            + TAMBAH MATERIAL LAIN
+          </button>
+          <div id="fieldAdditionalHint" class="tiny muted field-additional-hint"></div>
+        </div>
+
+        <div id="capturePanel" class="field-capture-panel"></div>
       </div>
     </div>
   `;
 
-  document.getElementById('workProjectSelect').addEventListener('change', async e => {
+  document.getElementById('workProjectSelect')?.addEventListener('change', async e => {
     await selectProject(e.target.value, true);
     state.selectedSession = null;
     state.requirements = null;
     state.selectedRequirement = null;
+    state.fieldShowAdditional = false;
     renderWork();
   });
-  bindSelectSearchPEMS_('workProjectSearch', 'workProjectSelect');
-  const search = document.getElementById('sessionSearch');
-  search.addEventListener('input', () => renderSessionList(search.value));
-  renderSessionList('');
-  if (state.selectedSession && sessions.some(s => s.sessionId === state.selectedSession.sessionId)) {
-    await selectSession(state.selectedSession.sessionId);
+
+  document.getElementById('fieldPointSelect')?.addEventListener('change', async e => {
+    const sessionId = String(e.target.value || '');
+    if (!sessionId) {
+      state.selectedSession = null;
+      state.requirements = null;
+      state.selectedRequirement = null;
+      state.fieldShowAdditional = false;
+      renderFieldPointInfoEmpty();
+      return;
+    }
+    await selectSession(sessionId);
+  });
+
+  document.getElementById('fieldGpsBtn')?.addEventListener('click', captureFieldPositionPEMS_);
+
+  renderFieldPointSelectPEMS_();
+
+  if (state.selectedSession) {
+    await selectSession(state.selectedSession.sessionId, { keepSelection: true });
+  } else if (sessions.length) {
+    const sorted = sortedFieldSessionsPEMS_();
+    if (sorted[0]?.sessionId) {
+      await selectSession(sorted[0].sessionId);
+    }
+  } else {
+    renderFieldPointInfoEmpty();
   }
 }
 
-function renderSessionList(filter) {
-  const container = document.getElementById('sessionList');
-  if (!container || !state.workspace) return;
-  const q = String(filter || '').toLowerCase().trim();
-  const sessions = (state.workspace.pointSessions || []).filter(s => {
-    const text = [s.sessionId, s.anchorLabel, s.anchorRole, s.anchorPointId].join(' ').toLowerCase();
-    return !q || text.includes(q);
-  }).slice(0, 60);
-
-  container.innerHTML = sessions.length ? sessions.map(s => `
-    <div class="list-item clickable session-card ${state.selectedSession?.sessionId === s.sessionId ? 'selected' : ''}" data-session="${escapeAttr(s.sessionId)}">
-      <div><div class="item-title">${escapeHtml(s.anchorLabel || s.sessionId)}</div><div class="item-sub">${escapeHtml(s.sessionId)} • ${escapeHtml(s.anchorRole || '-')}<br>Plan GPS: ${formatCoord(s.latPlan)}, ${formatCoord(s.longPlan)}</div></div>
-      <span class="badge ${s.verifyStatus === 'VERIFIED' ? 'success' : s.verifyStatus === 'IN_PROGRESS' ? 'warning' : 'neutral'}">${escapeHtml(s.verifyStatus || 'DRAFT')}</span>
-    </div>
-  `).join('') : '<div class="empty">Titik tidak ditemukan.</div>';
-  container.querySelectorAll('[data-session]').forEach(node => node.addEventListener('click', () => selectSession(node.dataset.session)));
+function humanPointRolePEMS_(role) {
+  const r = String(role || '').toUpperCase();
+  if (r === 'NEW_POLE') return 'TIANG BARU';
+  if (r === 'EXISTING_POLE') return 'TIANG EXISTING';
+  if (r === 'REFERENCE') return 'REFERENSI';
+  if (r === 'ODP') return 'ODP';
+  if (r === 'ODC') return 'ODC';
+  if (r === 'CLOSURE') return 'CLOSURE';
+  if (r === 'SLACK_SUPPORT') return 'SLACK SUPPORT';
+  return r || '-';
 }
 
-async function selectSession(sessionId) {
-  const sameSession =
-    state.selectedSession?.sessionId ===
-    sessionId;
+function humanPointStatusPEMS_(status) {
+  const s = String(status || 'DRAFT').toUpperCase();
+  if (s === 'VERIFIED') return 'SELESAI';
+  if (s === 'IN_PROGRESS') return 'PROSES';
+  return 'BELUM MULAI';
+}
+
+function sortedFieldSessionsPEMS_() {
+  const sessions = [...(state.workspace?.pointSessions || [])];
+  if (!state.fieldGps) return sessions;
+
+  const { latitude, longitude } = state.fieldGps;
+  return sessions.sort((a, b) => {
+    const ad = fieldDistanceToSessionPEMS_(a, latitude, longitude);
+    const bd = fieldDistanceToSessionPEMS_(b, latitude, longitude);
+    if (Number.isFinite(ad) && Number.isFinite(bd)) return ad - bd;
+    if (Number.isFinite(ad)) return -1;
+    if (Number.isFinite(bd)) return 1;
+    return 0;
+  });
+}
+
+function fieldDistanceToSessionPEMS_(session, lat = state.fieldGps?.latitude, lng = state.fieldGps?.longitude) {
+  const plat = Number(session?.latPlan);
+  const plng = Number(session?.longPlan);
+  if (![plat, plng, Number(lat), Number(lng)].every(Number.isFinite)) return NaN;
+  return haversine(Number(lat), Number(lng), plat, plng);
+}
+
+function renderFieldPointSelectPEMS_() {
+  const select = document.getElementById('fieldPointSelect');
+  if (!select) return;
+
+  const sessions = sortedFieldSessionsPEMS_();
+  const current = state.selectedSession?.sessionId || '';
+
+  if (!sessions.length) {
+    select.innerHTML = '<option value="">Tidak ada Titik Evidence Realisasi</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  select.innerHTML = [
+    '<option value="">Pilih Titik Evidence Realisasi</option>',
+    ...sessions.map(session => {
+      const distance = fieldDistanceToSessionPEMS_(session);
+      const distanceText = Number.isFinite(distance)
+        ? ` | ${distance < 1000 ? Math.round(distance) + ' m' : (distance / 1000).toFixed(1) + ' km'}`
+        : '';
+      const text = `${session.anchorLabel || session.sessionId} | ${humanPointRolePEMS_(session.anchorRole)} | ${humanPointStatusPEMS_(session.verifyStatus)}${distanceText}`;
+      return `<option value="${escapeAttr(session.sessionId)}" ${current === session.sessionId ? 'selected' : ''}>${escapeHtml(text)}</option>`;
+    })
+  ].join('');
+}
+
+function renderFieldPointInfoEmpty() {
+  const info = document.getElementById('fieldPointInfo');
+  const material = document.getElementById('fieldMaterialSelect');
+  const addBtn = document.getElementById('fieldAddMaterialBtn');
+  const hint = document.getElementById('fieldAdditionalHint');
+  const capture = document.getElementById('capturePanel');
+
+  if (info) {
+    info.classList.remove('hidden');
+    info.innerHTML = '<div class="empty">Pilih Titik Evidence Realisasi.</div>';
+  }
+  if (material) {
+    material.innerHTML = '<option value="">Pilih Material Evidence</option>';
+    material.disabled = true;
+  }
+  if (addBtn) addBtn.disabled = true;
+  if (hint) hint.textContent = '';
+  if (capture) capture.innerHTML = '';
+}
+
+async function captureFieldPositionPEMS_() {
+  const btn = document.getElementById('fieldGpsBtn');
+  const info = document.getElementById('fieldGpsInfo');
+  if (!btn) return;
+
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '📍 MENGAMBIL POSISI...';
+  if (info) info.textContent = 'Meminta GPS perangkat...';
+
+  try {
+    const gps = await getLiveGps({ timeout: 15000, maximumAge: 0 });
+    state.fieldGps = { ...gps, capturedAt: new Date().toISOString() };
+    localStorage.setItem(LAST_GPS_KEY, JSON.stringify({ ...gps, cachedAt: new Date().toISOString() }));
+    renderFieldPointSelectPEMS_();
+    if (state.selectedSession) renderRequirementsPanel();
+    if (info) {
+      const selectedDistance = state.selectedSession
+        ? fieldDistanceToSessionPEMS_(state.selectedSession)
+        : NaN;
+      info.textContent = `GPS ${gps.accuracy ? Math.round(gps.accuracy) + ' m' : '-'}${Number.isFinite(selectedDistance) ? ' • Jarak ke titik terpilih ' + Math.round(selectedDistance) + ' m' : ''}. Titik diurutkan dari yang terdekat.`;
+    }
+    toast('Posisi berhasil diambil. Titik diurutkan dari yang terdekat.', 'success', 4500);
+  } catch (err) {
+    if (info) info.textContent = humanError(err);
+    toast(humanError(err), 'danger', 6000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
+async function selectSession(sessionId, options = {}) {
+  const sameSession = state.selectedSession?.sessionId === sessionId;
 
   state.selectedSession =
-    (state.workspace?.pointSessions || [])
-      .find(
-        s =>
-          s.sessionId ===
-          sessionId
-      ) || null;
+    (state.workspace?.pointSessions || []).find(s => s.sessionId === sessionId) || null;
 
-  const revisionPmId =
-    state.revisionTargetPmId || '';
+  if (!state.selectedSession) {
+    renderFieldPointInfoEmpty();
+    return;
+  }
 
-  if (
-    sameSession &&
-    state.requirements &&
-    !revisionPmId
-  ) {
-    renderSessionList(
-      document.getElementById(
-        'sessionSearch'
-      )?.value || ''
-    );
+  renderFieldPointSelectPEMS_();
 
+  if (sameSession && state.requirements && options.keepSelection !== false) {
     renderRequirementsPanel();
     return;
   }
 
-  const requestSeq =
-    ++state.requirementsRequestSeq;
-
-  // Clear old point state immediately.
-  // Never leave previous point/material on screen while new point is loading.
+  const requestSeq = ++state.requirementsRequestSeq;
   state.requirements = null;
   state.selectedRequirement = null;
+  state.fieldShowAdditional = false;
 
-  renderSessionList(
-    document.getElementById(
-      'sessionSearch'
-    )?.value || ''
-  );
+  const info = document.getElementById('fieldPointInfo');
+  const material = document.getElementById('fieldMaterialSelect');
+  const capture = document.getElementById('capturePanel');
 
-  const right =
-    document.getElementById(
-      'workRight'
-    );
-
-  if (
-    !right ||
-    !state.selectedSession
-  ) {
-    return;
+  if (info) {
+    info.classList.remove('hidden');
+    info.innerHTML = `
+      <div class="point-loading-state">
+        <div class="point-loading-spinner"></div>
+        <div>
+          <b>Memuat ${escapeHtml(state.selectedSession.anchorLabel || state.selectedSession.sessionId)}</b>
+          <div class="small muted">${escapeHtml(state.selectedSession.sessionId)} • ${escapeHtml(humanPointRolePEMS_(state.selectedSession.anchorRole))}</div>
+        </div>
+      </div>`;
   }
-
-  const loadingLabel =
-    state.selectedSession.anchorLabel ||
-    state.selectedSession.sessionId;
-
-  const loadingRole =
-    state.selectedSession.anchorRole ||
-    '-';
-
-  right.innerHTML = `
-    <div class="point-loading-state">
-      <div class="point-loading-spinner"></div>
-      <div>
-        <b>Memuat ${escapeHtml(loadingLabel)}</b>
-        <div class="small muted">
-          ${escapeHtml(state.selectedSession.sessionId)}
-          • ${escapeHtml(loadingRole)}
-        </div>
-        <div class="tiny muted">
-          Requirement titik sebelumnya disembunyikan sampai data titik ini siap.
-        </div>
-      </div>
-    </div>
-  `;
+  if (material) {
+    material.innerHTML = '<option value="">Memuat Material Evidence...</option>';
+    material.disabled = true;
+  }
+  if (capture) capture.innerHTML = '';
 
   try {
-    const data =
-      await loadRequirements(
-        state.selectedProjectId,
-        sessionId
-      );
+    const data = await loadRequirements(state.selectedProjectId, sessionId);
 
-    // User may have clicked another point while this request was running.
     if (
-      requestSeq !==
-        state.requirementsRequestSeq ||
-      state.selectedSession?.sessionId !==
-        sessionId
-    ) {
-      return;
-    }
+      requestSeq !== state.requirementsRequestSeq ||
+      state.selectedSession?.sessionId !== sessionId
+    ) return;
 
-    state.requirements =
-      data;
+    state.requirements = data;
 
-    if (revisionPmId) {
-      state.selectedRequirement =
-        (
-          state.requirements?.requirements ||
-          []
-        ).find(
-          r =>
-            r.projectMaterialId ===
-            revisionPmId
-        ) || null;
-
+    if (state.revisionTargetPmId) {
+      const all = []
+        .concat(state.requirements?.requirements || [])
+        .concat(state.requirements?.additionalMaterials || []);
+      state.selectedRequirement = all.find(r => r.projectMaterialId === state.revisionTargetPmId) || null;
       state.revisionTargetPmId = '';
     }
 
     renderRequirementsPanel();
-  }
-  catch (err) {
+  } catch (err) {
     if (
-      requestSeq !==
-        state.requirementsRequestSeq ||
-      state.selectedSession?.sessionId !==
-        sessionId
-    ) {
-      return;
-    }
+      requestSeq !== state.requirementsRequestSeq ||
+      state.selectedSession?.sessionId !== sessionId
+    ) return;
 
-    right.innerHTML = `
-      <div class="status-box danger">
-        ${escapeHtml(humanError(err))}
-      </div>
-    `;
+    if (info) {
+      info.innerHTML = `<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;
+    }
   }
 }
-
 
 function effectiveRequirementWorkflow(r, draft) {
   const serverWorkflow =
@@ -1082,188 +1182,192 @@ function selectedRequirementStatusBannerHtml() {
   `;
 }
 
+function requirementProgressIconPEMS_(r) {
+  const workflow = String(r?.workflowStatus || r?.verifyStatus || r?.evidenceProgress || '').toUpperCase();
+  if (workflow === 'VERIFIED') return '✓';
+  if (workflow === 'SUBMITTED' || workflow === 'SYNCED' || Number(r?.photoCount || 0) > 0) return '◩';
+  if (workflow === 'NEED_REVISION' || workflow === 'REJECTED') return '⚠';
+  return '□';
+}
+
+function roleTagForPointMemberPEMS_(member) {
+  const raw = String(member?.pointRole || '').toUpperCase();
+  if (raw === 'NEW_POLE' || raw === 'EXISTING_POLE') return 'TIANG';
+  return humanPointRolePEMS_(raw);
+}
+
+function openSelectedPointInMapsPEMS_() {
+  const lat = Number(state.selectedSession?.latPlan);
+  const lng = Number(state.selectedSession?.longPlan);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    toast('Koordinat plan titik tidak tersedia.', 'warning');
+    return;
+  }
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(lat + ',' + lng)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function allSelectableRequirementsPEMS_() {
+  return []
+    .concat(state.requirements?.requirements || [])
+    .concat(state.requirements?.additionalMaterials || []);
+}
+
 function renderRequirementsPanel() {
-  const right = document.getElementById('workRight');
-  if (!right || !state.requirements || !state.selectedSession) return;
+  const info = document.getElementById('fieldPointInfo');
+  const materialSelect = document.getElementById('fieldMaterialSelect');
+  const addBtn = document.getElementById('fieldAddMaterialBtn');
+  const hint = document.getElementById('fieldAdditionalHint');
+  const capture = document.getElementById('capturePanel');
+
+  if (!info || !materialSelect || !state.requirements || !state.selectedSession) return;
+
+  const session = state.selectedSession;
   const reqs = state.requirements.requirements || [];
-  right.innerHTML = `
-    <div class="selected-point-summary">
-      <span class="tiny">TITIK TERPILIH</span>
-      <b>${escapeHtml(state.selectedSession.anchorLabel || state.selectedSession.sessionId)}</b>
-      <small>${escapeHtml(state.selectedSession.sessionId)} • ${escapeHtml(state.selectedSession.anchorRole || '-')}</small>
-    </div>
-    <div class="section-head material-step-head">
+  const required = reqs.filter(r => r.required === true);
+  const optional = reqs.filter(r => r.required !== true);
+  const additional = state.requirements.additionalMaterials || [];
+  const distance = fieldDistanceToSessionPEMS_(session);
+  const members = Array.isArray(session.members) ? session.members : [];
+
+  const anchorAssetTag = ['NEW_POLE','EXISTING_POLE'].includes(String(session.anchorRole || '').toUpperCase())
+    ? 'TIANG'
+    : humanPointRolePEMS_(session.anchorRole);
+
+  const assetRows = [
+    `<div class="field-asset-row"><span>☑</span><b>${escapeHtml(session.anchorLabel || session.sessionId)}</b><small>[${escapeHtml(anchorAssetTag)}]</small></div>`,
+    ...members.map(member => `
+      <div class="field-asset-row">
+        <span>☑</span>
+        <b>${escapeHtml(member.pointLabel || member.pointId || 'ITEM')}</b>
+        <small>[${escapeHtml(roleTagForPointMemberPEMS_(member))}]${member.distanceM !== '' && member.distanceM !== null && member.distanceM !== undefined ? ` • ${escapeHtml(String(member.distanceM))} m` : ''}</small>
+      </div>`)
+  ].join('');
+
+  const requirementRows = required.length
+    ? required.map(r => `
+        <div class="field-requirement-row">
+          <span>${requirementProgressIconPEMS_(r)}</span>
+          <div>
+            <b>${escapeHtml(r.designator || r.materialName || r.projectMaterialId)}</b>
+            <small>[${escapeHtml(r.requirementCode || 'MATERIAL')}] • Foto ${escapeHtml(String(r.photoCount || 0))}/${escapeHtml(String(r.evidenceRequired || 0))}</small>
+          </div>
+        </div>`).join('')
+    : '<div class="field-empty-requirement">Belum ada requirement evidence otomatis pada titik ini.</div>';
+
+  const optionalRows = optional.length
+    ? `<div class="field-optional-title">Opsional terkait titik</div>${optional.map(r => `
+        <div class="field-requirement-row optional">
+          <span>${requirementProgressIconPEMS_(r)}</span>
+          <div><b>${escapeHtml(r.designator || r.materialName || r.projectMaterialId)}</b><small>[${escapeHtml(r.requirementCode || 'OPSIONAL')}]</small></div>
+        </div>`).join('')}`
+    : '';
+
+  info.classList.remove('hidden');
+  info.innerHTML = `
+    <div class="field-point-head">
       <div>
-        <h2>2. Pilih Material / Aset yang akan difoto</h2>
-        <div class="small muted">Satu titik dapat memiliki beberapa material. Pilih satu material, ambil evidence, lalu lanjut material berikutnya.</div>
+        <b>${escapeHtml(session.anchorLabel || session.sessionId)}</b>
+        <small>${escapeHtml(humanPointRolePEMS_(session.anchorRole))} • ${escapeHtml(session.sessionId)}</small>
       </div>
-      <span class="badge info">${reqs.length} pilihan</span>
+      <span class="badge ${session.verifyStatus === 'VERIFIED' ? 'success' : session.verifyStatus === 'IN_PROGRESS' ? 'warning' : 'neutral'}">${escapeHtml(humanPointStatusPEMS_(session.verifyStatus))}</span>
     </div>
-    ${state.requirements.warnings?.length ? `<div class="warning-strip">${escapeHtml(state.requirements.warnings.map(w => w.message || w.code).join(' • '))}</div>` : ''}
-    ${selectedRequirementStatusBannerHtml()}
-    <div id="requirementList" class="list material-choice-list"></div>
-    <div id="capturePanel" style="margin-top:16px"></div>
+
+    ${Number.isFinite(distance) ? `<div class="field-point-line">📍 <b>Jarak dari Anda:</b> ${distance < 1000 ? Math.round(distance) + ' m' : (distance / 1000).toFixed(1) + ' km'}</div>` : ''}
+    <div class="field-point-line muted">🎯 <b>Koordinat Plan:</b> ${formatCoord(session.latPlan)}, ${formatCoord(session.longPlan)}</div>
+    <button id="fieldNavigateBtn" type="button" class="btn field-navigate-btn">🧭 ARAHKAN KE TITIK</button>
+
+    <div class="field-info-section">
+      <div class="field-info-title">Material / Aset di Titik:</div>
+      ${assetRows}
+    </div>
+
+    <div class="field-info-section field-requirement-box">
+      <div class="field-info-title">Requirement Evidence:</div>
+      ${requirementRows}
+      ${optionalRows}
+      ${additional.length ? `<div class="field-boq-note"><b>${additional.length} material BOQ lain</b> tersedia melalui tombol <b>+ Tambah Material Lain</b>.</div>` : ''}
+    </div>
+
+    ${state.requirements.warnings?.length ? `<div class="warning-strip field-warning-strip"><b>Catatan Mapping:</b><br>${state.requirements.warnings.map(w => `• ${escapeHtml(w.message || w.code)}`).join('<br>')}</div>` : ''}
   `;
 
-  const list = document.getElementById('requirementList');
-  list.innerHTML = reqs.length ? reqs.map(r => {
-    const target = Number(r.evidenceRequired || 0);
+  document.getElementById('fieldNavigateBtn')?.addEventListener('click', openSelectedPointInMapsPEMS_);
 
-    const revisionDraft = state.drafts
-      .filter(
-        d =>
-          d.projectId ===
-            state.selectedProjectId &&
-          d.sessionId ===
-            state.selectedSession.sessionId &&
-          d.projectMaterialId ===
-            r.projectMaterialId &&
-          d.parentEvidenceId &&
-          !d.isHistory &&
-          !['NEED_REVISION','REJECTED','VERIFIED']
-            .includes(
-              String(
-                d.workflow || ''
-              ).toUpperCase()
-            )
-      )
-      .sort(
-        (a,b) =>
-          String(b.updatedAt || '')
-            .localeCompare(
-              String(a.updatedAt || '')
-            )
-      )[0] || null;
+  const selectedId = state.selectedRequirement?.projectMaterialId || '';
+  const options = ['<option value="">Pilih Material Evidence</option>'];
 
-    let serverCount = Number(r.photoCount || 0);
-    let label = '';
-    let badgeClass = '';
-    let badgeText = '';
+  if (required.length) {
+    options.push('<optgroup label="REQUIREMENT EVIDENCE">');
+    required.forEach(r => {
+      const label = `${r.designator || r.materialName || r.projectMaterialId} | ${r.requirementCode || 'MATERIAL'}`;
+      options.push(`<option value="${escapeAttr(r.projectMaterialId)}" ${selectedId === r.projectMaterialId ? 'selected' : ''}>${escapeHtml(label)}</option>`);
+    });
+    options.push('</optgroup>');
+  }
 
-    if (revisionDraft) {
-      const localUnsynced = (state.draftsPhotos || []).filter(
-        p =>
-          p.draftId === revisionDraft.draftId &&
-          p.state !== 'SYNCED'
-      ).length;
+  if (optional.length) {
+    options.push('<optgroup label="OPSIONAL TERKAIT TITIK">');
+    optional.forEach(r => {
+      const label = `${r.designator || r.materialName || r.projectMaterialId} | ${r.requirementCode || 'OPSIONAL'}`;
+      options.push(`<option value="${escapeAttr(r.projectMaterialId)}" ${selectedId === r.projectMaterialId ? 'selected' : ''}>${escapeHtml(label)}</option>`);
+    });
+    options.push('</optgroup>');
+  }
 
-      serverCount =
-        Number(revisionDraft.serverPhotoCount || 0) +
-        localUnsynced;
+  if (state.fieldShowAdditional && additional.length) {
+    options.push('<optgroup label="TAMBAHAN REALISASI DARI BOQ">');
+    additional.forEach(r => {
+      const label = `${r.designator || r.materialName || r.projectMaterialId} | TAMBAHAN BOQ`;
+      options.push(`<option value="${escapeAttr(r.projectMaterialId)}" ${selectedId === r.projectMaterialId ? 'selected' : ''}>${escapeHtml(label)}</option>`);
+    });
+    options.push('</optgroup>');
+  }
 
-      label =
-        ` • REVISI V${Number(revisionDraft.revisionVersionNo || 2)}`;
+  materialSelect.innerHTML = options.join('');
+  materialSelect.disabled = !(required.length || optional.length || (state.fieldShowAdditional && additional.length));
 
-      const revisionComplete =
-        target > 0 &&
-        Number(revisionDraft.serverPhotoCount || 0) >= target;
-
-      badgeClass =
-        revisionComplete ? 'success' : 'warning';
-
-      badgeText =
-        revisionComplete ? 'REVISI COMPLETE' : 'PERLU PERBAIKAN';
-    } else {
-      const workflow =
-        String(
-          r.workflowStatus ||
-          r.verifyStatus ||
-          ''
-        ).toUpperCase();
-
-      const complete =
-        target > 0 &&
-        serverCount >= target;
-
-      if (workflow === 'VERIFIED') {
-        badgeClass = 'success';
-        badgeText = 'VERIFIED';
-        label = ` • V${Number(r.latestVersionNo || 1)}`;
-      }
-      else if (workflow === 'SUBMITTED') {
-        badgeClass = 'warning';
-        badgeText = 'MENUNGGU VERIF';
-        label = ` • V${Number(r.latestVersionNo || 1)}`;
-      }
-      else if (workflow === 'NEED_REVISION') {
-        badgeClass = 'warning';
-        badgeText = 'PERLU PERBAIKAN';
-        label = ` • V${Number(r.latestVersionNo || 1)}`;
-      }
-      else if (workflow === 'REJECTED') {
-        badgeClass = 'danger';
-        badgeText = 'DITOLAK';
-        label = ` • V${Number(r.latestVersionNo || 1)}`;
-      }
-      else if (workflow === 'SYNCED') {
-        badgeClass = 'info';
-        badgeText = 'SIAP SUBMIT';
-      }
-      else if (workflow === 'DRAFT_SERVER') {
-        badgeClass = 'neutral';
-        badgeText = 'PROSES';
-      }
-      else {
-        badgeClass =
-          complete
-            ? 'success'
-            : r.required
-              ? 'warning'
-              : 'neutral';
-
-        badgeText =
-          complete
-            ? 'COMPLETE'
-            : r.required
-              ? 'BELUM'
-              : 'OPSIONAL';
-      }
+  materialSelect.onchange = async e => {
+    const pmId = String(e.target.value || '');
+    if (!pmId) {
+      state.selectedRequirement = null;
+      if (capture) capture.innerHTML = '';
+      return;
     }
+    await selectRequirement(pmId);
+  };
 
-    const isSelected =
-      state.selectedRequirement?.projectMaterialId ===
-      r.projectMaterialId;
+  if (addBtn) {
+    addBtn.disabled = additional.length === 0;
+    addBtn.textContent = state.fieldShowAdditional
+      ? '− SEMBUNYIKAN MATERIAL LAIN'
+      : '+ TAMBAH MATERIAL LAIN';
+    addBtn.onclick = () => {
+      state.fieldShowAdditional = !state.fieldShowAdditional;
+      renderRequirementsPanel();
+    };
+  }
 
-    return `
-      <div class="list-item clickable material-card ${isSelected ? 'selected' : ''}" data-pm="${escapeAttr(r.projectMaterialId)}">
-        <div class="material-choice-main">
-          <div class="item-title">${escapeHtml(r.designator || r.materialName || r.projectMaterialId)}</div>
-          <div class="item-sub">
-            ${escapeHtml(r.materialName || '')}
-            ${r.category ? ` • ${escapeHtml(r.category)}` : ''}<br>
-            ${escapeHtml(r.requirementCode || 'MATERIAL')} •
-            ${r.required ? 'WAJIB' : 'OPSIONAL'} •
-            Evidence ${serverCount}/${target}${escapeHtml(label)}
-          </div>
-        </div>
-        <div class="material-choice-side">
-          <span class="badge ${badgeClass}">${escapeHtml(badgeText)}</span>
-          <span class="material-select-cta ${isSelected ? 'selected' : ''}">
-            ${isSelected ? '✓ TERPILIH' : 'PILIH MATERIAL'}
-          </span>
-        </div>
-      </div>`;
-  }).join('') : '<div class="empty">Tidak ada Material / Aset yang dapat dipilih pada titik ini. Cek requirement/mapping point.</div>';
-  list.querySelectorAll('[data-pm]').forEach(node => node.addEventListener('click', () => selectRequirement(node.dataset.pm)));
-  if (state.selectedRequirement) renderCapturePanel();
+  if (hint) {
+    hint.textContent = additional.length
+      ? `${additional.length} material BOQ lain tersedia. Tidak otomatis dianggap requirement titik.`
+      : 'Tidak ada material BOQ tambahan yang tersedia.';
+  }
+
+  if (state.selectedRequirement) {
+    renderCapturePanel();
+  } else if (capture) {
+    capture.innerHTML = '';
+  }
 }
 
 async function selectRequirement(projectMaterialId) {
-  state.selectedRequirement =
-    (
-      state.requirements?.requirements ||
-      []
-    ).find(
-      r =>
-        r.projectMaterialId ===
-        projectMaterialId
-    ) || null;
+  state.selectedRequirement = allSelectableRequirementsPEMS_().find(
+    r => r.projectMaterialId === projectMaterialId
+  ) || null;
 
-  // renderRequirementsPanel() already invokes renderCapturePanel()
-  // for the selected requirement. Do not invoke it twice.
   renderRequirementsPanel();
 }
-
 
 async function getServerPhotosForEvidence(evidenceId) {
   if (!evidenceId) {
@@ -4988,7 +5092,7 @@ async function refreshWorkspaceInBackground(projectId, key) {
 
 async function loadRequirements(projectId, sessionId, options = {}) {
   const key =
-    `requirements:r10:${userCachePrefix()}:${projectId}:${sessionId}`;
+    `requirements:r11:${userCachePrefix()}:${projectId}:${sessionId}`;
 
   const requestKey =
     `${projectId}:${sessionId}`;
