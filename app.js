@@ -393,7 +393,8 @@ async function bootAuthenticated() {
 
     if (navigator.onLine) {
       runSyncQueue();
-      refreshNotifications(false);
+      // HF16: do not let non-critical notification work compete with FIELD startup.
+      setTimeout(() => refreshNotifications(false).catch(() => {}), 8000);
       startNotificationPolling();
       primeGpsCache();
     }
@@ -842,9 +843,6 @@ async function renderWork() {
   document.getElementById('fieldGpsBtn')?.addEventListener('click', captureFieldPositionPEMS_);
 
   renderFieldProjectDocumentsPEMS_();
-  loadFieldDocumentsPEMS_(state.selectedProjectId)
-    .then(() => renderFieldProjectDocumentsPEMS_())
-    .catch(() => {});
   renderFieldPointSelectPEMS_();
 
   if (state.selectedSession) {
@@ -857,6 +855,16 @@ async function renderWork() {
   } else {
     renderFieldPointInfoEmpty();
   }
+
+  // HF16: BA/COMCASE is important but not needed to paint the selected point.
+  // Load it after the main FIELD requirement is already usable.
+  setTimeout(() => {
+    if (state.currentPage !== 'pekerjaan') return;
+    const pid = state.selectedProjectId;
+    loadFieldDocumentsPEMS_(pid)
+      .then(() => { if (state.selectedProjectId === pid) renderFieldProjectDocumentsPEMS_(); })
+      .catch(() => {});
+  }, 1500);
 }
 
 async function loadFieldDocumentsPEMS_(projectId, options = {}) {
@@ -877,6 +885,16 @@ async function loadFieldDocumentsPEMS_(projectId, options = {}) {
 
   state.fieldDocumentsProjectId = projectId;
 
+  const cacheKey = `field-documents:hf16:${userCachePrefix()}:${projectId}`;
+  if (options.force !== true) {
+    const cachedRow = await cacheGetRow(cacheKey);
+    if (cachedRow?.value) {
+      state.fieldDocuments = cachedRow.value;
+      // Fresh enough: no network needed.
+      if (cacheRowAgeMs(cachedRow) < 600_000) return state.fieldDocuments;
+    }
+  }
+
   if (!navigator.onLine || !sessionIsUsable()) {
     state.fieldDocuments = {
       projectId,
@@ -895,6 +913,7 @@ async function loadFieldDocumentsPEMS_(projectId, options = {}) {
     if (state.selectedProjectId === projectId) {
       state.fieldDocuments = data || null;
     }
+    if (data) await cachePut(cacheKey, data);
     return data;
   } catch (err) {
     if (state.selectedProjectId === projectId) {
@@ -5301,7 +5320,7 @@ async function refreshWorkspaceInBackground(projectId, key) {
 
 async function loadRequirements(projectId, sessionId, options = {}) {
   const key =
-    `requirements:hf15:${userCachePrefix()}:${projectId}:${sessionId}`;
+    `requirements:hf16:${userCachePrefix()}:${projectId}:${sessionId}`;
 
   const requestKey =
     `${projectId}:${sessionId}`;
