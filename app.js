@@ -5301,7 +5301,7 @@ async function refreshWorkspaceInBackground(projectId, key) {
 
 async function loadRequirements(projectId, sessionId, options = {}) {
   const key =
-    `requirements:hf14:${userCachePrefix()}:${projectId}:${sessionId}`;
+    `requirements:hf15:${userCachePrefix()}:${projectId}:${sessionId}`;
 
   const requestKey =
     `${projectId}:${sessionId}`;
