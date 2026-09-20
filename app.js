@@ -1366,6 +1366,7 @@ function additionalMaterialTagPEMS_(r) {
   const code = String(r?.requirementCode || '').toUpperCase();
   if (source === 'PLAN_KML' && mapping === 'OUT_OF_BOQ_PLAN_KML') return 'PLAN KML · OUT OF BOQ';
   if (source === 'PLAN_KML') return 'PLAN KML';
+  if (source === 'MASTER_V3_OUT_OF_BOQ' || mapping === 'OUT_OF_BOQ') return 'OUT OF BOQ';
   if (source === 'NON_MATERIAL_FIELD' || code === 'NON_MATERIAL') return 'NON MATERIAL';
   return 'TAMBAHAN BOQ';
 }
@@ -1381,7 +1382,7 @@ function additionalMaterialSummaryPEMS_(items) {
   });
   const parts = [];
   if (counts.plan) parts.push(`${counts.plan} PLAN KML`);
-  if (counts.out) parts.push(`${counts.out} PLAN KML OUT OF BOQ`);
+  if (counts.out) parts.push(`${counts.out} OUT OF BOQ`);
   if (counts.non) parts.push(`${counts.non} NON MATERIAL`);
   if (counts.boq) parts.push(`${counts.boq} TAMBAHAN BOQ`);
   return parts.join(' · ');

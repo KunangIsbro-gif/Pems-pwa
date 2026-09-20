@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-14-osp-field-mapping-r13f-hf12';
+const CACHE_NAME = 'pems-v15-9-15-field-profile-v3-r13f-hf13';
 const STATIC_ASSETS = [
   './',
   './index.html',
