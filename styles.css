@@ -418,3 +418,44 @@ body.modal-open{overflow:hidden}
   .field-evidence-card .toolbar{gap:8px}
   .field-evidence-card .toolbar .btn{flex:1 1 100%;min-height:46px}
 }
+
+
+/* ==========================================================
+   V15.9.14 HF12 — OSP-FO mapping + BA COMCASE field document
+   ========================================================== */
+.field-project-document-box {
+  margin: 12px 0 14px;
+  padding: 14px;
+  border: 1px solid var(--border, #dbe3ea);
+  border-radius: 14px;
+  background: #fffaf0;
+}
+.field-doc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.field-doc-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 8px 0 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.75);
+  border: 1px solid rgba(0,0,0,.07);
+}
+.field-doc-current div { min-width: 0; }
+.field-doc-current b,
+.field-doc-current small { display: block; overflow-wrap: anywhere; }
+.field-ba-btn { width: 100%; margin-top: 4px; }
+.field-ba-note {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #765a00;
+}
+.field-asset-row.plan-candidate { opacity: .9; }
+.field-asset-row.plan-candidate > span { font-weight: 800; }

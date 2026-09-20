@@ -56,6 +56,9 @@ const state = {
   gpsWarmupPromise: null,
   fieldGps: null,
   fieldShowAdditional: false,
+  fieldDocuments: null,
+  fieldDocumentsProjectId: '',
+  fieldDocumentUploading: false,
   captureStage: { label: '', percent: 0, active: false },
   adminSection: 'project-setup',
   adminMenuOpen: false,
@@ -778,6 +781,9 @@ async function renderWork() {
           ${projectSelectHtml(projects, state.selectedProjectId, 'workProjectSelect')}
         </div>
 
+        <div id="fieldProjectDocumentBox" class="field-project-document-box hidden"></div>
+        <input id="fieldBaComcaseInput" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" class="hidden">
+
         <div class="field field-point-select-wrap">
           <label>Titik Evidence Realisasi</label>
           <select id="fieldPointSelect" class="select"></select>
@@ -815,6 +821,8 @@ async function renderWork() {
     state.requirements = null;
     state.selectedRequirement = null;
     state.fieldShowAdditional = false;
+    state.fieldDocuments = null;
+    state.fieldDocumentsProjectId = '';
     renderWork();
   });
 
@@ -833,6 +841,10 @@ async function renderWork() {
 
   document.getElementById('fieldGpsBtn')?.addEventListener('click', captureFieldPositionPEMS_);
 
+  renderFieldProjectDocumentsPEMS_();
+  loadFieldDocumentsPEMS_(state.selectedProjectId)
+    .then(() => renderFieldProjectDocumentsPEMS_())
+    .catch(() => {});
   renderFieldPointSelectPEMS_();
 
   if (state.selectedSession) {
@@ -844,6 +856,147 @@ async function renderWork() {
     }
   } else {
     renderFieldPointInfoEmpty();
+  }
+}
+
+async function loadFieldDocumentsPEMS_(projectId, options = {}) {
+  projectId = String(projectId || '').trim();
+  if (!projectId) {
+    state.fieldDocuments = null;
+    state.fieldDocumentsProjectId = '';
+    return null;
+  }
+
+  if (
+    options.force !== true &&
+    state.fieldDocumentsProjectId === projectId &&
+    state.fieldDocuments
+  ) {
+    return state.fieldDocuments;
+  }
+
+  state.fieldDocumentsProjectId = projectId;
+
+  if (!navigator.onLine || !sessionIsUsable()) {
+    state.fieldDocuments = {
+      projectId,
+      offline: true,
+      hasBaComcaseRequirement: false,
+      baComcase: null
+    };
+    return state.fieldDocuments;
+  }
+
+  try {
+    const data = await api(`/projects/${encodeURIComponent(projectId)}/field-documents`, {
+      timeoutMs: 20000,
+      maxAttempts: 2
+    });
+    if (state.selectedProjectId === projectId) {
+      state.fieldDocuments = data || null;
+    }
+    return data;
+  } catch (err) {
+    if (state.selectedProjectId === projectId) {
+      state.fieldDocuments = {
+        projectId,
+        loadError: humanError(err),
+        hasBaComcaseRequirement: false,
+        baComcase: null
+      };
+    }
+    return state.fieldDocuments;
+  }
+}
+
+function renderFieldProjectDocumentsPEMS_() {
+  const box = document.getElementById('fieldProjectDocumentBox');
+  const input = document.getElementById('fieldBaComcaseInput');
+  if (!box) return;
+
+  const data = state.fieldDocuments;
+  if (!data || data.projectId !== state.selectedProjectId || !data.hasBaComcaseRequirement) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+
+  const doc = data.baComcase || null;
+  const status = String(doc?.status || '').toUpperCase();
+  const uploaded = !!doc;
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <div class="field-doc-head">
+      <div>
+        <div class="field-info-title">Dokumen Perizinan / COMCASE</div>
+        <div class="small muted">NON MATERIAL · Evidence dokumen project</div>
+      </div>
+      <span class="badge ${uploaded ? 'success' : 'warning'}">${uploaded ? escapeHtml(status || 'SUBMITTED') : 'BELUM UPLOAD'}</span>
+    </div>
+    ${uploaded ? `
+      <div class="field-doc-current">
+        <span>📄</span>
+        <div><b>${escapeHtml(doc.fileName || 'BA COMCASE')}</b><small>${escapeHtml(formatDateTime(doc.uploadedAt || ''))}${doc.uploadedBy ? ` · ${escapeHtml(doc.uploadedBy)}` : ''}</small></div>
+      </div>` : ''}
+    <button id="fieldBaComcaseBtn" type="button" class="btn ${uploaded ? 'outline' : 'warning'} field-ba-btn" ${state.fieldDocumentUploading ? 'disabled' : ''}>
+      ${state.fieldDocumentUploading ? 'MENGUPLOAD...' : (uploaded ? 'GANTI BA COMCASE' : 'UPLOAD BA COMCASE')}
+    </button>
+    <div class="field-ba-note">Pastikan BA COMCASE sudah ditandatangani Stakeholder.</div>
+  `;
+
+  const btn = document.getElementById('fieldBaComcaseBtn');
+  if (btn && input) {
+    btn.onclick = () => {
+      if (!navigator.onLine) {
+        toast('Upload BA COMCASE memerlukan koneksi internet.', 'warning', 5000);
+        return;
+      }
+      input.value = '';
+      input.click();
+    };
+    input.onchange = async event => {
+      const file = event.target.files?.[0];
+      if (file) await uploadBaComcasePEMS_(file);
+    };
+  }
+}
+
+async function uploadBaComcasePEMS_(file) {
+  if (!file || state.fieldDocumentUploading) return;
+  const projectId = String(state.selectedProjectId || '').trim();
+  if (!projectId) return;
+
+  const lower = String(file.name || '').toLowerCase();
+  if (!/\.(pdf|jpg|jpeg|png)$/.test(lower)) {
+    toast('BA COMCASE harus PDF, JPG, JPEG, atau PNG.', 'danger', 5500);
+    return;
+  }
+  if (Number(file.size || 0) > 15 * 1024 * 1024) {
+    toast('Ukuran BA COMCASE maksimum 15 MB.', 'danger', 5500);
+    return;
+  }
+
+  try {
+    state.fieldDocumentUploading = true;
+    renderFieldProjectDocumentsPEMS_();
+    const base64 = await adminFileToBase64(file);
+    await api(`/projects/${encodeURIComponent(projectId)}/ba-comcase`, {
+      method: 'POST',
+      body: {
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        base64
+      },
+      timeoutMs: 45000,
+      maxAttempts: 1
+    });
+    await loadFieldDocumentsPEMS_(projectId, { force: true });
+    toast('BA COMCASE berhasil diupload.', 'success', 5000);
+  } catch (err) {
+    toast(humanError(err), 'danger', 7000);
+  } finally {
+    state.fieldDocumentUploading = false;
+    renderFieldProjectDocumentsPEMS_();
   }
 }
 
@@ -1207,6 +1360,33 @@ function openSelectedPointInMapsPEMS_() {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+function additionalMaterialTagPEMS_(r) {
+  const source = String(r?.source || '').toUpperCase();
+  const mapping = String(r?.mappingStatus || '').toUpperCase();
+  const code = String(r?.requirementCode || '').toUpperCase();
+  if (source === 'PLAN_KML' && mapping === 'OUT_OF_BOQ_PLAN_KML') return 'PLAN KML · OUT OF BOQ';
+  if (source === 'PLAN_KML') return 'PLAN KML';
+  if (source === 'NON_MATERIAL_FIELD' || code === 'NON_MATERIAL') return 'NON MATERIAL';
+  return 'TAMBAHAN BOQ';
+}
+
+function additionalMaterialSummaryPEMS_(items) {
+  const counts = { plan:0, out:0, non:0, boq:0 };
+  (items || []).forEach(r => {
+    const tag = additionalMaterialTagPEMS_(r);
+    if (tag === 'PLAN KML') counts.plan++;
+    else if (tag.includes('OUT OF BOQ')) counts.out++;
+    else if (tag === 'NON MATERIAL') counts.non++;
+    else counts.boq++;
+  });
+  const parts = [];
+  if (counts.plan) parts.push(`${counts.plan} PLAN KML`);
+  if (counts.out) parts.push(`${counts.out} PLAN KML OUT OF BOQ`);
+  if (counts.non) parts.push(`${counts.non} NON MATERIAL`);
+  if (counts.boq) parts.push(`${counts.boq} TAMBAHAN BOQ`);
+  return parts.join(' · ');
+}
+
 function allSelectableRequirementsPEMS_() {
   return []
     .concat(state.requirements?.requirements || [])
@@ -1234,14 +1414,20 @@ function renderRequirementsPanel() {
     ? 'TIANG'
     : humanPointRolePEMS_(session.anchorRole);
 
+  const planAddRoles = new Set(['ODP','ODC','CLOSURE']);
+  const anchorIsPlanAdd = planAddRoles.has(String(anchorAssetTag || '').toUpperCase());
   const assetRows = [
-    `<div class="field-asset-row"><span>☑</span><b>${escapeHtml(session.anchorLabel || session.sessionId)}</b><small>[${escapeHtml(anchorAssetTag)}]</small></div>`,
-    ...members.map(member => `
-      <div class="field-asset-row">
-        <span>☑</span>
+    `<div class="field-asset-row ${anchorIsPlanAdd ? 'plan-candidate' : ''}"><span>${anchorIsPlanAdd ? '＋' : '☑'}</span><b>${escapeHtml(session.anchorLabel || session.sessionId)}</b><small>[${escapeHtml(anchorAssetTag)}]${anchorIsPlanAdd ? ' • PLAN KML · pilih via Tambah Material Lain' : ''}</small></div>`,
+    ...members.map(member => {
+      const memberRoleTag = roleTagForPointMemberPEMS_(member);
+      const isPlanAdd = planAddRoles.has(String(memberRoleTag || '').toUpperCase());
+      return `
+      <div class="field-asset-row ${isPlanAdd ? 'plan-candidate' : ''}">
+        <span>${isPlanAdd ? '＋' : '☑'}</span>
         <b>${escapeHtml(member.pointLabel || member.pointId || 'ITEM')}</b>
-        <small>[${escapeHtml(roleTagForPointMemberPEMS_(member))}]${member.distanceM !== '' && member.distanceM !== null && member.distanceM !== undefined ? ` • ${escapeHtml(String(member.distanceM))} m` : ''}</small>
-      </div>`)
+        <small>[${escapeHtml(memberRoleTag)}]${isPlanAdd ? ' • PLAN KML · pilih via Tambah Material Lain' : ''}${member.distanceM !== '' && member.distanceM !== null && member.distanceM !== undefined ? ` • ${escapeHtml(String(member.distanceM))} m` : ''}</small>
+      </div>`;
+    })
   ].join('');
 
   const requirementRows = required.length
@@ -1286,7 +1472,7 @@ function renderRequirementsPanel() {
       <div class="field-info-title">Requirement Evidence:</div>
       ${requirementRows}
       ${optionalRows}
-      ${additional.length ? `<div class="field-boq-note"><b>${additional.length} material BOQ lain</b> tersedia melalui tombol <b>+ Tambah Material Lain</b>.</div>` : ''}
+      ${additional.length ? `<div class="field-boq-note"><b>${additional.length} kandidat tambahan</b> tersedia melalui tombol <b>+ Tambah Material Lain</b>.<br><small>${escapeHtml(additionalMaterialSummaryPEMS_(additional))}</small></div>` : ''}
     </div>
 
     ${state.requirements.warnings?.length ? `<div class="warning-strip field-warning-strip"><b>Catatan Mapping:</b><br>${state.requirements.warnings.map(w => `• ${escapeHtml(w.message || w.code)}`).join('<br>')}</div>` : ''}
@@ -1316,9 +1502,9 @@ function renderRequirementsPanel() {
   }
 
   if (state.fieldShowAdditional && additional.length) {
-    options.push('<optgroup label="TAMBAHAN REALISASI DARI BOQ">');
+    options.push('<optgroup label="TAMBAH MATERIAL / EVIDENCE LAIN">');
     additional.forEach(r => {
-      const label = `${r.designator || r.materialName || r.projectMaterialId} | TAMBAHAN BOQ`;
+      const label = `${r.designator || r.materialName || r.projectMaterialId} | ${additionalMaterialTagPEMS_(r)}`;
       options.push(`<option value="${escapeAttr(r.projectMaterialId)}" ${selectedId === r.projectMaterialId ? 'selected' : ''}>${escapeHtml(label)}</option>`);
     });
     options.push('</optgroup>');
@@ -1350,8 +1536,8 @@ function renderRequirementsPanel() {
 
   if (hint) {
     hint.textContent = additional.length
-      ? `${additional.length} material BOQ lain tersedia. Tidak otomatis dianggap requirement titik.`
-      : 'Tidak ada material BOQ tambahan yang tersedia.';
+      ? `${additional.length} kandidat tersedia: ${additionalMaterialSummaryPEMS_(additional)}. Tidak otomatis menjadi requirement utama.`
+      : 'Tidak ada material/evidence tambahan yang relevan untuk titik ini.';
   }
 
   if (state.selectedRequirement) {
