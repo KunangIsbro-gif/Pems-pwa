@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-15-field-profile-v3-r13f-hf13';
+const CACHE_NAME = 'pems-v15-9-16-field-profile-v3-r13f-hf14';
 const STATIC_ASSETS = [
   './',
   './index.html',

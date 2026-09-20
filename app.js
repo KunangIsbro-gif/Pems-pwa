@@ -2339,6 +2339,11 @@ async function getOrCreateCurrentDraft(ctx) {
     materialId: r.materialId,
     designator: r.designator,
     materialName: r.materialName,
+    category: r.category || '',
+    unit: r.unit || '',
+    source: r.source || '',
+    mappingStatus: r.mappingStatus || '',
+    mappingProfile: state.requirements?.mappingProfile || '',
     requirementCode: r.requirementCode,
     requiredPhotoCount: Math.max(0, Number(r.evidenceRequired || 0)),
     qtyPlan: r.qtyPlan,
@@ -2661,6 +2666,14 @@ async function syncOneQueueItem(item) {
       projectId: draft.projectId,
       sessionId: draft.sessionId,
       projectMaterialId: draft.projectMaterialId,
+      materialId: draft.materialId || '',
+      designator: draft.designator || '',
+      materialName: draft.materialName || '',
+      category: draft.category || '',
+      unit: draft.unit || '',
+      source: draft.source || '',
+      mappingStatus: draft.mappingStatus || '',
+      mappingProfile: draft.mappingProfile || '',
       evidenceDraftId: draft.draftId,
       photoLocalId: photo.photoLocalId,
       latitude: photo.latitude,
@@ -2686,6 +2699,15 @@ async function syncOneQueueItem(item) {
       base64
     }
   });
+
+  const previousPmId = draft.projectMaterialId;
+  if (result.projectMaterialId && result.projectMaterialId !== previousPmId) {
+    draft.projectMaterialId = result.projectMaterialId;
+    if (state.selectedRequirement?.projectMaterialId === previousPmId) {
+      state.selectedRequirement.projectMaterialId = result.projectMaterialId;
+      state.selectedRequirement.isVirtual = false;
+    }
+  }
 
   draft.serverEvidenceId = result.evidenceItemId;
   draft.serverPhotoCount = Number(result.photoCount || draft.serverPhotoCount || 0);
@@ -5279,7 +5301,7 @@ async function refreshWorkspaceInBackground(projectId, key) {
 
 async function loadRequirements(projectId, sessionId, options = {}) {
   const key =
-    `requirements:r11:${userCachePrefix()}:${projectId}:${sessionId}`;
+    `requirements:hf14:${userCachePrefix()}:${projectId}:${sessionId}`;
 
   const requestKey =
     `${projectId}:${sessionId}`;
@@ -5299,7 +5321,7 @@ async function loadRequirements(projectId, sessionId, options = {}) {
     if (
       navigator.onLine &&
       sessionIsUsable() &&
-      cacheRowAgeMs(cachedRow) > 120_000
+      cacheRowAgeMs(cachedRow) > 300_000
     ) {
       refreshRequirementsInBackground(
         projectId,
