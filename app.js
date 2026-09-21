@@ -220,7 +220,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-20-r13f-hf18');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-21-r13f-hf19');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -400,7 +400,7 @@ async function bootAuthenticated() {
 
     if (navigator.onLine) {
       runSyncQueue();
-      // HF16: do not let non-critical notification work compete with FIELD startup.
+      // HF16: do not let non-critical notification work compete with WASPANG startup.
       setTimeout(() => refreshNotifications(false).catch(() => {}), initialRoute.page === 'pekerjaan' ? 15000 : 5000);
       startNotificationPolling();
       primeGpsCache();
@@ -473,11 +473,17 @@ function openMobileMorePEMS_(menus) {
           ${notificationCountForPage(key) ? `<span class="nav-count">${escapeHtml(String(notificationCountForPage(key)))}</span>` : ''}
         </a>`).join('')}
       </div>
+      <button type="button" class="btn danger full mobile-more-logout" data-mobile-logout="1">KELUAR / LOGOUT</button>
     </div>`;
   document.body.appendChild(wrap);
   wrap.addEventListener('click', event => {
     if (event.target === wrap || event.target.closest('[data-more-close]')) {
       closeMobileMorePEMS_();
+      return;
+    }
+    if (event.target.closest('[data-mobile-logout]')) {
+      closeMobileMorePEMS_();
+      logout();
       return;
     }
     const link = event.target.closest('[data-more-nav]');
@@ -675,7 +681,7 @@ async function renderHome() {
   const m = monitoring || { evidenceTotal: 0, waitingVerification: 0, needRevision: 0, verified: 0 };
 
   el.content.innerHTML = `
-    ${state.config.GPS_POLICY === 'DEV' ? '<div class="warning-strip"><b>DEV MODE:</b> GPS fallback laptop masih diizinkan. Ubah GPS_POLICY ke FIELD sebelum pilot tim lapangan.</div>' : ''}
+    ${state.config.GPS_POLICY === 'DEV' ? '<div class="warning-strip"><b>DEV MODE:</b> GPS fallback laptop masih diizinkan. Ubah GPS_POLICY ke FIELD sebelum pilot WASPANG.</div>' : ''}
     <div class="grid kpi">
       ${kpi('Project', projects.length)}
       ${kpi('Queue Lokal', pending, failed ? `${failed} gagal` : 'siap')}
@@ -685,7 +691,7 @@ async function renderHome() {
     <div class="grid two" style="margin-top:16px">
       <div class="card">
         <div class="section-head"><h2>Mulai / Lanjut Pekerjaan</h2><span class="badge ${navigator.onLine ? 'success' : 'warning'}">${navigator.onLine ? 'ONLINE' : 'OFFLINE'}</span></div>
-        <p class="muted">Alur lapangan: pilih Project → pilih Titik → pilih Material/Aset yang akan difoto → Ambil Foto + GPS.</p>
+        <p class="muted">Alur WASPANG: pilih Project → pilih Titik → pilih Material/Aset yang akan difoto → Ambil Foto + GPS.</p>
         <div class="field"><label>Project</label><input id="homeProjectSearch" class="input" placeholder="Cari PID / detail pekerjaan..." style="margin-bottom:8px">${projectSelectHtml(projects, state.selectedProjectId, 'homeProjectSelect')}</div>
         <button id="continueWorkBtn" class="btn primary full" style="margin-top:12px" ${projects.length ? '' : 'disabled'}>Lanjut Pekerjaan</button>
       </div>
@@ -856,7 +862,7 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
         </div>
 
         <div class="field-evidence-heading">
-          <h2>PEMS Field Evidence</h2>
+          <h2>PEMS Evidence WASPANG</h2>
           <div class="small muted">Project → Titik Evidence → Material → Foto + GPS → Verifikasi</div>
         </div>
 
@@ -1994,7 +2000,7 @@ async function renderCapturePanel() {
       <div class="field"><label>Quantity Realisasi</label><input id="qtyRealInput" class="input" type="number" step="any" value="${escapeAttr(draft?.qtyReal ?? '')}" placeholder="Opsional" ${locked ? 'disabled' : ''}></div>
       <div class="field"><label>Target Foto</label><input class="input" disabled value="${target} foto"></div>
     </div>
-    <div class="field" style="margin-top:10px"><label>Catatan Lapangan</label><textarea id="fieldNoteInput" class="textarea" placeholder="Kendala / kondisi khusus..." ${locked ? 'disabled' : ''}>${escapeHtml(draft?.fieldNote || '')}</textarea></div>
+    <div class="field" style="margin-top:10px"><label>Catatan WASPANG</label><textarea id="fieldNoteInput" class="textarea" placeholder="Kendala / kondisi khusus..." ${locked ? 'disabled' : ''}>${escapeHtml(draft?.fieldNote || '')}</textarea></div>
     <div class="status-box ${complete ? 'success' : 'neutral'}">
       <b>Progress:</b> Server ${serverCount}/${target} • Lokal belum sync ${actualLocal.unsynced} • Total terdeteksi ${totalKnown}/${target}
     </div>
@@ -2280,14 +2286,14 @@ async function onCameraFileSelected(event) {
       gps.accuracy > blockGps
     ) {
       throw new Error(
-        `GPS accuracy ${Math.round(gps.accuracy)} m > batas FIELD ${blockGps} m. Ulangi GPS.`
+        `GPS accuracy ${Math.round(gps.accuracy)} m > batas WASPANG ${blockGps} m. Ulangi GPS.`
       );
     }
 
     const blockDistance = Number(
       configNumber(
         'POINT_DISTANCE_BLOCK_M',
-        configNumber('POINT_DISTANCE_WARNING_M', 30)
+        100
       )
     );
 
@@ -2297,7 +2303,7 @@ async function onCameraFileSelected(event) {
       pointDistance > blockDistance
     ) {
       throw new Error(
-        `Jarak ke titik plan ${Math.round(pointDistance)} m > batas FIELD ${blockDistance} m. Datang lebih dekat ke titik sebelum ambil evidence.`
+        `Jarak ke titik plan ${Math.round(pointDistance)} m > batas WASPANG ${blockDistance} m. Datang lebih dekat ke titik sebelum ambil evidence.`
       );
     }
 
@@ -2917,7 +2923,7 @@ async function renderVerification() {
     return;
   }
   if (!navigator.onLine) {
-    el.content.innerHTML = '<div class="empty">Verifikasi membutuhkan koneksi server. Evidence lapangan tetap dapat dibuat offline.</div>';
+    el.content.innerHTML = '<div class="empty">Verifikasi membutuhkan koneksi server. Evidence WASPANG tetap dapat dibuat offline.</div>';
     return;
   }
   try {
@@ -2953,7 +2959,7 @@ function verificationCardHtml(ev) {
         <div><div class="tiny muted">Distance to Plan</div><b>${formatNumber(ev.distanceToPlanM)} m</b></div>
         <div><div class="tiny muted">Foto</div><b>${photos.length}/${Number(ev.requiredPhotoCount || 1)}</b></div>
       </div>
-      ${ev.fieldNote ? `<div class="status-box neutral"><b>Catatan Lapangan:</b> ${escapeHtml(ev.fieldNote)}</div>` : ''}
+      ${ev.fieldNote ? `<div class="status-box neutral"><b>Catatan WASPANG:</b> ${escapeHtml(ev.fieldNote)}</div>` : ''}
       <div class="photo-grid" style="margin-top:12px">${photos.map(p => `
         <div class="photo-card verifier-photo-card">
           <div class="small"><b>${escapeHtml(p.fileName || p.photoId)}</b></div>
@@ -3349,7 +3355,7 @@ async function renderMonitoring(options = {}) {
     data.byUser || [];
 
   const isField =
-    role === 'LAPANGAN';
+    isWaspangRolePEMS_(role);
 
   const metricCards =
     isField
@@ -3389,7 +3395,7 @@ async function renderMonitoring(options = {}) {
           [
             'Perlu Revisi',
             data.needRevision || 0,
-            'dikembalikan ke lapangan'
+            'dikembalikan ke WASPANG'
           ],
           [
             'Verified',
@@ -3895,7 +3901,7 @@ async function renderAdmin() {
             </div>
             <div class="status-box neutral" style="margin-top:12px"><b>R11N-P5:</b> BOQ Proactive dibaca direct; KML dipetakan ke physical BOQ family (M/J satu family). Point referensi seperti DEMAND tidak dianggap mismatch.</div>
             <div class="plan-review-box" style="margin-top:14px">
-              <div class="section-head"><div><h3>Plan Review — BOQ vs KML/KMZ</h3><div class="small muted">AUTO REVIEW = analisis sistem. ADMIN REVIEW = mapping & pengecekan plan. PM REVIEW = keputusan Publish for Field Execution.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
+              <div class="section-head"><div><h3>Plan Review — BOQ vs KML/KMZ</h3><div class="small muted">AUTO REVIEW = analisis sistem. ADMIN REVIEW = mapping & pengecekan plan. PM REVIEW = keputusan Publish for WASPANG Execution.</div></div><span id="planReviewBadge" class="badge neutral">NOT_REVIEWED</span></div>
               <div class="grid three" style="margin-top:10px">
                 <div class="status-box neutral"><b>AUTO REVIEW</b><div><span id="planAutoBadge" class="badge neutral">NOT_REVIEWED</span></div></div>
                 <div class="status-box neutral"><b>ADMIN REVIEW</b><div><span id="planAdminBadge" class="badge neutral">PENDING</span></div></div>
@@ -4058,7 +4064,7 @@ async function renderAdmin() {
         <div class="card">
           <div class="section-head"><h2>User & Role</h2><span class="badge info">${users.length} user</span></div>
           <div class="form-row"><div class="field"><label>Email</label><input id="adminUserEmail" class="input" placeholder="nama@domain.com"></div><div class="field"><label>Nama</label><input id="adminUserName" class="input"></div></div>
-          <div class="form-row" style="margin-top:10px"><div class="field"><label>Role</label><select id="adminUserRole" class="select"><option>LAPANGAN</option><option>ADMIN</option><option>VERIFIER</option><option>PM_LEADER</option></select></div><div class="field"><label>Area</label><input id="adminUserArea" class="input" placeholder="Pontianak"></div></div>
+          <div class="form-row" style="margin-top:10px"><div class="field"><label>Role</label><select id="adminUserRole" class="select"><option>WASPANG</option><option>ADMIN</option><option>VERIFIER</option><option>PM_LEADER</option></select></div><div class="field"><label>Area</label><input id="adminUserArea" class="input" placeholder="Pontianak"></div></div>
           <button id="saveUserBtn" class="btn secondary" style="margin-top:12px">Simpan User</button>
           <div class="table-wrap" style="margin-top:16px"><table><thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Area</th><th>Aktif</th></tr></thead><tbody>${users.map(u=>`<tr><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.fullName)}</td><td>${escapeHtml(u.role)}</td><td>${escapeHtml(u.area)}</td><td>${u.active?'YES':'NO'}</td></tr>`).join('')}</tbody></table></div>
         </div>
@@ -4067,12 +4073,12 @@ async function renderAdmin() {
       <section class="admin-section hidden" data-admin-panel="config">
         <div class="card"><h2>App Config Operasional</h2>
           <div class="grid three" style="margin-top:12px">
-            <div class="field"><label>GPS Policy</label><select id="cfgGpsPolicy" class="select"><option ${String(adminConfig.GPS_POLICY).toUpperCase()==='DEV'?'selected':''}>DEV</option><option ${String(adminConfig.GPS_POLICY).toUpperCase()==='FIELD'?'selected':''}>FIELD</option></select></div>
-            <div class="field"><label>GPS Field Block (m)</label><input id="cfgGpsBlock" class="input" type="number" value="${escapeAttr(adminConfig.GPS_FIELD_BLOCK_M ?? 50)}"></div>
-            <div class="field"><label>Distance Warning (m)</label><input id="cfgDistanceWarn" class="input" type="number" value="${escapeAttr(adminConfig.POINT_DISTANCE_WARNING_M ?? 30)}"></div>
+            <div class="field"><label>Mode GPS</label><select id="cfgGpsPolicy" class="select"><option value="DEV" ${String(adminConfig.GPS_POLICY).toUpperCase()==='DEV'?'selected':''}>DEV</option><option value="FIELD" ${String(adminConfig.GPS_POLICY).toUpperCase()==='FIELD'?'selected':''}>WASPANG</option></select></div>
+            <div class="field"><label>Batas Akurasi GPS WASPANG (m)</label><input id="cfgGpsBlock" class="input" type="number" value="${escapeAttr(adminConfig.GPS_FIELD_BLOCK_M ?? 50)}"></div>
+            <div class="field"><label>Distance Warning (m)</label><input id="cfgDistanceWarn" class="input" type="number" value="${escapeAttr(adminConfig.POINT_DISTANCE_WARNING_M ?? 30)}"></div><div class="field"><label>Batas Jarak WASPANG (m)</label><input id="cfgDistanceBlock" class="input" type="number" value="${escapeAttr(adminConfig.POINT_DISTANCE_BLOCK_M ?? 100)}"></div>
           </div>
           <button id="saveOperationalConfigBtn" class="btn secondary" style="margin-top:12px">Simpan Config</button>
-          <div class="small muted" style="margin-top:8px">Gunakan DEV selama test laptop. Ganti FIELD sebelum pilot tim lapangan.</div>
+          <div class="small muted" style="margin-top:8px">Gunakan DEV selama test laptop. Gunakan mode WASPANG untuk operasional HP.</div>
         </div>
       </section>
 
@@ -4337,7 +4343,7 @@ function updateAdminPublishPanelPEMS_(project) {
   if(!project?.projectId){box.className='status-box neutral';box.innerHTML='Simpan Draft Project terlebih dahulu. Setelah upload + Auto Review + Admin Review, PM/LEADER memutuskan Publish.';btn.classList.add('hidden');return;}
   const setup=String(project.setupStatus||'DRAFT').toUpperCase(); if(setup==='PUBLISHED'){box.className='status-box success';box.innerHTML=`<b>PUBLISHED.</b> PM Review: ${escapeHtml(project.planPmReviewStatus||'APPROVED')} · Baseline BOQ V${escapeHtml(String(project.publishedBoqVersion||project.boqVersion||'-'))} + KML V${escapeHtml(String(project.publishedKmlVersion||project.kmlPlanVersion||'-'))}.`;btn.classList.add('hidden');return;}
   const pub=adminProjectPublishStatePEMS_(project);
-  if(pub.ready){box.className='status-box success';box.innerHTML=state.adminCanPublish?'<b>READY FOR EXECUTION.</b> Auto Review + Admin Review selesai. PM/LEADER dapat Publish.':'<b>READY FOR EXECUTION.</b> Menunggu PM/LEADER Publish.';if(state.adminCanPublish){btn.classList.remove('hidden');btn.className='btn success';btn.textContent='Publish for Field Execution';btn.disabled=false;}else btn.classList.add('hidden');}
+  if(pub.ready){box.className='status-box success';box.innerHTML=state.adminCanPublish?'<b>READY FOR EXECUTION.</b> Auto Review + Admin Review selesai. PM/LEADER dapat Publish.':'<b>READY FOR EXECUTION.</b> Menunggu PM/LEADER Publish.';if(state.adminCanPublish){btn.classList.remove('hidden');btn.className='btn success';btn.textContent='Publish for WASPANG Execution';btn.disabled=false;}else btn.classList.add('hidden');}
   else if(pub.overrideAvailable){box.className='status-box warning';box.innerHTML='<b>PLAN REVIEW INCOMPLETE.</b> PM/LEADER dapat Override Publish hanya dengan alasan yang dicatat di Audit.';if(state.adminCanPublish){btn.classList.remove('hidden');btn.className='btn warning';btn.textContent='Override Publish';btn.disabled=false;}else btn.classList.add('hidden');}
   else{box.className='status-box warning';box.innerHTML=`<b>Belum siap Publish.</b> Lengkapi: ${escapeHtml(pub.missing.join(', '))}.`;btn.classList.add('hidden');}
 }
@@ -4345,8 +4351,8 @@ async function publishAdminProjectPEMS_(projectId, button) {
   projectId=String(projectId||'').trim(); const project=(state.adminProjects||[]).find(p=>p.projectId===projectId); if(!projectId||!project){toast('Project belum dipilih.','warning',4500);return;}
   const pub=adminProjectPublishStatePEMS_(project); if(!pub.ready&&!pub.overrideAvailable){toast(`Belum siap Publish: ${pub.missing.join(', ')}.`, 'warning',6500);return;} if(!state.adminCanPublish){toast('Publish hanya dapat dilakukan PM/LEADER.','warning',5000);return;}
   const warn=Number(project.planWarningCount||0),review=String(project.planReviewStatus||'').toUpperCase(),override=!pub.ready&&pub.overrideAvailable; let note='';
-  if(override){note=String(window.prompt('Override Publish wajib memiliki alasan PM/LEADER:','Field Execution perlu berjalan meski Plan Review belum lengkap.')||'').trim();if(!note){toast('Override dibatalkan karena alasan kosong.','warning',4500);return;}}
-  else {const confirmText=warn>0?`Publish ${projectId} untuk Field Execution dengan ${warn} warning? Warning tetap disimpan untuk reconciliation akhir.`:`Publish ${projectId} untuk Field Execution? Baseline BOQ V${project.boqVersion||'-'} + KML V${project.kmlPlanVersion||'-'} akan dicatat.`; if(!window.confirm(confirmText))return; note=`Publish for Field Execution · Review ${review} · Warning ${warn}`;}
+  if(override){note=String(window.prompt('Override Publish wajib memiliki alasan PM/LEADER:','WASPANG Execution perlu berjalan meski Plan Review belum lengkap.')||'').trim();if(!note){toast('Override dibatalkan karena alasan kosong.','warning',4500);return;}}
+  else {const confirmText=warn>0?`Publish ${projectId} untuk WASPANG Execution dengan ${warn} warning? Warning tetap disimpan untuk reconciliation akhir.`:`Publish ${projectId} untuk WASPANG Execution? Baseline BOQ V${project.boqVersion||'-'} + KML V${project.kmlPlanVersion||'-'} akan dicatat.`; if(!window.confirm(confirmText))return; note=`Publish for WASPANG Execution · Review ${review} · Warning ${warn}`;}
   try{setButtonLoadingPEMS_(button,true,override?'Override Publishing...':'Publishing...');const data=await api(`/admin/projects/${encodeURIComponent(projectId)}/publish`,{method:'POST',body:{note,override}});const updated={...project,setupStatus:'PUBLISHED',planPmReviewStatus:data.pmReviewStatus|| (override?'OVERRIDE_APPROVED':'APPROVED'),planOverrideUsed:!!data.overrideUsed,publishedBoqVersion:data.publishedBoqVersion||project.boqVersion,publishedKmlVersion:data.publishedKmlVersion||project.kmlPlanVersion};upsertAdminProjectLocalPEMS_(updated);toast(`${projectId} berhasil PUBLISHED${override?' dengan OVERRIDE':''}.`,'success',5500);updateAdminPlanReviewPanelPEMS_(updated);updateAdminPublishPanelPEMS_(updated);setTimeout(()=>refreshNotifications(true,true).catch(()=>{}),50);}catch(err){toast(humanError(err),'danger',7000);}finally{setButtonLoadingPEMS_(button,false);}
 }
 
@@ -4669,7 +4675,8 @@ async function saveOperationalConfig() {
     const updates = [
       ['GPS_POLICY', value('cfgGpsPolicy')],
       ['GPS_FIELD_BLOCK_M', value('cfgGpsBlock')],
-      ['POINT_DISTANCE_WARNING_M', value('cfgDistanceWarn')]
+      ['POINT_DISTANCE_WARNING_M', value('cfgDistanceWarn')],
+      ['POINT_DISTANCE_BLOCK_M', value('cfgDistanceBlock') || '100']
     ];
     await Promise.all(updates.map(([key,val]) => api('/admin/config', { method:'POST', body:{key,value:val} })));
     const next={...(state.config||{})}; updates.forEach(([k,v])=>next[k]=v); state.config=next;
@@ -5254,11 +5261,7 @@ async function renderAudit() {
 }
 
 function renderSettings() {
-  const isField =
-    String(
-      state.user?.role || ''
-    ).toUpperCase() ===
-    'LAPANGAN';
+  const isField = isWaspangRolePEMS_(state.user?.role);
 
   el.content.innerHTML = `
     <div class="grid two">
@@ -5275,14 +5278,15 @@ function renderSettings() {
       <div class="card">
         <h2>Konfigurasi Operasional</h2>
         <div class="list">
-          ${statusRow('GPS Policy', state.config.GPS_POLICY || '-', state.config.GPS_POLICY === 'FIELD'?'success':'warning')}
-          ${statusRow('GPS Field Block', `${configNumber('GPS_FIELD_BLOCK_M',50)} m`, 'neutral')}
+          ${statusRow('Mode GPS', String(state.config.GPS_POLICY||'').toUpperCase()==='FIELD' ? 'WASPANG' : (state.config.GPS_POLICY||'-'), state.config.GPS_POLICY === 'FIELD'?'success':'warning')}
+          ${statusRow('Batas Akurasi GPS WASPANG', `${configNumber('GPS_FIELD_BLOCK_M',50)} m`, 'neutral')}
+          ${statusRow('Batas Jarak WASPANG', `${configNumber('POINT_DISTANCE_BLOCK_M',100)} m`, 'neutral')}
           ${statusRow('Distance Warning', `${configNumber('POINT_DISTANCE_WARNING_M',30)} m`, 'neutral')}
           ${statusRow('Photo Max', `${configNumber('MAX_PHOTO_MB',5.5)} MB`, 'neutral')}
         </div>
 
         ${isField
-          ? '<div class="small muted" style="margin-top:12px">Konfigurasi server dikunci untuk role LAPANGAN.</div>'
+          ? '<div class="small muted" style="margin-top:12px">Konfigurasi server dikunci untuk role WASPANG.</div>'
           : '<button id="changeGatewayBtn" class="btn ghost full" style="margin-top:12px">Ubah API Gateway Perangkat Ini</button>'}
       </div>
     </div>`;
@@ -6441,7 +6445,8 @@ function projectSelectHtml(projects, selected, id) {
 function kpi(label,value,sub='') { return `<div class="card kpi-card"><div class="value">${escapeHtml(String(value ?? 0))}</div><div class="label">${escapeHtml(label)}${sub?` • ${escapeHtml(sub)}`:''}</div></div>`; }
 function statusRow(label,value,badge='neutral') { return `<div class="list-item"><div><div class="item-title">${escapeHtml(label)}</div></div><span class="badge ${badge}">${escapeHtml(String(value ?? '-'))}</span></div>`; }
 function workflowBadge(status) { const s=String(status||'').toUpperCase(); if(['VERIFIED','SYNCED','COMPLETE','REVISION_RESOLVED'].includes(s))return 'success'; if(['SUBMITTED','QUEUED','SYNCING','NEED_REVISION','REOPENED'].includes(s))return 'warning'; if(['REJECTED','FAILED','SYNC_ERROR'].includes(s))return 'danger'; if(['DRAFT_SERVER'].includes(s))return 'info'; return 'neutral'; }
-function roleLabel(role) { return {LAPANGAN:'LAPANGAN',ADMIN:'ADMIN',VERIFIER:'VERIFIER',PM_LEADER:'PM / LEADER'}[String(role||'').toUpperCase()] || String(role||'-'); }
+function isWaspangRolePEMS_(role) { return ['WASPANG','LAPANGAN','FIELD'].includes(String(role||'').toUpperCase()); }
+function roleLabel(role) { const r=String(role||'').toUpperCase(); return isWaspangRolePEMS_(r) ? 'WASPANG' : ({ADMIN:'ADMIN',VERIFIER:'VERIFIER',PM_LEADER:'PM / LEADER'}[r] || String(role||'-')); }
 function formatNumber(v) { const n=Number(v); return Number.isFinite(n)?(Math.round(n*10)/10).toLocaleString('id-ID'):'-'; }
 function formatCoord(v) { const n=Number(v); return Number.isFinite(n)?n.toFixed(6):'-'; }
 function formatBytes(bytes) { const n=Number(bytes)||0; if(n<1024)return `${n} B`; if(n<1024*1024)return `${(n/1024).toFixed(1)} KB`; return `${(n/1024/1024).toFixed(2)} MB`; }
