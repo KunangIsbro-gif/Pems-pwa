@@ -51,8 +51,15 @@ const state = {
   monitoringInflight: null,
   monitoringLastFetchAt: 0,
   workspaceInflight: new Map(),
+  workspaceMemory: new Map(),
   requirementsInflight: new Map(),
+  requirementsMemory: new Map(),
   requirementsRequestSeq: 0,
+  workRenderInflight: null,
+  workRenderProjectId: '',
+  workRenderSeq: 0,
+  fieldDocumentsInflight: new Map(),
+  fieldDocumentsTimer: null,
   gpsWarmupPromise: null,
   fieldGps: null,
   fieldShowAdditional: false,
@@ -213,7 +220,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-7-0-r11n-p0');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-20-r13f-hf18');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -394,7 +401,7 @@ async function bootAuthenticated() {
     if (navigator.onLine) {
       runSyncQueue();
       // HF16: do not let non-critical notification work compete with FIELD startup.
-      setTimeout(() => refreshNotifications(false).catch(() => {}), 8000);
+      setTimeout(() => refreshNotifications(false).catch(() => {}), initialRoute.page === 'pekerjaan' ? 15000 : 5000);
       startNotificationPolling();
       primeGpsCache();
     }
@@ -443,6 +450,46 @@ function parseRoutePEMS_() {
 function shouldLetBrowserOpenLinkPEMS_(event) {
   return !!(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1);
 }
+function closeMobileMorePEMS_() {
+  const old = document.getElementById('mobileMoreSheet');
+  if (old) old.remove();
+}
+
+function openMobileMorePEMS_(menus) {
+  closeMobileMorePEMS_();
+  const primary = new Set(['home','pekerjaan','evidence','monitoring']);
+  const extras = (menus || []).filter(key => !primary.has(key));
+  if (!extras.length) return;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'mobileMoreSheet';
+  wrap.className = 'mobile-more-backdrop';
+  wrap.innerHTML = `
+    <div class="mobile-more-sheet" role="dialog" aria-modal="true" aria-label="Menu lainnya">
+      <div class="mobile-more-head"><b>Menu Lainnya</b><button type="button" class="btn ghost small" data-more-close="1">Tutup</button></div>
+      <div class="mobile-more-grid">
+        ${extras.map(key => `<a class="mobile-more-item ${state.currentPage === key ? 'active' : ''}" href="${escapeAttr(routeForPEMS_(key))}" data-more-nav="${escapeAttr(key)}">
+          <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
+          ${notificationCountForPage(key) ? `<span class="nav-count">${escapeHtml(String(notificationCountForPage(key)))}</span>` : ''}
+        </a>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  wrap.addEventListener('click', event => {
+    if (event.target === wrap || event.target.closest('[data-more-close]')) {
+      closeMobileMorePEMS_();
+      return;
+    }
+    const link = event.target.closest('[data-more-nav]');
+    if (!link) return;
+    if (shouldLetBrowserOpenLinkPEMS_(event)) return;
+    event.preventDefault();
+    const page = link.dataset.moreNav;
+    closeMobileMorePEMS_();
+    navigate(page);
+  });
+}
+
 function renderNavigation() {
   const menus = state.bootstrap?.roleMenus || ['home', 'settings'];
 
@@ -456,11 +503,10 @@ function renderNavigation() {
     ['assignments', 'Assignment Aktif']
   ];
 
-  const render = (container) => {
-    const isSidebar = container === el.sideNav;
+  const renderSidebar = (container) => {
     container.innerHTML = menus.map(key => {
       const count = notificationCountForPage(key);
-      if (key === 'admin' && isSidebar) {
+      if (key === 'admin') {
         return `
           <div class="nav-group ${state.adminMenuOpen ? 'open' : ''}">
             <button class="nav-btn nav-admin-toggle ${state.currentPage === 'admin' ? 'active' : ''}" data-admin-toggle="1">
@@ -481,53 +527,70 @@ function renderNavigation() {
         ${count ? `<span class="nav-count">${escapeHtml(String(count))}</span>` : ''}
       </a>`;
     }).join('');
-
-    container.querySelectorAll('[data-nav]').forEach(btn =>
-      btn.addEventListener('click', (event) => {
-        if (shouldLetBrowserOpenLinkPEMS_(event)) return;
-        event.preventDefault();
-        navigate(btn.dataset.nav);
-      })
-    );
-
-    container.querySelectorAll('[data-admin-toggle]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        // R11I: parent Admin adalah accordion lokal. Tidak boleh menunggu API.
-        // Klik pertama hanya buka/tutup submenu secara instan; request server baru
-        // dimulai setelah user memilih salah satu submenu.
-        state.adminMenuOpen = !state.adminMenuOpen;
-        renderNavigation();
-      });
-    });
-
-    container.querySelectorAll('[data-admin-section]').forEach(btn => {
-      btn.addEventListener('click', (event) => {
-        if (shouldLetBrowserOpenLinkPEMS_(event)) return;
-        event.preventDefault();
-        state.adminMenuOpen = true;
-        state.adminSection = btn.dataset.adminSection || 'project-setup';
-        navigate('admin', { adminSection: state.adminSection });
-      });
-    });
   };
 
-  render(el.sideNav);
-  render(el.bottomNav);
+  const renderBottom = (container) => {
+    const primaryOrder = ['home','pekerjaan','evidence','monitoring'];
+    const primary = primaryOrder.filter(key => menus.includes(key));
+    const extras = menus.filter(key => !primary.includes(key));
+    const moreActive = extras.includes(state.currentPage);
+    container.innerHTML = primary.map(key => {
+      const count = notificationCountForPage(key);
+      return `<a class="nav-btn mobile-nav-btn ${state.currentPage === key ? 'active' : ''}" href="${escapeAttr(routeForPEMS_(key))}" data-nav="${escapeAttr(key)}">
+        <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
+        ${count ? `<span class="nav-count">${escapeHtml(String(count))}</span>` : ''}
+      </a>`;
+    }).join('') + (extras.length ? `
+      <button type="button" class="nav-btn mobile-nav-btn ${moreActive ? 'active' : ''}" data-mobile-more="1">
+        <span>Lainnya</span>
+        ${extras.reduce((n,key)=>n+notificationCountForPage(key),0) ? `<span class="nav-count">${escapeHtml(String(extras.reduce((n,key)=>n+notificationCountForPage(key),0)))}</span>` : ''}
+      </button>` : '');
+  };
 
-  document
-    .querySelectorAll('[data-nav]')
-    .forEach(btn =>
-      btn.classList.toggle(
-        'active',
-        btn.dataset.nav === state.currentPage
-      )
-    );
+  renderSidebar(el.sideNav);
+  renderBottom(el.bottomNav);
+
+  document.querySelectorAll('[data-nav]').forEach(btn =>
+    btn.addEventListener('click', (event) => {
+      if (shouldLetBrowserOpenLinkPEMS_(event)) return;
+      event.preventDefault();
+      closeMobileMorePEMS_();
+      navigate(btn.dataset.nav);
+    })
+  );
+
+  el.bottomNav?.querySelector('[data-mobile-more]')?.addEventListener('click', () => openMobileMorePEMS_(menus));
+
+  el.sideNav.querySelectorAll('[data-admin-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.adminMenuOpen = !state.adminMenuOpen;
+      renderNavigation();
+    });
+  });
+
+  el.sideNav.querySelectorAll('[data-admin-section]').forEach(btn => {
+    btn.addEventListener('click', (event) => {
+      if (shouldLetBrowserOpenLinkPEMS_(event)) return;
+      event.preventDefault();
+      state.adminMenuOpen = true;
+      state.adminSection = btn.dataset.adminSection || 'project-setup';
+      navigate('admin', { adminSection: state.adminSection });
+    });
+  });
 }
+
 
 async function navigate(page, options = {}) {
   const menus = state.bootstrap?.roleMenus || [];
   if (!menus.includes(page)) page = 'home';
   if (page === 'admin' && options.adminSection) state.adminSection = options.adminSection;
+
+  // HF17: hashchange + popstate (or a fast repeated click) must not start a
+  // second FIELD render while the first one is still resolving the same project.
+  if (page === 'pekerjaan' && state.currentPage === 'pekerjaan' && state.workRenderInflight) {
+    return state.workRenderInflight;
+  }
+
   state.currentPage = page;
   if (!options.fromHash) {
     const targetHash = routeForPEMS_(page, state.adminSection);
@@ -734,6 +797,25 @@ async function startRevision(evidenceId) {
 }
 
 async function renderWork() {
+  const projectKey = String(state.selectedProjectId || '__DEFAULT__');
+  if (state.workRenderInflight && state.workRenderProjectId === projectKey) {
+    return state.workRenderInflight;
+  }
+
+  const renderSeq = ++state.workRenderSeq;
+  state.workRenderProjectId = projectKey;
+  const promise = renderWorkCoreHF17PEMS_(renderSeq)
+    .finally(() => {
+      if (state.workRenderSeq === renderSeq) {
+        state.workRenderInflight = null;
+        state.workRenderProjectId = '';
+      }
+    });
+  state.workRenderInflight = promise;
+  return promise;
+}
+
+async function renderWorkCoreHF17PEMS_(renderSeq) {
   const projects = state.bootstrap?.projects || [];
   if (!projects.length) {
     el.content.innerHTML = '<div class="empty">Belum ada project yang dapat diakses. Admin perlu cek role/assignment.</div>';
@@ -746,6 +828,7 @@ async function renderWork() {
   }
 
   await loadWorkspace(state.selectedProjectId);
+  if (renderSeq !== state.workRenderSeq || state.currentPage !== 'pekerjaan') return;
   primeGpsCache();
 
   const workspace = state.workspace;
@@ -817,7 +900,7 @@ async function renderWork() {
   `;
 
   document.getElementById('workProjectSelect')?.addEventListener('change', async e => {
-    await selectProject(e.target.value, true);
+    await selectProject(e.target.value, false);
     state.selectedSession = null;
     state.requirements = null;
     state.selectedRequirement = null;
@@ -856,15 +939,20 @@ async function renderWork() {
     renderFieldPointInfoEmpty();
   }
 
-  // HF16: BA/COMCASE is important but not needed to paint the selected point.
-  // Load it after the main FIELD requirement is already usable.
-  setTimeout(() => {
-    if (state.currentPage !== 'pekerjaan') return;
-    const pid = state.selectedProjectId;
-    loadFieldDocumentsPEMS_(pid)
-      .then(() => { if (state.selectedProjectId === pid) renderFieldProjectDocumentsPEMS_(); })
-      .catch(() => {});
-  }, 1500);
+  // HF17 PERFORMANCE: BA/COMCASE must never compete with workspace/requirements.
+  // It is loaded only after the FIELD point is already usable and only once.
+  if (state.fieldDocumentsTimer) clearTimeout(state.fieldDocumentsTimer);
+  const docsProjectId = state.selectedProjectId;
+  state.fieldDocumentsTimer = setTimeout(() => {
+    const run = () => {
+      if (state.currentPage !== 'pekerjaan' || state.selectedProjectId !== docsProjectId) return;
+      loadFieldDocumentsPEMS_(docsProjectId)
+        .then(() => { if (state.selectedProjectId === docsProjectId) renderFieldProjectDocumentsPEMS_(); })
+        .catch(() => {});
+    };
+    if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 3000 });
+    else run();
+  }, 12000);
 }
 
 async function loadFieldDocumentsPEMS_(projectId, options = {}) {
@@ -905,15 +993,24 @@ async function loadFieldDocumentsPEMS_(projectId, options = {}) {
     return state.fieldDocuments;
   }
 
-  try {
-    const data = await api(`/projects/${encodeURIComponent(projectId)}/field-documents`, {
+  if (state.fieldDocumentsInflight.has(projectId)) {
+    return await state.fieldDocumentsInflight.get(projectId);
+  }
+
+  const docsPromise = api(`/projects/${encodeURIComponent(projectId)}/field-documents`, {
       timeoutMs: 20000,
-      maxAttempts: 2
-    });
-    if (state.selectedProjectId === projectId) {
-      state.fieldDocuments = data || null;
-    }
-    if (data) await cachePut(cacheKey, data);
+      maxAttempts: 1
+    })
+    .then(async data => {
+      if (state.selectedProjectId === projectId) state.fieldDocuments = data || null;
+      if (data) await cachePut(cacheKey, data);
+      return data;
+    })
+    .finally(() => state.fieldDocumentsInflight.delete(projectId));
+  state.fieldDocumentsInflight.set(projectId, docsPromise);
+
+  try {
+    const data = await docsPromise;
     return data;
   } catch (err) {
     if (state.selectedProjectId === projectId) {
@@ -1876,9 +1973,9 @@ async function renderCapturePanel() {
     <div id="captureProcess" class="capture-process ${state.captureStage.active ? '' : 'hidden'}">
       <div class="capture-process-head">
         <span id="captureStageLabel">${escapeHtml(state.captureStage.label || 'Memproses...')}</span>
-        <b id="captureStagePercent">${escapeHtml(String(state.captureStage.percent || 0))}%</b>
+        <b id="captureStagePercent">${state.captureStage.indeterminate ? 'mengirim…' : `${escapeHtml(String(state.captureStage.percent || 0))}%`}</b>
       </div>
-      <div class="progress"><span id="captureStageBar" style="width:${Math.max(0,Math.min(100,Number(state.captureStage.percent||0)))}%"></span></div>
+      <div class="progress"><span id="captureStageBar" class="${state.captureStage.indeterminate ? 'indeterminate' : ''}" style="width:${state.captureStage.indeterminate ? 38 : Math.max(0,Math.min(100,Number(state.captureStage.percent||0)))}%"></span></div>
     </div>
 
     <div class="divider"></div>
@@ -2184,6 +2281,23 @@ async function onCameraFileSelected(event) {
     ) {
       throw new Error(
         `GPS accuracy ${Math.round(gps.accuracy)} m > batas FIELD ${blockGps} m. Ulangi GPS.`
+      );
+    }
+
+    const blockDistance = Number(
+      configNumber(
+        'POINT_DISTANCE_BLOCK_M',
+        configNumber('POINT_DISTANCE_WARNING_M', 30)
+      )
+    );
+
+    if (
+      gpsPolicy === 'FIELD' &&
+      Number.isFinite(pointDistance) &&
+      pointDistance > blockDistance
+    ) {
+      throw new Error(
+        `Jarak ke titik plan ${Math.round(pointDistance)} m > batas FIELD ${blockDistance} m. Datang lebih dekat ke titik sebelum ambil evidence.`
       );
     }
 
@@ -2594,8 +2708,8 @@ async function runSyncQueue() {
         item.attempts = Number(item.attempts || 0) + 1;
 
         setCaptureStage(
-          'Upload foto ke server',
-          72,
+          'Mengirim foto ke server…',
+          null,
           true
         );
         await idbPut(STORE_QUEUE, item);
@@ -2604,7 +2718,7 @@ async function runSyncQueue() {
         await idbDelete(STORE_QUEUE, item.queueId);
 
         setCaptureStage(
-          'Sync selesai',
+          'Tersimpan di server',
           100,
           false
         );
@@ -2712,6 +2826,11 @@ async function syncOneQueueItem(item) {
       assignmentId: draft.assignmentId || '',
       parentEvidenceId: draft.parentEvidenceId || '',
       revisionReason: draft.revisionReason || '',
+      serverEvidenceId: draft.serverEvidenceId || '',
+      requiredPhotoCount: Number(draft.requiredPhotoCount || 1),
+      requirementCode: draft.requirementCode || 'MATERIAL',
+      pointId: state.selectedSession?.anchorPointId || '',
+      planMatchRef: state.selectedSession?.anchorLabel || '',
       thumbnailBase64: thumbnail?.base64 || '',
       thumbnailMimeType: thumbnail?.mimeType || 'image/jpeg',
       thumbnailBytes: Number(thumbnail?.bytes || 0),
@@ -5189,10 +5308,16 @@ async function loadWorkspace(projectId, options = {}) {
   const force =
     options.force === true;
 
+  if (!force && state.workspaceMemory.has(projectId)) {
+    state.workspace = state.workspaceMemory.get(projectId);
+    return state.workspace;
+  }
+
   if (
     !force &&
     state.workspace?.project?.projectId === projectId
   ) {
+    state.workspaceMemory.set(projectId, state.workspace);
     return state.workspace;
   }
 
@@ -5205,6 +5330,7 @@ async function loadWorkspace(projectId, options = {}) {
   ) {
     state.workspace =
       cachedRow.value;
+    state.workspaceMemory.set(projectId, state.workspace);
 
     // Stale-while-revalidate. Do not make the user wait.
     if (
@@ -5241,6 +5367,7 @@ async function loadWorkspace(projectId, options = {}) {
       )
         .then(async data => {
           state.workspace = data;
+          state.workspaceMemory.set(projectId, data);
           await cachePut(key, data);
           return data;
         })
@@ -5262,6 +5389,7 @@ async function loadWorkspace(projectId, options = {}) {
       if (cachedRow?.value) {
         state.workspace =
           cachedRow.value;
+        state.workspaceMemory.set(projectId, state.workspace);
         return state.workspace;
       }
       throw err;
@@ -5271,6 +5399,7 @@ async function loadWorkspace(projectId, options = {}) {
   state.workspace =
     cachedRow?.value ||
     null;
+  if (state.workspace) state.workspaceMemory.set(projectId, state.workspace);
 
   return state.workspace;
 }
@@ -5296,6 +5425,7 @@ async function refreshWorkspaceInBackground(projectId, key) {
           projectId
         ) {
           state.workspace = data;
+          state.workspaceMemory.set(projectId, data);
         }
 
         return data;
@@ -5328,6 +5458,10 @@ async function loadRequirements(projectId, sessionId, options = {}) {
   const force =
     options.force === true;
 
+  if (!force && state.requirementsMemory.has(requestKey)) {
+    return state.requirementsMemory.get(requestKey);
+  }
+
   const cachedRow =
     await cacheGetRow(key);
 
@@ -5350,6 +5484,7 @@ async function loadRequirements(projectId, sessionId, options = {}) {
       );
     }
 
+    state.requirementsMemory.set(requestKey, cachedRow.value);
     return cachedRow.value;
   }
 
@@ -5372,6 +5507,7 @@ async function loadRequirements(projectId, sessionId, options = {}) {
         `/points/${encodeURIComponent(sessionId)}/requirements?projectId=${encodeURIComponent(projectId)}`
       )
         .then(async data => {
+          state.requirementsMemory.set(requestKey, data);
           await cachePut(key, data);
           return data;
         })
@@ -5425,6 +5561,7 @@ async function refreshRequirementsInBackground(
       `/points/${encodeURIComponent(sessionId)}/requirements?projectId=${encodeURIComponent(projectId)}`
     )
       .then(async data => {
+        state.requirementsMemory.set(requestKey, data);
         await cachePut(key, data);
 
         if (
@@ -5749,14 +5886,27 @@ function primeGpsCache() {
       );
 }
 
+async function gpsPermissionStatePEMS_() {
+  try {
+    if (!navigator.permissions?.query) return 'unknown';
+    const status = await navigator.permissions.query({ name:'geolocation' });
+    return status?.state || 'unknown';
+  } catch (_) {
+    return 'unknown';
+  }
+}
+
 function getLiveGps(options = {}) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     if (!navigator.geolocation) {
-      return reject(
-        new Error(
-          'Geolocation tidak didukung perangkat.'
-        )
-      );
+      return reject(new Error('Geolocation tidak didukung perangkat.'));
+    }
+    if (!window.isSecureContext) {
+      return reject(new Error('GPS browser hanya dapat dipakai pada koneksi HTTPS yang aman.'));
+    }
+    const permission = await gpsPermissionStatePEMS_();
+    if (permission === 'denied') {
+      return reject(new Error('Izin lokasi diblokir browser. Tekan ikon lokasi/pengaturan di kiri alamat situs → Location/Lokasi → Izinkan, lalu coba lagi.'));
     }
 
     navigator.geolocation.getCurrentPosition(
@@ -5777,12 +5927,11 @@ function getLiveGps(options = {}) {
       err =>
         reject(
           new Error(
-            err.code === 3
-              ? 'Permintaan GPS timeout.'
-              : `GPS gagal: ${
-                  err.message ||
-                  err.code
-                }`
+            err.code === 1
+              ? 'Izin lokasi ditolak. Izinkan Location/Lokasi untuk situs PEMS dari pengaturan browser, lalu coba lagi.'
+              : err.code === 3
+                ? 'Permintaan GPS timeout. Pastikan GPS perangkat aktif dan berada di area terbuka.'
+                : `GPS gagal: ${err.message || err.code}`
           )
         ),
       {
@@ -5962,19 +6111,14 @@ function setCaptureStage(
   percent,
   active = true
 ) {
+  const indeterminate = percent === null || percent === undefined;
   state.captureStage = {
-    label:
-      String(label || ''),
-    percent:
-      Math.max(
-        0,
-        Math.min(
-          100,
-          Number(percent || 0)
-        )
-      ),
-    active:
-      active === true
+    label: String(label || ''),
+    percent: indeterminate
+      ? null
+      : Math.max(0, Math.min(100, Number(percent || 0))),
+    indeterminate,
+    active: active === true
   };
 
   const wrap =
@@ -6010,13 +6154,16 @@ function setCaptureStage(
   }
 
   if (percentEl) {
-    percentEl.textContent =
-      `${state.captureStage.percent}%`;
+    percentEl.textContent = state.captureStage.indeterminate
+      ? 'mengirim…'
+      : `${state.captureStage.percent}%`;
   }
 
   if (bar) {
-    bar.style.width =
-      `${state.captureStage.percent}%`;
+    bar.classList.toggle('indeterminate', state.captureStage.indeterminate === true);
+    bar.style.width = state.captureStage.indeterminate
+      ? '38%'
+      : `${state.captureStage.percent}%`;
   }
 }
 
