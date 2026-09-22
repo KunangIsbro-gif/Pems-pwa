@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-23-monitor-direct-full-r13f-hf21';
+const CACHE_NAME = 'pems-v15-9-25-waspang-stabilization-r13f-hf23';
 const STATIC_ASSETS = [
   './',
   './index.html',

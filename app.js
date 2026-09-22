@@ -9,6 +9,7 @@ const LAST_GPS_KEY = 'PEMS_V15_LAST_GPS';
 const SELECTED_PROJECT_KEY = 'PEMS_V15_SELECTED_PROJECT';
 const ACTIVE_DRAFT_KEY = 'PEMS_V15_ACTIVE_DRAFT_ID';
 const PROACTIVE_BRIDGE_KEY = 'PEMS_V15_PROACTIVE_BRIDGE_PAYLOAD';
+const OFFLINE_LOGOUT_KEY = 'PEMS_V15_OFFLINE_LOGOUT';
 
 const DB_NAME = 'PEMS_V15_DB';
 const DB_VERSION = 1;
@@ -36,6 +37,11 @@ const state = {
   verificationQueue: [],
   monitoring: null,
   syncing: false,
+  syncProgress: { current: 0, total: 0, label: '' },
+  syncRetryTimer: null,
+  offlinePack: { projectId: '', running: false, total: 0, done: 0, failed: 0 },
+  offlinePackTimer: null,
+  monitoringFocus: '',
   cameraContext: null,
   revisionTargetPmId: '',
   draftsPhotos: [],
@@ -168,7 +174,18 @@ async function init() {
     if (booted) return;
   }
 
-  showLogin('Login Google sekali untuk masuk ke PEMS V15.');
+  // HF23: WASPANG may reopen the already prepared app while completely offline.
+  // Explicit logout disables this until the next successful online login.
+  // Cached WASPANG local mode also covers the case where Android reports
+  // navigator.onLine=true but the SIM has no quota / the gateway is unreachable.
+  if (localStorage.getItem(OFFLINE_LOGOUT_KEY) !== '1') {
+    const offlineBooted = await bootOfflineWaspangPEMS_();
+    if (offlineBooted) return;
+  }
+
+  showLogin(navigator.onLine
+    ? 'Login Google sekali untuk masuk ke PEMS V15.'
+    : 'Offline. Sambungkan internet sekali untuk login/siapkan project, lalu PEMS WASPANG dapat dibuka kembali tanpa kuota.');
 }
 
 function wireStaticEvents() {
@@ -200,7 +217,7 @@ function wireStaticEvents() {
     }
   });
   const syncRouteFromLocation = () => {
-    if (!state.bootstrap || !sessionIsUsable()) return;
+    if (!state.bootstrap || !appAccessUsablePEMS_()) return;
     const route = parseRoutePEMS_();
     navigate(route.page, { fromHash:true, adminSection:route.adminSection });
   };
@@ -213,7 +230,7 @@ function setupNetworkListeners() {
   window.addEventListener('online', async () => {
     updateNetworkUi();
     toast('Koneksi kembali online. Memeriksa queue...', 'success');
-    await runSyncQueue();
+    await runSyncQueue({ source:'online', retryFailed:false });
   });
   window.addEventListener('offline', () => {
     updateNetworkUi();
@@ -224,7 +241,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-23-r13f-hf21');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-25-r13f-hf23');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -273,6 +290,7 @@ function saveSession(token, expiresAt) {
   state.sessionExpiresAt = expiresAt;
   localStorage.setItem(SESSION_KEY, token);
   localStorage.setItem(SESSION_EXP_KEY, expiresAt);
+  localStorage.removeItem(OFFLINE_LOGOUT_KEY);
 }
 
 function clearSession() {
@@ -286,6 +304,7 @@ function clearSession() {
 
 function logout() {
   stopNotificationPolling();
+  localStorage.setItem(OFFLINE_LOGOUT_KEY, '1');
   clearSession();
   hideAppShell();
   showLogin('Session ditutup. Login kembali bila diperlukan.');
@@ -364,6 +383,7 @@ async function bootAuthenticated() {
 
     state.bootstrap = boot;
     state.user = boot.user;
+    localStorage.removeItem(OFFLINE_LOGOUT_KEY);
     state.config = boot.config || {};
     state.selectedProjectId = localStorage.getItem(SELECTED_PROJECT_KEY) || '';
     if (state.selectedProjectId && !(boot.projects || []).some(p => p.projectId === state.selectedProjectId)) {
@@ -403,7 +423,7 @@ async function bootAuthenticated() {
     navigate(initialRoute.page, { fromHash:true, adminSection:initialRoute.adminSection });
 
     if (navigator.onLine) {
-      runSyncQueue();
+      runSyncQueue({ source:'boot', retryFailed:false });
       // HF16: do not let non-critical notification work compete with WASPANG startup.
       setTimeout(() => refreshNotifications(false).catch(() => {}), initialRoute.page === 'pekerjaan' ? 15000 : 5000);
       startNotificationPolling();
@@ -415,6 +435,39 @@ async function bootAuthenticated() {
     if (isAuthError(err)) clearSession();
     showLogin(humanError(err));
     el.retryBootBtn.classList.remove('hidden');
+    return false;
+  }
+}
+
+function appAccessUsablePEMS_() {
+  if (sessionIsUsable()) return true;
+  return localStorage.getItem(OFFLINE_LOGOUT_KEY) !== '1' && !!state.bootstrap && isWaspangRolePEMS_(state.user?.role);
+}
+
+async function bootOfflineWaspangPEMS_() {
+  try {
+    const boot = await cacheGet('bootstrap');
+    if (!boot?.user || !isWaspangRolePEMS_(boot.user.role)) return false;
+
+    state.bootstrap = boot;
+    state.user = boot.user;
+    state.config = boot.config || {};
+    state.selectedProjectId = localStorage.getItem(SELECTED_PROJECT_KEY) || '';
+    if (state.selectedProjectId && !(boot.projects || []).some(p => p.projectId === state.selectedProjectId)) {
+      state.selectedProjectId = '';
+      localStorage.removeItem(SELECTED_PROJECT_KEY);
+    }
+
+    await recoverStaleQueuePEMS_();
+    await refreshLocalState();
+    showAppShell();
+    renderNavigation();
+    const initialRoute = parseRoutePEMS_();
+    await navigate(initialRoute.page, { fromHash:true, adminSection:initialRoute.adminSection });
+    toast(sessionIsUsable() ? 'PEMS WASPANG aktif.' : (navigator.onLine ? 'Mode LOKAL WASPANG aktif. Login online diperlukan hanya saat sync.' : 'Mode OFFLINE WASPANG aktif. Foto/GPS tetap aman lokal; sync menunggu internet.'), 'warning', 6500);
+    return true;
+  } catch (err) {
+    console.warn('Offline WASPANG boot failed', err);
     return false;
   }
 }
@@ -687,10 +740,10 @@ async function renderHome() {
   el.content.innerHTML = `
     ${state.config.GPS_POLICY === 'DEV' ? '<div class="warning-strip"><b>DEV MODE:</b> GPS fallback laptop masih diizinkan. Ubah GPS_POLICY ke FIELD sebelum pilot WASPANG.</div>' : ''}
     <div class="grid kpi">
-      ${kpi('Project', projects.length)}
-      ${kpi('Queue Lokal', pending, failed ? `${failed} gagal` : 'siap')}
-      ${kpi('Need Revision', m.needRevision || 0)}
-      ${kpi('Verified', m.verified || 0)}
+      ${kpiActionPEMS_('Project', projects.length, 'projects', 'Buka Pekerjaan')}
+      ${kpiActionPEMS_('Queue Lokal', pending, 'queue', failed ? `${failed} gagal` : 'Buka Evidence')}
+      ${kpiActionPEMS_('Need Revision', m.needRevision || 0, 'revision', 'Lihat yang harus diperbaiki')}
+      ${kpiActionPEMS_('Verified', m.verified || 0, 'verified', 'Lihat evidence selesai')}
     </div>
     <div class="grid two" style="margin-top:16px">
       <div class="card">
@@ -698,12 +751,14 @@ async function renderHome() {
         <p class="muted">Alur WASPANG: pilih Project → pilih Titik → pilih Material/Aset yang akan difoto → Ambil Foto + GPS.</p>
         <div class="field"><label>Project</label><input id="homeProjectSearch" class="input" placeholder="Cari PID / detail pekerjaan..." style="margin-bottom:8px">${projectSelectHtml(projects, state.selectedProjectId, 'homeProjectSelect')}</div>
         <button id="continueWorkBtn" class="btn primary full" style="margin-top:12px" ${projects.length ? '' : 'disabled'}>Lanjut Pekerjaan</button>
+        <button id="prepareOfflineBtn" class="btn outline full" style="margin-top:8px" ${(!navigator.onLine || !projects.length) ? 'disabled' : ''}>Siapkan Project Offline</button>
+        <div id="offlinePackHint" class="tiny muted" style="margin-top:7px">Simpan titik + requirement project ke HP sebelum area sinyal lemah.</div>
       </div>
       <div class="card">
         <h2>Status Sistem</h2>
         <div class="list">
           ${statusRow('Koneksi', navigator.onLine ? 'Online' : 'Offline', navigator.onLine ? 'success' : 'warning')}
-          ${statusRow('Session', sessionIsUsable() ? 'Aktif' : 'Login diperlukan', sessionIsUsable() ? 'success' : 'danger')}
+          ${statusRow('Session', sessionIsUsable() ? 'Aktif' : (isWaspangRolePEMS_(state.user?.role) && state.bootstrap ? (navigator.onLine ? 'Lokal WASPANG' : 'Offline WASPANG') : 'Login diperlukan'), appAccessUsablePEMS_() ? 'success' : 'danger')}
           ${statusRow('Auto Sync', truthyConfig('AUTO_SYNC', true) ? 'Aktif' : 'Nonaktif', truthyConfig('AUTO_SYNC', true) ? 'success' : 'neutral')}
           ${statusRow('Role', roleLabel(state.user?.role), 'info')}
         </div>
@@ -724,6 +779,18 @@ async function renderHome() {
     if (select?.value) await selectProject(select.value, true);
     navigate('pekerjaan');
   });
+  document.getElementById('prepareOfflineBtn')?.addEventListener('click', async () => {
+    const select = document.getElementById('homeProjectSelect');
+    const projectId = select?.value || state.selectedProjectId;
+    if (!projectId) return toast('Pilih project dulu.', 'warning');
+    await selectProject(projectId, true);
+    await prepareProjectOfflinePackPEMS_(projectId, { quiet:false });
+    updateOfflinePackHintPEMS_();
+  });
+  el.content.querySelectorAll('[data-home-kpi]').forEach(btn => {
+    btn.addEventListener('click', () => handleHomeKpiPEMS_(btn.dataset.homeKpi || ''));
+  });
+  updateOfflinePackHintPEMS_();
   el.content.querySelectorAll('[data-start-revision]').forEach(btn => {
     btn.addEventListener('click', () => startRevision(btn.dataset.startRevision));
   });
@@ -840,6 +907,7 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
   await loadWorkspace(state.selectedProjectId);
   if (renderSeq !== state.workRenderSeq || state.currentPage !== 'pekerjaan') return;
   primeGpsCache();
+  if (navigator.onLine && sessionIsUsable()) scheduleOfflinePackPEMS_(state.selectedProjectId);
 
   const workspace = state.workspace;
   if (!workspace) {
@@ -873,6 +941,8 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
         <div class="field">
           <label>Project</label>
           ${projectSelectHtml(projects, state.selectedProjectId, 'workProjectSelect')}
+          <button id="workOfflinePackBtn" type="button" class="btn outline small" style="margin-top:8px" ${!navigator.onLine ? 'disabled' : ''}>Siapkan Project Offline</button>
+          <div id="workOfflinePackHint" class="tiny muted" style="margin-top:6px">Simpan seluruh titik + requirement project ini ke HP.</div>
         </div>
 
         <div id="fieldProjectDocumentBox" class="field-project-document-box hidden"></div>
@@ -908,6 +978,12 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
       </div>
     </div>
   `;
+
+  document.getElementById('workOfflinePackBtn')?.addEventListener('click', async () => {
+    await prepareProjectOfflinePackPEMS_(state.selectedProjectId, { quiet:false });
+    updateOfflinePackHintPEMS_();
+  });
+  updateOfflinePackHintPEMS_();
 
   document.getElementById('workProjectSelect')?.addEventListener('change', async e => {
     await selectProject(e.target.value, false);
@@ -2426,12 +2502,14 @@ async function onCameraFileSelected(event) {
     await refreshLocalState();
     updateQueueBadge();
 
+    // HF23: capture is DONE as soon as IndexedDB confirms the local photo.
+    // Server upload is background work and must never keep WASPANG standing at the pole.
     setCaptureStage(
       navigator.onLine
-        ? 'Foto aman lokal — mulai upload'
-        : 'Foto aman di perangkat',
-      navigator.onLine ? 64 : 100,
-      true
+        ? 'Foto aman lokal • upload berjalan di background'
+        : 'Foto aman lokal • menunggu internet',
+      100,
+      false
     );
 
     await renderCapturePanel();
@@ -2452,7 +2530,7 @@ async function onCameraFileSelected(event) {
         true
       )
     ) {
-      runSyncQueue();
+      runSyncQueue({ source:'auto', retryFailed:false });
     }
     else {
       setCaptureStage(
@@ -2493,6 +2571,8 @@ async function getOrCreateCurrentDraft(ctx) {
   ) {
     existing.qtyReal = ctx.qtyReal;
     existing.fieldNote = ctx.fieldNote;
+    existing.pointId = existing.pointId || state.selectedSession?.anchorPointId || '';
+    existing.planMatchRef = existing.planMatchRef || state.selectedSession?.anchorLabel || existing.anchorLabel || '';
     existing.updatedAt = new Date().toISOString();
     await idbPut(STORE_DRAFTS, existing);
     return existing;
@@ -2504,6 +2584,8 @@ async function getOrCreateCurrentDraft(ctx) {
     projectId: state.selectedProjectId,
     sessionId: state.selectedSession.sessionId,
     anchorLabel: state.selectedSession.anchorLabel,
+    pointId: state.selectedSession.anchorPointId || '',
+    planMatchRef: state.selectedSession.anchorLabel || '',
     projectMaterialId: r.projectMaterialId,
     materialId: r.materialId,
     designator: r.designator,
@@ -2727,65 +2809,185 @@ async function submitCurrentEvidence() {
   }
 }
 
-async function runSyncQueue() {
-  if (state.syncing || !navigator.onLine || !sessionIsUsable()) {
-    updateQueueBadge();
+async function recoverStaleQueuePEMS_() {
+  const items = await idbGetAll(STORE_QUEUE);
+  const now = Date.now();
+  let changed = false;
+  for (const item of items) {
+    if (item.state === 'SYNCING') {
+      const touched = new Date(item.updatedAt || item.createdAt || 0).getTime();
+      if (!Number.isFinite(touched) || now - touched > 90_000) {
+        item.state = 'WAITING';
+        item.lastError = item.lastError || 'Sync sebelumnya terputus; aman untuk dicoba lagi.';
+        item.updatedAt = new Date().toISOString();
+        await idbPut(STORE_QUEUE, item);
+        changed = true;
+      }
+    }
+  }
+  if (changed) await refreshLocalState();
+}
+
+function queueRetryDelayMsPEMS_(attempts) {
+  const n = Math.max(1, Number(attempts || 1));
+  return Math.min(180_000, [0, 15_000, 30_000, 60_000, 120_000][Math.min(4, n)] || 180_000);
+}
+
+function queueIsRetryableErrorPEMS_(err) {
+  if (err?.networkError) return true;
+  const status = Number(err?.status || 0);
+  return [408,425,429,500,502,503,504].includes(status);
+}
+
+function scheduleQueueRetryPEMS_(delayMs) {
+  if (state.syncRetryTimer) clearTimeout(state.syncRetryTimer);
+  state.syncRetryTimer = setTimeout(() => {
+    state.syncRetryTimer = null;
+    if (navigator.onLine && sessionIsUsable()) runSyncQueue({ source:'retry', retryFailed:false });
+  }, Math.max(10_000, Number(delayMs || 30_000)));
+}
+
+function updateSyncUiPEMS_() {
+  const btn = document.getElementById('evidenceSyncBtn');
+  if (!btn) return;
+  if (state.syncing) {
+    btn.disabled = true;
+    btn.textContent = `Sinkron ${state.syncProgress.current}/${state.syncProgress.total}`;
     return;
   }
+  btn.disabled = !navigator.onLine;
+  btn.textContent = !navigator.onLine ? 'Menunggu Koneksi' : (sessionIsUsable() ? 'Coba Sinkronkan Lagi' : 'Login & Sinkronkan');
+}
+
+async function retryDraftFailedPEMS_(draftId) {
+  const items = (await idbGetAll(STORE_QUEUE)).filter(q => q.draftId === draftId && q.state === 'FAILED');
+  for (const item of items) {
+    item.state = 'WAITING';
+    item.lastError = '';
+    item.nextAttemptAt = '';
+    item.updatedAt = new Date().toISOString();
+    await idbPut(STORE_QUEUE, item);
+  }
+  await refreshLocalState();
+  if (!navigator.onLine) {
+    toast('Item dikembalikan ke queue. Sync berjalan saat internet tersedia.', 'warning', 5000);
+    await renderEvidence();
+    return;
+  }
+  await runSyncQueue({ source:'manual-draft', retryFailed:false });
+}
+
+async function runSyncQueue(options = {}) {
+  const manual = String(options.source || '').startsWith('manual');
+  const retryFailed = options.retryFailed === true;
+
+  if (state.syncing) {
+    if (manual) toast('Sinkronisasi sedang berjalan.', 'neutral', 2500);
+    updateSyncUiPEMS_();
+    return;
+  }
+  if (!navigator.onLine) {
+    if (manual) toast('Tidak ada internet. Foto tetap aman di HP.', 'warning', 4500);
+    updateQueueBadge();
+    updateSyncUiPEMS_();
+    return;
+  }
+  if (!sessionIsUsable()) {
+    if (manual) {
+      toast('Login Google diperlukan untuk mengirim queue. Foto lokal tetap aman.', 'warning', 5000);
+      showLogin('Login Google untuk sinkronisasi. Draft/foto lokal tidak hilang.');
+    }
+    updateQueueBadge();
+    updateSyncUiPEMS_();
+    return;
+  }
+
+  await recoverStaleQueuePEMS_();
+  const all = await idbGetAll(STORE_QUEUE);
+  const now = Date.now();
+  const waiting = all.filter(q => q.state === 'WAITING' && (manual || !q.nextAttemptAt || new Date(q.nextAttemptAt).getTime() <= now));
+  const failed = retryFailed ? all.filter(q => q.state === 'FAILED') : [];
+  // New/normal queue ALWAYS runs before old failed items.
+  const items = waiting.sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)))
+    .concat(failed.sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))));
+
+  if (!items.length) {
+    if (manual) toast('Tidak ada foto yang perlu dikirim sekarang.', 'success', 3000);
+    updateSyncUiPEMS_();
+    return;
+  }
+
   state.syncing = true;
+  state.syncProgress = { current:0, total:items.length, label:'' };
   updateQueueBadge();
+  updateSyncUiPEMS_();
+
+  let successCount = 0;
+  let stoppedForNetwork = false;
   try {
-    let items = (await idbGetAll(STORE_QUEUE)).filter(q => q.state === 'WAITING' || q.state === 'FAILED');
-    items.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-    for (const item of items) {
+    for (let i=0; i<items.length; i++) {
       if (!navigator.onLine || !sessionIsUsable()) break;
+      const item = items[i];
+      state.syncProgress = { current:i+1, total:items.length, label:item.queueId || '' };
+      updateSyncUiPEMS_();
       try {
         item.state = 'SYNCING';
         item.attempts = Number(item.attempts || 0) + 1;
-
-        setCaptureStage(
-          'Mengirim foto ke server…',
-          null,
-          true
-        );
+        item.updatedAt = new Date().toISOString();
         await idbPut(STORE_QUEUE, item);
         updateQueueBadge();
+
         await syncOneQueueItem(item);
         await idbDelete(STORE_QUEUE, item.queueId);
-
-        setCaptureStage(
-          'Tersimpan di server',
-          100,
-          false
-        );
+        successCount++;
       } catch (err) {
         const msg = humanError(err);
-        if (isAuthError(err) || err?.networkError) {
+        item.lastError = msg;
+        item.updatedAt = new Date().toISOString();
+
+        if (isAuthError(err)) {
           item.state = 'WAITING';
-          item.lastError = msg;
+          item.nextAttemptAt = '';
           await idbPut(STORE_QUEUE, item);
-          if (isAuthError(err)) {
-            clearSession();
-            toast('Session expired. Queue lokal tetap aman; login sekali untuk lanjut.', 'warning', 6000);
-            showLogin('Session expired. Login kembali; queue lokal tidak hilang.');
-          }
+          clearSession();
+          toast('Session habis. Queue lokal aman; login online sekali untuk lanjut sync.', 'warning', 6500);
+          showLogin('Session habis. Login kembali; queue lokal tidak hilang.');
           break;
         }
+
+        if (queueIsRetryableErrorPEMS_(err)) {
+          const delay = queueRetryDelayMsPEMS_(item.attempts);
+          item.state = 'WAITING';
+          item.nextAttemptAt = new Date(Date.now()+delay).toISOString();
+          await idbPut(STORE_QUEUE, item);
+          stoppedForNetwork = true;
+          scheduleQueueRetryPEMS_(delay);
+          // If server/network is currently slow, do not burn the rest of the queue.
+          break;
+        }
+
+        // Permanent validation / permission errors are isolated and NEVER block newer photos.
         item.state = 'FAILED';
-        item.lastError = msg;
+        item.nextAttemptAt = '';
         await idbPut(STORE_QUEUE, item);
-        console.warn('Queue item failed', item.queueId, err);
+        console.warn('Queue item failed permanently', item.queueId, err);
         continue;
       }
     }
   } finally {
     state.syncing = false;
+    state.syncProgress = { current:0, total:0, label:'' };
     await refreshLocalState();
     updateQueueBadge();
-    if (state.currentPage === 'evidence') renderEvidence();
-    if (state.currentPage === 'pekerjaan' && state.selectedRequirement) renderCapturePanel();
+    updateSyncUiPEMS_();
+    if (state.currentPage === 'evidence') await renderEvidence();
+    // Do not re-fetch server photos after background sync; WASPANG can keep moving immediately.
+    if (navigator.onLine && sessionIsUsable()) refreshNotifications(false);
 
-    refreshNotifications(false);
+    if (manual) {
+      if (successCount) toast(`${successCount} foto berhasil tersimpan di server.`, 'success', 4000);
+      else if (stoppedForNetwork) toast('Server/jaringan belum stabil. Queue tetap aman dan akan dicoba lagi otomatis.', 'warning', 6000);
+    }
   }
 }
 
@@ -2831,6 +3033,8 @@ async function syncOneQueueItem(item) {
   const base64 = await blobToBase64(photo.blob);
   const result = await api('/evidence/sync-photo', {
     method: 'POST',
+    timeoutMs: 45000,
+    maxAttempts: 1,
     body: {
       projectId: draft.projectId,
       sessionId: draft.sessionId,
@@ -2865,8 +3069,8 @@ async function syncOneQueueItem(item) {
       serverEvidenceId: draft.serverEvidenceId || '',
       requiredPhotoCount: Number(draft.requiredPhotoCount || 1),
       requirementCode: draft.requirementCode || 'MATERIAL',
-      pointId: state.selectedSession?.anchorPointId || '',
-      planMatchRef: state.selectedSession?.anchorLabel || '',
+      pointId: draft.pointId || '',
+      planMatchRef: draft.planMatchRef || '',
       thumbnailBase64: thumbnail?.base64 || '',
       thumbnailMimeType: thumbnail?.mimeType || 'image/jpeg',
       thumbnailBytes: Number(thumbnail?.bytes || 0),
@@ -2910,13 +3114,15 @@ async function renderEvidence() {
       ${kpi('Submitted', drafts.filter(d => d.workflow === 'SUBMITTED').length)}
     </div>
     <div class="card" style="margin-top:16px">
-      <div class="section-head"><h2>Queue & Draft Evidence</h2><button id="evidenceSyncBtn" class="btn secondary small" ${!navigator.onLine ? 'disabled' : ''}>Sync Sekarang</button></div>
+      <div class="section-head"><div><h2>Queue & Draft Evidence</h2><div class="tiny muted">Foto baru diprioritaskan. Item gagal lama tidak menahan queue baru.</div></div><button id="evidenceSyncBtn" class="btn secondary small" ${!navigator.onLine ? 'disabled' : ''}>${!navigator.onLine ? 'Menunggu Koneksi' : (sessionIsUsable() ? 'Coba Sinkronkan Lagi' : 'Login & Sinkronkan')}</button></div>
       <div class="list">
         ${drafts.length ? drafts.map(d => draftCardHtml(d, queue)).join('') : '<div class="empty">Belum ada draft evidence lokal.</div>'}
       </div>
     </div>
   `;
-  document.getElementById('evidenceSyncBtn')?.addEventListener('click', runSyncQueue);
+  document.getElementById('evidenceSyncBtn')?.addEventListener('click', () => runSyncQueue({ source:'manual', retryFailed:true }));
+  updateSyncUiPEMS_();
+  el.content.querySelectorAll('[data-retry-draft]').forEach(btn => btn.addEventListener('click', () => retryDraftFailedPEMS_(btn.dataset.retryDraft)));
   el.content.querySelectorAll('[data-draft-submit]').forEach(btn => btn.addEventListener('click', async () => {
     const draft = await idbGet(STORE_DRAFTS, btn.dataset.draftSubmit);
     if (!draft?.serverEvidenceId) return;
@@ -2937,15 +3143,43 @@ async function renderEvidence() {
 
 function draftCardHtml(draft, queue) {
   const q = queue.filter(x => x.draftId === draft.draftId);
-  const waiting = q.filter(x => ['WAITING','SYNCING'].includes(x.state)).length;
-  const failed = q.filter(x => x.state === 'FAILED').length;
+  const waitingItems = q.filter(x => ['WAITING','SYNCING'].includes(x.state));
+  const failedItems = q.filter(x => x.state === 'FAILED');
+  const waiting = waitingItems.length;
+  const failed = failedItems.length;
   const complete = Number(draft.serverPhotoCount || 0) >= Number(draft.requiredPhotoCount || 1);
+  const queueText = waiting
+    ? `${waitingItems.some(x=>x.state==='SYNCING') ? 'Mengirim' : 'Menunggu'} ${waiting}`
+    : 'Queue 0';
+  const waitingRetryItems = waitingItems.filter(item => item.state === 'WAITING' && item.lastError);
+  const waitingRetryHtml = waitingRetryItems.length
+    ? `<div class="queue-retry-box">
+        ${waitingRetryItems.slice(0,2).map(item => {
+          const next = item.nextAttemptAt ? new Date(item.nextAttemptAt) : null;
+          const retryLabel = next && Number.isFinite(next.getTime()) ? ` • coba lagi ${next.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}` : '';
+          return `<div><b>Menunggu retry:</b> ${escapeHtml(item.lastError || 'Server/jaringan belum stabil')}${escapeHtml(retryLabel)}</div>`;
+        }).join('')}
+      </div>`
+    : '';
+  const errorHtml = failedItems.length
+    ? `<div class="queue-error-box">
+        ${failedItems.slice(0,3).map(item => `<div><b>Gagal:</b> ${escapeHtml(item.lastError || 'Tidak diketahui')}</div>`).join('')}
+        ${failedItems.length > 3 ? `<div>+ ${failedItems.length-3} error lain</div>` : ''}
+        <button class="btn warning small" data-retry-draft="${escapeAttr(draft.draftId)}">Coba Lagi Item Gagal</button>
+      </div>`
+    : '';
   return `
-    <div class="list-item">
-      <div><div class="item-title">${escapeHtml(draft.designator || draft.materialName || draft.projectMaterialId)}</div><div class="item-sub">${escapeHtml(draft.projectId)} • ${escapeHtml(draft.sessionId)}<br>Server ${Number(draft.serverPhotoCount || 0)}/${Number(draft.requiredPhotoCount || 0)} • Queue ${waiting}${failed ? ` • Failed ${failed}` : ''}</div></div>
+    <div class="list-item draft-queue-card">
+      <div style="min-width:0;flex:1">
+        <div class="item-title">${escapeHtml(draft.designator || draft.materialName || draft.projectMaterialId)}</div>
+        <div class="item-sub">${escapeHtml(draft.projectId)} • ${escapeHtml(draft.sessionId)}<br>Server ${Number(draft.serverPhotoCount || 0)}/${Number(draft.requiredPhotoCount || 0)} • ${escapeHtml(queueText)}${failed ? ` • Gagal ${failed}` : ''}</div>
+        ${waitingRetryHtml}
+        ${errorHtml}
+      </div>
       <div style="display:grid;gap:7px;justify-items:end"><span class="badge ${workflowBadge(draft.workflow)}">${escapeHtml(draft.workflow || 'DRAFT_LOCAL')}</span>${draft.serverEvidenceId && complete && draft.workflow !== 'SUBMITTED' ? `<button class="btn success small" data-draft-submit="${escapeAttr(draft.draftId)}">Submit</button>` : ''}</div>
     </div>`;
 }
+
 
 async function renderVerification() {
   if (!hasPermission('verification.decide')) {
@@ -3377,8 +3611,13 @@ async function renderMonitoring(options = {}) {
   const actionItems =
     data.actionItems || [];
 
-  const recentItems =
+  const rawRecentItems =
     data.recentItems || [];
+
+  const focusStatus = String(state.monitoringFocus || '').toUpperCase();
+  const recentItems = focusStatus
+    ? rawRecentItems.filter(item => String(item.workflowStatus || '').toUpperCase() === focusStatus)
+    : rawRecentItems;
 
   const byUser =
     data.byUser || [];
@@ -3489,10 +3728,10 @@ async function renderMonitoring(options = {}) {
     <div class="card" style="margin-top:16px">
       <div class="section-head">
         <div>
-          <h2>${isField ? 'Evidence Terakhir Saya' : 'Evidence Terbaru'}</h2>
-          <div class="small muted">${isField ? 'Menunjukkan titik/material yang sebenarnya diverifikasi.' : '20 aktivitas evidence terbaru di area akses.'}</div>
+          <h2>${focusStatus ? `${friendlyWorkflowLabel(focusStatus)} Evidence` : (isField ? 'Evidence Terakhir Saya' : 'Evidence Terbaru')}</h2>
+          <div class="small muted">${focusStatus ? 'Filter dari kartu Home. Tekan Tampilkan Semua untuk kembali.' : (isField ? 'Menunjukkan titik/material yang sebenarnya diverifikasi.' : '20 aktivitas evidence terbaru di area akses.')}</div>
         </div>
-        <span class="badge neutral">${recentItems.length}</span>
+        <div style="display:flex;gap:8px;align-items:center"><span class="badge neutral">${recentItems.length}</span>${focusStatus ? '<button id="monitorClearFocus" class="btn ghost small">Tampilkan Semua</button>' : ''}</div>
       </div>
 
       <div class="monitoring-evidence-list">
@@ -3559,6 +3798,8 @@ async function renderMonitoring(options = {}) {
       </div>
     ` : ''}
   `;
+
+  document.getElementById('monitorClearFocus')?.addEventListener('click', () => { state.monitoringFocus=''; renderMonitoring(); });
 
   el.content.querySelectorAll('[data-monitor-page]').forEach(btn => {
     btn.addEventListener('click', () =>
@@ -5482,7 +5723,7 @@ function renderSettings() {
           ${statusRow('Device ID', getDeviceId(), 'neutral')}
           ${statusRow('App Version', APP_VERSION, 'info')}
           ${statusRow('Koneksi API', state.apiBase ? 'Terhubung' : 'Belum terhubung', state.apiBase ? 'success':'danger')}
-          ${statusRow('Session', sessionIsUsable() ? 'Aktif' : 'Login diperlukan', sessionIsUsable()?'success':'warning')}
+          ${statusRow('Session', sessionIsUsable() ? 'Aktif' : (isWaspangRolePEMS_(state.user?.role) && state.bootstrap ? (navigator.onLine ? 'Lokal WASPANG' : 'Offline WASPANG') : 'Login diperlukan'), appAccessUsablePEMS_() ? 'success':'warning')}
         </div>
       </div>
 
@@ -5510,10 +5751,108 @@ function renderSettings() {
   });
 }
 
+async function offlinePackStatusPEMS_(projectId) {
+  if (!projectId) return null;
+  return await cacheGet(`offline-pack:${userCachePrefix()}:${projectId}`);
+}
+
+function updateOfflinePackHintPEMS_() {
+  const p = state.offlinePack;
+  const projectId = document.getElementById('homeProjectSelect')?.value || state.selectedProjectId;
+  const pairs = [
+    [document.getElementById('offlinePackHint'), document.getElementById('prepareOfflineBtn')],
+    [document.getElementById('workOfflinePackHint'), document.getElementById('workOfflinePackBtn')]
+  ];
+  pairs.forEach(([hint, btn]) => {
+    if (!hint) return;
+    if (p.running && p.projectId === projectId) {
+      hint.textContent = `Menyiapkan offline ${p.done}/${p.total}${p.failed ? ` • gagal ${p.failed}` : ''}…`;
+      if (btn) { btn.disabled = true; btn.textContent = `Menyiapkan ${p.done}/${p.total}`; }
+    } else {
+      hint.textContent = navigator.onLine
+        ? 'Simpan titik + requirement ke HP agar tetap bisa kerja saat mode pesawat/tanpa kuota.'
+        : 'Offline: memakai data project yang sudah tersimpan di HP.';
+      if (btn) {
+        btn.disabled = !navigator.onLine;
+        btn.textContent = 'Siapkan Project Offline';
+      }
+    }
+  });
+}
+
+function scheduleOfflinePackPEMS_(projectId) {
+  if (state.offlinePackTimer) clearTimeout(state.offlinePackTimer);
+  state.offlinePackTimer = setTimeout(() => {
+    state.offlinePackTimer = null;
+    if (navigator.onLine && sessionIsUsable() && state.selectedProjectId === projectId) {
+      prepareProjectOfflinePackPEMS_(projectId, { quiet:true }).catch(()=>{});
+    }
+  }, 20_000);
+}
+
+async function prepareProjectOfflinePackPEMS_(projectId, options = {}) {
+  projectId = String(projectId || '').trim();
+  if (!projectId) throw new Error('Project belum dipilih.');
+  if (!navigator.onLine || !sessionIsUsable()) {
+    if (!options.quiet) toast('Siapkan Offline memerlukan internet + session aktif.', 'warning', 5000);
+    return null;
+  }
+  if (state.offlinePack.running) return null;
+
+  const workspace = await loadWorkspace(projectId);
+  const sessions = Array.isArray(workspace?.pointSessions) ? workspace.pointSessions : [];
+  state.offlinePack = { projectId, running:true, total:sessions.length, done:0, failed:0 };
+  updateOfflinePackHintPEMS_();
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < sessions.length) {
+      const session = sessions[cursor++];
+      const sessionId = String(session?.sessionId || '').trim();
+      if (!sessionId) { state.offlinePack.done++; continue; }
+      const cacheKey = `requirements:hf16:${userCachePrefix()}:${projectId}:${sessionId}`;
+      try {
+        const cached = await cacheGetRow(cacheKey);
+        if (!cached?.value) {
+          const data = await api(`/points/${encodeURIComponent(sessionId)}/requirements?projectId=${encodeURIComponent(projectId)}`, { timeoutMs:20000, maxAttempts:1 });
+          await cachePut(cacheKey, data);
+          state.requirementsMemory.set(`${projectId}:${sessionId}`, data);
+        }
+      } catch (err) {
+        state.offlinePack.failed++;
+        console.warn('Offline pack requirement failed', sessionId, err);
+      } finally {
+        state.offlinePack.done++;
+        updateOfflinePackHintPEMS_();
+      }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+
+  const result = {
+    projectId,
+    total: sessions.length,
+    cached: Math.max(0, sessions.length - state.offlinePack.failed),
+    failed: state.offlinePack.failed,
+    ready: state.offlinePack.failed === 0,
+    updatedAt: new Date().toISOString()
+  };
+  await cachePut(`offline-pack:${userCachePrefix()}:${projectId}`, result);
+  state.offlinePack.running = false;
+  updateOfflinePackHintPEMS_();
+  if (!options.quiet) {
+    toast(result.ready
+      ? `Project siap offline: ${result.cached}/${result.total} titik.`
+      : `Offline pack selesai sebagian: ${result.cached}/${result.total}. ${result.failed} titik perlu dicoba lagi.`, result.ready ? 'success' : 'warning', 6000);
+  }
+  return result;
+}
+
 async function selectProject(projectId, preload) {
   state.selectedProjectId = projectId;
   localStorage.setItem(SELECTED_PROJECT_KEY, projectId);
   if (preload) await loadWorkspace(projectId);
+  if (preload && navigator.onLine && sessionIsUsable()) scheduleOfflinePackPEMS_(projectId);
 }
 
 async function loadWorkspace(projectId, options = {}) {
@@ -6654,6 +6993,14 @@ function projectSelectHtml(projects, selected, id) {
   return `<select id="${escapeAttr(id)}" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}" ${p.projectId===selected?'selected':''}>${escapeHtml(adminProjectLabelPEMS_(p))}</option>`).join('')}</select>`;
 }
 function kpi(label,value,sub='') { return `<div class="card kpi-card"><div class="value">${escapeHtml(String(value ?? 0))}</div><div class="label">${escapeHtml(label)}${sub?` • ${escapeHtml(sub)}`:''}</div></div>`; }
+function kpiActionPEMS_(label,value,action,sub='') { return `<button type="button" class="card kpi-card kpi-action" data-home-kpi="${escapeAttr(action)}"><div class="value">${escapeHtml(String(value ?? 0))}</div><div class="label">${escapeHtml(label)}${sub?` • ${escapeHtml(sub)}`:''}</div></button>`; }
+function handleHomeKpiPEMS_(action) {
+  if (action === 'projects') { navigate('pekerjaan'); return; }
+  if (action === 'queue') { navigate('evidence'); return; }
+  if (action === 'revision') { state.monitoringFocus='NEED_REVISION'; navigate('monitoring'); return; }
+  if (action === 'verified') { state.monitoringFocus='VERIFIED'; navigate('monitoring'); return; }
+}
+
 function statusRow(label,value,badge='neutral') { return `<div class="list-item"><div><div class="item-title">${escapeHtml(label)}</div></div><span class="badge ${badge}">${escapeHtml(String(value ?? '-'))}</span></div>`; }
 function workflowBadge(status) { const s=String(status||'').toUpperCase(); if(['VERIFIED','SYNCED','COMPLETE','REVISION_RESOLVED'].includes(s))return 'success'; if(['SUBMITTED','QUEUED','SYNCING','NEED_REVISION','REOPENED'].includes(s))return 'warning'; if(['REJECTED','FAILED','SYNC_ERROR'].includes(s))return 'danger'; if(['DRAFT_SERVER'].includes(s))return 'info'; return 'neutral'; }
 function isWaspangRolePEMS_(role) { return ['WASPANG','LAPANGAN','FIELD'].includes(String(role||'').toUpperCase()); }

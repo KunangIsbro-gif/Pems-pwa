@@ -644,3 +644,16 @@ body.modal-open{overflow:hidden}
   .monitor-photo-decision .form-row{grid-template-columns:1fr}
   .monitor-photo-decision .toolbar{display:grid;grid-template-columns:1fr;gap:8px}
 }
+
+
+/* HF23 WASPANG Stabilization */
+.kpi-action{display:block;width:100%;text-align:left;border:1px solid var(--line);font:inherit;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease}
+.kpi-action:hover,.kpi-action:focus-visible{transform:translateY(-1px);box-shadow:0 8px 22px rgba(15,23,42,.08);border-color:#94a3b8;outline:none}
+.kpi-action .label:after{content:'  ›';font-weight:900;color:#334155}
+.queue-error-box{margin-top:9px;padding:9px 10px;border:1px solid #fecaca;background:#fff7f7;border-radius:10px;color:#991b1b;font-size:.78rem;display:grid;gap:6px}
+.draft-queue-card{align-items:flex-start}
+@media(max-width:560px){.kpi-action{min-height:104px}.queue-error-box .btn{width:100%}}
+
+/* HF23 WASPANG queue retry feedback */
+.queue-retry-box{margin-top:9px;padding:9px 11px;border-radius:12px;background:#eef6ff;border:1px solid #bfdbfe;color:#1e3a5f;font-size:12px;line-height:1.45}
+.queue-retry-box>div+div{margin-top:4px}
