@@ -1,5 +1,5 @@
 window.PEMS_CONFIG = {
-  APP_VERSION: 'V15.9.25-WASPANG-STABILIZATION-R13F-HF23',
+  APP_VERSION: 'V15.9.27-TIF-WORD-OUTPUT-R13F-HF25',
   GOOGLE_CLIENT_ID: '1060103852891-d73p5h12i97rcrfkh0i0ns891iv37n10.apps.googleusercontent.com',
   API_BASE: 'https://pems-gateway.siikunang.workers.dev/api/v15'
 };

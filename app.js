@@ -42,6 +42,8 @@ const state = {
   offlinePack: { projectId: '', running: false, total: 0, done: 0, failed: 0 },
   offlinePackTimer: null,
   monitoringFocus: '',
+  monitoringProjectFilter: '',
+  monitoringUserFilter: '',
   cameraContext: null,
   revisionTargetPmId: '',
   draftsPhotos: [],
@@ -241,7 +243,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-25-r13f-hf23');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-27-r13f-hf25');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -1590,6 +1592,24 @@ function additionalMaterialSummaryPEMS_(items) {
   return parts.join(' · ');
 }
 
+function fieldMaterialGuidanceHF24PEMS_(session, requirements, additional) {
+  const role = String(session?.anchorRole || session?.pointRole || '').toUpperCase();
+  const label = [session?.anchorLabel, session?.pointLabel, session?.sourceCode].filter(Boolean).join(' ').toUpperCase();
+  const addText = (additional || []).map(r => [r.designator, r.materialName, r.requirementCode].join(' ')).join(' ').toUpperCase();
+  const notes = [];
+  if (role === 'OTB/ODF' || /\bOTB\b|\bODF\b|\bFTM\b/.test(label)) {
+    notes.push('OTB/ODF adalah titik/aset sendiri. Jika pekerjaan di OTB/ODF, pilih titik OTB/ODF dari daftar titik, bukan ditambahkan di titik TIANG.');
+  }
+  if (role === 'RISER/TC-02' || /TC-02-ODC|RISER/.test(label)) {
+    notes.push('TC-02-ODC masuk konteks RISER/TC-02. Pilih titik TC-02/Riser bila ada di KML; jangan dipilih dari aksesori TIANG.');
+  }
+  if (/PP-OF-OUT|PP-OF-IN|PIPE PROTECTOR|DUCT|HDPE/.test(addText + ' ' + label)) {
+    notes.push('PP-OF-OUT / PP-OF-IN adalah material ROUTE / Proteksi Kabel. Evidence-nya tidak dipaksa ke titik TIANG; nanti masuk flow Realisasi Route / Proteksi Kabel.');
+  }
+  if (!notes.length) return '';
+  return `<div class="status-box info field-guidance" style="margin-top:10px"><b>Panduan Material:</b><br>${notes.map(n => `• ${escapeHtml(n)}`).join('<br>')}</div>`;
+}
+
 function allSelectableRequirementsPEMS_() {
   return []
     .concat(state.requirements?.requirements || [])
@@ -1678,6 +1698,7 @@ function renderRequirementsPanel() {
       ${additional.length ? `<div class="field-boq-note"><b>${additional.length} kandidat tambahan</b> tersedia melalui tombol <b>+ Tambah Material Lain</b>.<br><small>${escapeHtml(additionalMaterialSummaryPEMS_(additional))}</small></div>` : ''}
     </div>
 
+    ${fieldMaterialGuidanceHF24PEMS_(session, state.requirements, additional)}
     ${state.requirements.warnings?.length ? `<div class="warning-strip field-warning-strip"><b>Catatan Mapping:</b><br>${state.requirements.warnings.map(w => `• ${escapeHtml(w.message || w.code)}`).join('<br>')}</div>` : ''}
   `;
 
@@ -3102,25 +3123,148 @@ async function syncOneQueueItem(item) {
   await idbPut(STORE_PHOTOS, photo);
 }
 
+
+function workflowIsClosedHF24PEMS_(workflow) {
+  const s = String(workflow || '').toUpperCase();
+  return ['SUBMITTED','VERIFIED','NEED_REVISION','REJECTED','REVISION_RESOLVED'].includes(s);
+}
+
+function workflowIsActiveDraftHF24PEMS_(draft) {
+  const s = String(draft?.workflow || 'DRAFT_LOCAL').toUpperCase();
+  return !workflowIsClosedHF24PEMS_(s);
+}
+
+async function reconcileLocalEvidenceStatusesHF24PEMS_(options = {}) {
+  if (!navigator.onLine || !sessionIsUsable()) return { updated: 0 };
+  const now = Date.now();
+  if (!options.force && state.lastEvidenceReconcileAt && now - state.lastEvidenceReconcileAt < 15000) {
+    return { updated: 0, skipped: true };
+  }
+  const drafts = await idbAll(STORE_DRAFTS);
+  const ids = drafts.map(d => String(d.serverEvidenceId || '').trim()).filter(Boolean);
+  if (!ids.length) return { updated: 0 };
+  let data;
+  try {
+    data = await api('/evidence/statuses', { method:'POST', body:{ evidenceIds: ids }, timeoutMs:30000, maxAttempts:1 });
+  } catch (err) {
+    console.warn('HF24 reconcile failed', err);
+    return { updated: 0, error: err };
+  }
+  const map = new Map((data.items || []).map(item => [String(item.evidenceId), item]));
+  let updated = 0;
+  const queue = await idbAll(STORE_QUEUE);
+  const queueToDelete = [];
+  for (const draft of drafts) {
+    const serverId = String(draft.serverEvidenceId || '').trim();
+    const st = map.get(serverId);
+    if (!st) continue;
+    const serverWorkflow = String(st.workflowStatus || '').toUpperCase();
+    if (serverWorkflow && serverWorkflow !== String(draft.workflow || '').toUpperCase()) {
+      draft.workflow = serverWorkflow;
+      updated++;
+    }
+    if (Number(st.actualPhotoCount || 0) > Number(draft.serverPhotoCount || 0)) {
+      draft.serverPhotoCount = Number(st.actualPhotoCount || 0);
+      updated++;
+    }
+    draft.workflowLabel = st.workflowLabel || draft.workflowLabel || '';
+    draft.serverVerifiedAt = st.verifiedAt || draft.serverVerifiedAt || '';
+    draft.serverSubmittedAt = st.submittedAt || draft.serverSubmittedAt || '';
+    draft.locked = !!st.locked || workflowIsClosedHF24PEMS_(serverWorkflow);
+    draft.updatedAt = new Date().toISOString();
+    await idbPut(STORE_DRAFTS, draft);
+
+    if (workflowIsClosedHF24PEMS_(serverWorkflow)) {
+      queue.filter(q => q.draftId === draft.draftId).forEach(q => queueToDelete.push(q.queueId));
+    }
+  }
+  for (const queueId of queueToDelete) {
+    await idbDelete(STORE_QUEUE, queueId);
+  }
+  if (updated || queueToDelete.length) {
+    await refreshLocalState();
+  }
+  state.lastEvidenceReconcileAt = now;
+  return { updated, queueRemoved: queueToDelete.length };
+}
+
+function draftHistoryCardHtmlHF24PEMS_(draft) {
+  const workflow = String(draft.workflow || '').toUpperCase();
+  const label = draft.workflowLabel || friendlyWorkflowLabel(workflow);
+  const badge = workflowBadge(workflow);
+  const doneHint = workflow === 'VERIFIED'
+    ? 'Selesai diverifikasi PM/Verifier.'
+    : workflow === 'SUBMITTED'
+      ? 'Sudah masuk ke menu Verifikasi PM/Verifier.'
+      : workflow === 'NEED_REVISION'
+        ? 'Perlu tindak lanjut WASPANG.'
+        : workflow === 'REJECTED'
+          ? 'Ditolak oleh verifier.'
+          : 'Riwayat evidence.';
+  return `<div class="list-item draft-queue-card history-card">
+    <div style="min-width:0;flex:1">
+      <div class="item-title">${escapeHtml(draft.designator || draft.materialName || draft.projectMaterialId)}</div>
+      <div class="item-sub">${escapeHtml(draft.projectId)} • ${escapeHtml(draft.sessionId)}<br>Server ${Number(draft.serverPhotoCount || 0)}/${Number(draft.requiredPhotoCount || 0)} • ${escapeHtml(doneHint)}</div>
+    </div>
+    <div style="display:grid;gap:7px;justify-items:end"><span class="badge ${badge}">${escapeHtml(label || workflow)}</span></div>
+  </div>`;
+}
+
 async function renderEvidence() {
   await refreshLocalState();
+  if (navigator.onLine && sessionIsUsable()) {
+    await reconcileLocalEvidenceStatusesHF24PEMS_({ force:false });
+    await refreshLocalState();
+  }
+
   const drafts = state.drafts.slice().sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
   const queue = state.queue;
+  const activeDrafts = drafts.filter(workflowIsActiveDraftHF24PEMS_);
+  const historyDrafts = drafts.filter(d => !workflowIsActiveDraftHF24PEMS_(d));
+  const activeDraftIds = new Set(activeDrafts.map(d => d.draftId));
+  const activeQueue = queue.filter(q => activeDraftIds.has(q.draftId));
+  const waitingCount = activeQueue.filter(q => q.state === 'WAITING' || q.state === 'SYNCING').length;
+  const failedCount = activeQueue.filter(q => q.state === 'FAILED').length;
+  const syncButtonDisabled = !navigator.onLine || (!waitingCount && !failedCount);
+  const syncButtonText = !navigator.onLine
+    ? 'Menunggu Koneksi'
+    : (!waitingCount && !failedCount)
+      ? 'Queue Kosong'
+      : (sessionIsUsable() ? 'Coba Sinkronkan Lagi' : 'Login & Sinkronkan');
+
   el.content.innerHTML = `
     <div class="grid kpi">
-      ${kpi('Draft Lokal', drafts.filter(d => d.workflow === 'DRAFT_LOCAL').length)}
-      ${kpi('Menunggu Sync', queue.filter(q => q.state === 'WAITING' || q.state === 'SYNCING').length)}
-      ${kpi('Sync Gagal', queue.filter(q => q.state === 'FAILED').length)}
-      ${kpi('Submitted', drafts.filter(d => d.workflow === 'SUBMITTED').length)}
+      ${kpi('Draft Lokal', activeDrafts.filter(d => d.workflow === 'DRAFT_LOCAL').length)}
+      ${kpi('Menunggu Sync', waitingCount)}
+      ${kpi('Sync Gagal', failedCount)}
+      ${kpi('Submitted', historyDrafts.filter(d => String(d.workflow).toUpperCase() === 'SUBMITTED').length)}
     </div>
     <div class="card" style="margin-top:16px">
-      <div class="section-head"><div><h2>Queue & Draft Evidence</h2><div class="tiny muted">Foto baru diprioritaskan. Item gagal lama tidak menahan queue baru.</div></div><button id="evidenceSyncBtn" class="btn secondary small" ${!navigator.onLine ? 'disabled' : ''}>${!navigator.onLine ? 'Menunggu Koneksi' : (sessionIsUsable() ? 'Coba Sinkronkan Lagi' : 'Login & Sinkronkan')}</button></div>
+      <div class="section-head"><div><h2>Queue & Draft Evidence</h2><div class="tiny muted">Foto baru diprioritaskan. Item gagal lama tidak menahan queue baru. Evidence yang sudah SUBMITTED/VERIFIED dipindah ke Riwayat.</div></div><button id="evidenceSyncBtn" class="btn secondary small" ${syncButtonDisabled ? 'disabled' : ''}>${escapeHtml(syncButtonText)}</button></div>
       <div class="list">
-        ${drafts.length ? drafts.map(d => draftCardHtml(d, queue)).join('') : '<div class="empty">Belum ada draft evidence lokal.</div>'}
+        ${activeDrafts.length ? activeDrafts.map(d => draftCardHtml(d, queue)).join('') : '<div class="empty">Tidak ada draft/queue aktif. Semua foto yang sudah submit ada di Riwayat.</div>'}
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="section-head"><div><h2>Riwayat Evidence</h2><div class="tiny muted">Status mengikuti server: Menunggu Verifikasi, Verified, Need Revision, atau Rejected.</div></div><button id="evidenceReconcileBtn" class="btn outline small" ${(!navigator.onLine || !sessionIsUsable()) ? 'disabled' : ''}>Refresh Status Server</button></div>
+      <div class="list">
+        ${historyDrafts.length ? historyDrafts.map(draftHistoryCardHtmlHF24PEMS_).join('') : '<div class="empty">Belum ada evidence terkirim/selesai di perangkat ini.</div>'}
       </div>
     </div>
   `;
   document.getElementById('evidenceSyncBtn')?.addEventListener('click', () => runSyncQueue({ source:'manual', retryFailed:true }));
+  document.getElementById('evidenceReconcileBtn')?.addEventListener('click', async btnEvent => {
+    const btn = btnEvent.currentTarget;
+    try {
+      setButtonLoadingPEMS_(btn, true, 'Refresh...');
+      const res = await reconcileLocalEvidenceStatusesHF24PEMS_({ force:true });
+      toast(`Status server diperbarui${res.updated ? ` · ${res.updated} berubah` : ''}.`, 'success', 4000);
+      await renderEvidence();
+    } catch (err) {
+      toast(humanError(err), 'danger', 6000);
+      setButtonLoadingPEMS_(btn, false);
+    }
+  });
   updateSyncUiPEMS_();
   el.content.querySelectorAll('[data-retry-draft]').forEach(btn => btn.addEventListener('click', () => retryDraftFailedPEMS_(btn.dataset.retryDraft)));
   el.content.querySelectorAll('[data-draft-submit]').forEach(btn => btn.addEventListener('click', async () => {
@@ -3132,6 +3276,8 @@ async function renderEvidence() {
       draft.workflow = result.workflowStatus;
       draft.updatedAt = new Date().toISOString();
       await idbPut(STORE_DRAFTS,draft);
+      await purgeQueueForDraftHF24PEMS_(draft.draftId);
+      await clearLiveCachesHF24PEMS_();
       toast('Evidence submitted.', 'success');
       await renderEvidence();
     } catch(err) {
@@ -3139,6 +3285,22 @@ async function renderEvidence() {
       setButtonLoadingPEMS_(btn, false);
     }
   }));
+}
+
+async function purgeQueueForDraftHF24PEMS_(draftId) {
+  const items = await idbAll(STORE_QUEUE);
+  for (const item of items) {
+    if (item.draftId === draftId) await idbDelete(STORE_QUEUE, item.queueId);
+  }
+}
+
+async function clearLiveCachesHF24PEMS_() {
+  try { await idbDelete(STORE_CACHE, `monitoring:${userCachePrefix()}`); } catch {}
+  try { await idbDelete(STORE_CACHE, `notifications:${userCachePrefix()}`); } catch {}
+  state.monitoring = null;
+  state.notifications = { count: 0, items: [], generatedAt: '' };
+  state.notificationLastFetchAt = 0;
+  state.monitoringLastFetchAt = 0;
 }
 
 function draftCardHtml(draft, queue) {
@@ -3480,6 +3642,7 @@ async function handleVerificationAction(btn) {
     setButtonLoadingPEMS_(btn, true, loadingLabel);
     await api(`/verification/${encodeURIComponent(id)}/${action}`, { method:'POST', body:{reasonCode,note} });
     toast(`Evidence ${action.toUpperCase()} berhasil.`, 'success');
+    await clearLiveCachesHF24PEMS_();
     await refreshNotifications(true, true);
     await renderVerification();
   } catch(err) {
@@ -3496,8 +3659,11 @@ async function fetchMonitoringOnce(cacheKey) {
     return await state.monitoringInflight;
   }
 
+  const projectFilter = String(state.monitoringProjectFilter || '').trim();
+  const monitorPath = projectFilter ? `/monitoring?projectId=${encodeURIComponent(projectFilter)}` : '/monitoring';
+
   state.monitoringInflight =
-    api('/monitoring')
+    api(monitorPath)
       .then(async data => {
         state.monitoring =
           data;
@@ -3550,7 +3716,7 @@ async function refreshMonitoringInBackground(cacheKey) {
 
 async function renderMonitoring(options = {}) {
   const cacheKey =
-    `monitoring:${userCachePrefix()}`;
+    `monitoring:${userCachePrefix()}:${String(state.monitoringProjectFilter || 'ALL')}`;
 
   const force =
     options.force === true;
@@ -3615,12 +3781,20 @@ async function renderMonitoring(options = {}) {
     data.recentItems || [];
 
   const focusStatus = String(state.monitoringFocus || '').toUpperCase();
-  const recentItems = focusStatus
+  const userFilter = String(state.monitoringUserFilter || '').toLowerCase();
+  const recentItemsBase = focusStatus
     ? rawRecentItems.filter(item => String(item.workflowStatus || '').toUpperCase() === focusStatus)
     : rawRecentItems;
+  const recentItems = userFilter
+    ? recentItemsBase.filter(item => String(item.createdBy || '').toLowerCase() === userFilter)
+    : recentItemsBase;
 
   const byUser =
-    data.byUser || [];
+    userFilter
+      ? (data.byUser || []).filter(user => String(user.email || '').toLowerCase() === userFilter)
+      : (data.byUser || []);
+
+  const projectOptions = (data.projects || state.bootstrap?.projects || []).slice();
 
   const isField =
     isWaspangRolePEMS_(role);
@@ -3690,6 +3864,22 @@ async function renderMonitoring(options = {}) {
         kpi(row[0], row[1], row[2])
       ).join('')}
     </div>
+
+    ${!isField ? `
+      <div class="card" style="margin-top:16px">
+        <div class="section-head"><h2>Filter Monitoring</h2><span class="badge info">LOP / User</span></div>
+        <div class="grid two">
+          <div class="field"><label>Project / LOP</label><select id="monitorProjectFilter" class="input">
+            <option value="">Semua Project / LOP</option>
+            ${projectOptions.map(p => { const pid = String(p.projectId || ''); const label = [pid, p.detailProject || p.projectName].filter(Boolean).join(' — '); return `<option value="${escapeAttr(pid)}" ${pid === String(state.monitoringProjectFilter || '') ? 'selected' : ''}>${escapeHtml(label)}</option>`; }).join('')}
+          </select></div>
+          <div class="field"><label>User / WASPANG</label><select id="monitorUserFilter" class="input">
+            <option value="">Semua User</option>
+            ${(data.byUser || []).map(user => { const email = String(user.email || '').toLowerCase(); return `<option value="${escapeAttr(email)}" ${email === String(state.monitoringUserFilter || '').toLowerCase() ? 'selected' : ''}>${escapeHtml(user.name || email)} — ${escapeHtml(email)}</option>`; }).join('')}
+          </select></div>
+        </div>
+      </div>
+    ` : ''}
 
     <div class="grid ${isField ? 'two' : 'two'}" style="margin-top:16px">
       <div class="card">
@@ -3798,6 +3988,17 @@ async function renderMonitoring(options = {}) {
       </div>
     ` : ''}
   `;
+
+  document.getElementById('monitorProjectFilter')?.addEventListener('change', async event => {
+    state.monitoringProjectFilter = String(event.target.value || '');
+    state.monitoringUserFilter = '';
+    state.monitoring = null;
+    await renderMonitoring({ force:true });
+  });
+  document.getElementById('monitorUserFilter')?.addEventListener('change', event => {
+    state.monitoringUserFilter = String(event.target.value || '');
+    renderMonitoring({ force:false });
+  });
 
   document.getElementById('monitorClearFocus')?.addEventListener('click', () => { state.monitoringFocus=''; renderMonitoring(); });
 
@@ -3949,8 +4150,7 @@ async function handleMonitoringDecisionPEMS_(button, evidenceId) {
     await api(`/verification/${encodeURIComponent(evidenceId)}/${action}`, { method:'POST', body:{ reasonCode, note } });
     toast(`Evidence ${action.toUpperCase()} berhasil.`, 'success');
     closePhotoModal();
-    await idbDelete(STORE_CACHE, `monitoring:${userCachePrefix()}`);
-    state.monitoring = null;
+    await clearLiveCachesHF24PEMS_();
     await refreshNotifications(true, true);
     await renderMonitoring({ force:true });
   } catch (err) {
@@ -5197,17 +5397,23 @@ async function renderOutput() {
         </div>
         <div class="card compact">
           <h3>Word / PDF Evidence Report</h3>
-          <div class="small muted">Template MITRATEL A4 · visual LOCK · 3×2 evidence · HQ original Drive · checkpoint per halaman · persistent worker · DOCX + PDF per material + PDF FINAL HQ.</div>
+          <div id="outputReportTemplateHint" class="small muted">Template sesuai stakeholder: TIF 3×2; MITRATEL tetap template lama.</div>
+          <label for="outputReportModeSelect" style="display:block;margin-top:10px">Mode Word/PDF</label>
+          <select id="outputReportModeSelect" class="input" style="margin-top:4px">
+            <option value="PREVIEW">PREVIEW — uji template &amp; foto</option>
+            ${hasPermission('output.final') ? '<option value="FINAL">FINAL — wajib lolos audit lokasi</option>' : ''}
+          </select>
+          <div id="outputReportAuditHint" class="small muted" style="margin-top:6px">Memeriksa audit koordinat...</div>
           <button id="generateWordPdfBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate Word + PDF</button>
           <div id="reportJobStatus" class="status-box neutral" style="margin-top:12px">Belum ada R13F-HF4 Report Job.</div>
           <div id="reportJobActions" class="toolbar compact" style="margin-top:8px;display:none">
             <button id="resumeReportJobBtn" class="btn secondary" type="button" style="display:none">Resume Job</button>
             <button id="cancelReportJobBtn" class="btn outline" type="button" style="display:none">Batalkan Job</button>
           </div>
-          <div class="list" style="margin-top:12px">
-            ${statusRow('Word Evidence Report', caps.wordEvidence || caps.word || 'READY', 'success')}
-            ${statusRow('PDF Evidence Report', caps.pdfEvidence || caps.pdf || 'READY', 'success')}
-            ${statusRow('PDF FINAL Gabungan', caps.pdfEvidence || caps.pdf || 'READY', 'success')}
+          <div class="list" id="outputRealFileStatus" style="margin-top:12px">
+            ${statusRow('Word Evidence Report', 'Belum dicek', 'neutral')}
+            ${statusRow('PDF Evidence Report', 'Belum dicek', 'neutral')}
+            ${statusRow('PDF FINAL Gabungan', 'Belum dicek', 'neutral')}
           </div>
         </div>
       </div>
@@ -5226,9 +5432,14 @@ async function renderOutput() {
       <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> satu Point Session boleh punya beberapa material. Generator membaca latest <b>VERIFIED Material Evidence</b>; setiap material menjadi placemark di folder kategorinya. KML/KMZ PHOTO membawa foto tertanam, KML NONPHOTO tanpa foto. Akses semua file KML/KMZ/Word/PDF disinkronkan untuk user output PEMS dan tidak dibuat public.</div>
     </div>`;
 
+  document.getElementById('outputReportModeSelect')?.addEventListener('change', () => {
+    const data = state.outputProjectStatus;
+    if (data) renderOutputProjectStatusPEMS_(data);
+  });
   document.getElementById('outputProjectSelect')?.addEventListener('change', async (event) => {
     stopReportJobPollPEMS_();
     state.outputReportJob = null;
+    state.outputReportModeProject = '';
     state.outputSelectedProjectId = String(event.target.value || '');
     await loadOutputProjectStatusPEMS_(state.outputSelectedProjectId);
   });
@@ -5369,20 +5580,67 @@ function renderOutputProjectStatusPEMS_(data) {
   const verified = Number(data.verifiedEvidenceCount || 0);
   const eligible = Number(data.eligiblePointCount || 0);
   const invalid = Number(data.invalidCoordinateCount || 0);
+  const coordinateWarn = Number(data.coordinateWarningCount || 0);
+  const traceWarn = Number(data.traceabilityWarningCount || 0);
+  const qtyWarn = Number(data.missingQuantityCount || 0);
   const finalMode = hasPermission('output.final');
   const canGenerate = finalMode ? !!data.canGenerateFinal : !!data.canGeneratePreview;
   btn.disabled = !canGenerate || eligible <= 0 || state.outputGenerating;
   btn.textContent = finalMode ? 'Generate FINAL · 3 Output' : 'Generate PREVIEW · 3 Output';
-  if (reportBtn) {
-    reportBtn.disabled = !canGenerate || verified <= 0 || state.outputReportGenerating;
-    reportBtn.textContent = finalMode ? 'Generate FINAL · Word + PDF' : 'Generate PREVIEW · Word + PDF';
+  const reportModeSelect = document.getElementById('outputReportModeSelect');
+  const tifAuditBlocked = !!data.tifFinalBlocked;
+  const tifSelected = String(data.templateProfile || '').toUpperCase() === 'TIF';
+  if (reportModeSelect) {
+    const prev = reportModeSelect.value;
+    if (state.outputReportModeProject !== String(data.projectId || '')) {
+      reportModeSelect.value = (tifSelected && tifAuditBlocked) || !finalMode ? 'PREVIEW' : 'FINAL';
+      state.outputReportModeProject = String(data.projectId || '');
+    } else reportModeSelect.value = prev;
+    const finalOption = reportModeSelect.querySelector('option[value="FINAL"]');
+    if (finalOption) finalOption.disabled = tifSelected && tifAuditBlocked;
+    if (tifSelected && tifAuditBlocked && reportModeSelect.value === 'FINAL') reportModeSelect.value = 'PREVIEW';
   }
+  const reportMode = reportModeSelect ? reportModeSelect.value : (finalMode?'FINAL':'PREVIEW');
+  if (reportBtn) {
+    reportBtn.disabled = !canGenerate || verified <= 0 || state.outputReportGenerating ||
+      String(data.templateProfile || '') === 'UNAVAILABLE';
+    reportBtn.textContent = `Generate ${reportMode} · Word + PDF`;
+  }
+  const auditHint = document.getElementById('outputReportAuditHint');
+  if (auditHint) auditHint.textContent = tifSelected && tifAuditBlocked
+    ? `FINAL ditahan (${Number(data.tifFinalBlockerCount || 0)} temuan). PREVIEW tersedia agar layout dapat diperiksa.`
+    : 'PREVIEW untuk uji layout; FINAL hanya dari verified evidence yang lolos audit.';
 
+  const warnHtml = (coordinateWarn || traceWarn || qtyWarn)
+    ? `<div class="warning-strip" style="margin-top:8px"><b>Audit sebelum FINAL:</b> Jarak >100m ${coordinateWarn} · Trace titik kurang ${traceWarn} · QTY kosong ${qtyWarn}</div>`
+    : '';
+  const stakeholder = String(data.stakeholder || '').toUpperCase();
+  const tpl = String(data.templateProfile||'') === 'MITRATEL' ? 'Template MITRATEL' : String(data.templateProfile||'') === 'TIF' ? 'Template TIF' : 'Template tidak tersedia';
   box.className = `status-box ${eligible>0?'success':verified>0?'warning':'neutral'}`;
-  box.innerHTML = `<b>${escapeHtml(data.projectId || '')}</b> · ${escapeHtml(data.projectName || '')}<br><span class="tiny">VERIFIED Material Evidence ${verified} · Placemark Eligible ${eligible} · Invalid/Skipped ${invalid}</span>`;
+  box.innerHTML = `<b>${escapeHtml(data.projectId || '')}</b> · ${escapeHtml(data.projectName || '')}<br><span class="tiny">${escapeHtml(tpl)} · VERIFIED Material Evidence ${verified} · Placemark Eligible ${eligible} · Invalid/Skipped ${invalid}</span>${warnHtml}`;
+
+  const hint = document.getElementById('outputReportTemplateHint');
+  if (hint) hint.textContent = String(data.templateProfile||'') === 'MITRATEL'
+    ? 'Template MITRATEL A4 · 3×2 evidence · DOCX + PDF per material + PDF FINAL HQ.'
+    : String(data.templateProfile||'') === 'TIF'
+    ? 'Template TIF sesuai DOCX kiriman: 3×2 foto/halaman · DOCX + PDF per material + PDF gabungan. Foto HQ dari Drive.'
+    : 'Template laporan belum tersedia untuk stakeholder ini.';
+
+  if ((data.outputWarnings || []).length) {
+    box.innerHTML += `<details style="margin-top:8px"><summary>Detail audit output (${data.outputWarnings.length})</summary><div class="tiny" style="margin-top:6px">${data.outputWarnings.slice(0,10).map(w => `• ${escapeHtml(w.label || w.evidenceId || '')}: ${escapeHtml(w.message || w.code || '')}`).join('<br>')}</div></details>`;
+  }
 
   const files = data.files || [];
   list.innerHTML = renderCompactOutputFilesPEMS_(files);
+  const result = document.getElementById('outputRealFileStatus');
+  if (result) {
+    const docx = files.filter(f => /\.docx$/i.test(f.fileName || '')).length;
+    const pdf = files.filter(f => /\.pdf$/i.test(f.fileName || '') && !/EVIDENCE_FINAL/i.test(f.fileName || '')).length;
+    const finalPdf = files.filter(f => /EVIDENCE_FINAL.*\.pdf$/i.test(f.fileName || '')).length;
+    result.innerHTML = statusRow('Word Evidence Report', docx ? `${docx} DOCX tersedia` : 'Belum ada file', docx?'success':'neutral') +
+      statusRow('PDF Evidence Report', pdf ? `${pdf} PDF tersedia` : 'Belum ada file', pdf?'success':'neutral') +
+      statusRow('PDF FINAL Gabungan', finalPdf ? `${finalPdf} PDF tersedia` : 'Belum ada file', finalPdf?'success':'neutral');
+  }
 }
 
 async function loadOutputProjectStatusPEMS_(projectId, force = false) {
@@ -5449,8 +5707,12 @@ async function generateWordPdfPEMS_() {
   const btn = document.getElementById('generateWordPdfBtn');
   if (!projectId || !btn) return;
   const finalMode = hasPermission('output.final');
-  const mode = finalMode ? 'FINAL' : 'PREVIEW';
+  const mode = String(document.getElementById('outputReportModeSelect')?.value || 'PREVIEW');
   const status = state.outputProjectStatus || {};
+  if (mode === 'FINAL' && (!finalMode || status.tifFinalBlocked)) {
+    toast('FINAL belum diizinkan: periksa audit koordinat/traceability/qty. Pilih PREVIEW.', 'warning', 9000);
+    return;
+  }
   const activeJob = state.outputReportJob || {};
   if (['QUEUED','PROCESSING','CANCEL_REQUESTED'].includes(String(activeJob.status || '').toUpperCase())) {
     toast('Background Report Job masih berjalan. PEMS akan melanjutkannya tanpa menahan browser.', 'warning', 7000);

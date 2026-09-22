@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-25-waspang-stabilization-r13f-hf23';
+const CACHE_NAME = 'pems-v15-9-27-tif-word-output-r13f-hf25';
 const STATIC_ASSETS = [
   './',
   './index.html',
