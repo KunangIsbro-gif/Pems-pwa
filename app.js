@@ -220,7 +220,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-21-r13f-hf19');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-22-r13f-hf20');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -3469,7 +3469,7 @@ async function renderMonitoring(options = {}) {
       <div class="monitoring-evidence-list">
         ${recentItems.length
           ? recentItems.map(item => `
-            <div class="monitoring-evidence-row">
+            <button type="button" class="monitoring-evidence-row monitoring-evidence-open" data-monitor-evidence-id="${escapeAttr(item.evidenceId)}" aria-label="Buka foto evidence ${escapeAttr(item.itemLabel || item.evidenceId)}">
               <div class="monitoring-evidence-main">
                 <div class="item-title">${escapeHtml(item.itemLabel || item.evidenceId)}</div>
                 <div class="item-sub">
@@ -3486,7 +3486,7 @@ async function renderMonitoring(options = {}) {
                 <span class="badge ${workflowBadge(item.workflowStatus)}">${escapeHtml(item.workflowLabel || friendlyWorkflowLabel(item.workflowStatus))}</span>
                 <div class="tiny muted">Foto ${escapeHtml(String(item.actualPhotoCount || 0))}/${escapeHtml(String(item.requiredPhotoCount || 0))}</div>
               </div>
-            </div>
+            </button>
           `).join('')
           : '<div class="empty">Belum ada evidence milik akun/area ini.</div>'}
       </div>
@@ -3536,6 +3536,180 @@ async function renderMonitoring(options = {}) {
       navigate(btn.dataset.monitorPage || 'monitoring')
     );
   });
+
+  el.content.querySelectorAll('[data-monitor-evidence-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const evidenceId = btn.dataset.monitorEvidenceId || '';
+      const item = recentItems.find(row => String(row.evidenceId) === String(evidenceId));
+      if (item) openMonitoringEvidencePEMS_(item);
+    });
+  });
+}
+
+function ensureMonitoringEvidenceModalPEMS_() {
+  let modal = document.getElementById('monitorEvidenceModal');
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = 'monitorEvidenceModal';
+  modal.className = 'monitor-evidence-modal hidden';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.innerHTML = `
+    <div class="monitor-evidence-card">
+      <div class="monitor-evidence-head">
+        <div>
+          <b id="monitorEvidenceTitle">Evidence</b>
+          <div id="monitorEvidenceSub" class="tiny muted"></div>
+        </div>
+        <button id="monitorEvidenceClose" type="button" class="btn ghost small">Tutup</button>
+      </div>
+      <div id="monitorEvidenceBody" class="monitor-evidence-body"></div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#monitorEvidenceClose')?.addEventListener('click', closeMonitoringEvidencePEMS_);
+  modal.addEventListener('click', event => {
+    if (event.target === modal) closeMonitoringEvidencePEMS_();
+  });
+  return modal;
+}
+
+function closeMonitoringEvidencePEMS_() {
+  const modal = document.getElementById('monitorEvidenceModal');
+  modal?.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+async function openMonitoringPhotoPEMS_(evidenceId, photo) {
+  try {
+    const url = await verifierPhotoObjectUrl(evidenceId, photo.photoId, 'full');
+    el.photoModalImage.src = url;
+    el.photoModalMeta.innerHTML = `
+      <div><b>${escapeHtml(photo.fileName || photo.photoId)}</b></div>
+      <div>GPS Accuracy: <b>${escapeHtml(formatNumber(photo.gpsAccuracy))} m</b></div>
+      <div>Jarak ke titik plan: <b>${escapeHtml(formatNumber(photo.distanceToPlanM))} m</b></div>
+      <div>GPS Source: <b>${escapeHtml(photo.gpsSource || '-')}</b></div>
+      <div>Captured: <b>${escapeHtml(formatDate(photo.capturedAt))}</b></div>
+      <div>Status: <b>${escapeHtml(photo.status || 'SYNCED')}</b></div>`;
+    el.photoModal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+  }
+}
+
+async function hydrateMonitoringThumbPEMS_(img) {
+  if (!img || img.dataset.loaded === '1') return;
+  img.dataset.loaded = '1';
+  const evidenceId = img.dataset.evidenceId || '';
+  const photoId = img.dataset.photoId || '';
+  if (!evidenceId || !photoId) return;
+  try {
+    const url = await verifierPhotoObjectUrl(evidenceId, photoId, 'thumb');
+    img.src = url;
+    img.classList.remove('hidden');
+    img.previousElementSibling?.classList.add('hidden');
+  } catch (err) {
+    const loading = img.previousElementSibling;
+    if (loading) loading.textContent = 'Preview tidak tersedia';
+  }
+}
+
+async function handleMonitoringDecisionPEMS_(button, evidenceId) {
+  const action = button.dataset.monitorVerify || '';
+  const modal = ensureMonitoringEvidenceModalPEMS_();
+  const reasonCode = modal.querySelector('[data-monitor-reason]')?.value || '';
+  const note = modal.querySelector('[data-monitor-note]')?.value || '';
+  if ((action === 'revision' || action === 'reject') && !reasonCode && !note) {
+    toast('Revision/Reject wajib punya alasan.', 'warning');
+    return;
+  }
+  try {
+    const loadingLabel = action === 'approve' ? 'Approving...' : action === 'revision' ? 'Mengirim Revisi...' : 'Rejecting...';
+    setButtonLoadingPEMS_(button, true, loadingLabel);
+    await api(`/verification/${encodeURIComponent(evidenceId)}/${action}`, { method:'POST', body:{ reasonCode, note } });
+    toast(`Evidence ${action.toUpperCase()} berhasil.`, 'success');
+    closeMonitoringEvidencePEMS_();
+    await idbDelete(STORE_CACHE, `monitoring:${userCachePrefix()}`);
+    state.monitoring = null;
+    await refreshNotifications(true, true);
+    await renderMonitoring({ force:true });
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+    setButtonLoadingPEMS_(button, false);
+  }
+}
+
+async function openMonitoringEvidencePEMS_(item) {
+  const modal = ensureMonitoringEvidenceModalPEMS_();
+  const title = modal.querySelector('#monitorEvidenceTitle');
+  const sub = modal.querySelector('#monitorEvidenceSub');
+  const body = modal.querySelector('#monitorEvidenceBody');
+  const canDecide = hasPermission('verification.decide');
+
+  title.textContent = item.itemLabel || item.designator || item.evidenceId || 'Evidence';
+  sub.textContent = `${item.sessionId || '-'} • ${item.designator || '-'} • ${item.workflowLabel || friendlyWorkflowLabel(item.workflowStatus)}`;
+  body.innerHTML = '<div class="monitor-evidence-loading">Memuat foto evidence...</div>';
+  modal.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+
+  try {
+    const result = await api(`/evidence/${encodeURIComponent(item.evidenceId)}/photos`, { timeoutMs:30000 });
+    const photos = result.photos || [];
+    const status = String(result.workflowStatus || item.workflowStatus || '').toUpperCase();
+    const decisionHtml = canDecide && status === 'SUBMITTED'
+      ? `
+        <div class="monitor-evidence-verify">
+          <div class="section-head"><h3>Keputusan Verifikasi</h3><span class="badge warning">SUBMITTED</span></div>
+          <div class="form-row">
+            <div class="field"><label>Reason Code</label><select class="select" data-monitor-reason><option value="">-- pilih bila revision/reject --</option><option>FOTO_TIDAK_JELAS</option><option>GPS_TIDAK_SESUAI</option><option>MATERIAL_TIDAK_SESUAI</option><option>QTY_TIDAK_SESUAI</option><option>EVIDENCE_KURANG</option><option>LAINNYA</option></select></div>
+            <div class="field"><label>Catatan</label><input class="input" data-monitor-note placeholder="Catatan verifier"></div>
+          </div>
+          <div class="toolbar" style="margin-top:12px">
+            <button class="btn success" data-monitor-verify="approve">Approve</button>
+            <button class="btn warning" data-monitor-verify="revision">Need Revision</button>
+            <button class="btn danger" data-monitor-verify="reject">Reject</button>
+          </div>
+        </div>`
+      : `
+        <div class="status-box neutral monitor-evidence-access">
+          <b>${canDecide ? 'Status Evidence' : 'Mode Lihat Foto'}</b>
+          <div>${canDecide ? `Evidence saat ini ${escapeHtml(status || '-')}; keputusan verifikasi hanya aktif saat SUBMITTED.` : 'Role ini dapat membuka foto dan metadata, tetapi tidak memiliki hak keputusan verifikasi.'}</div>
+        </div>`;
+
+    body.innerHTML = `
+      <div class="monitor-evidence-summary">
+        <div><span class="tiny muted">Evidence ID</span><b>${escapeHtml(item.evidenceId || '-')}</b></div>
+        <div><span class="tiny muted">Status</span><b>${escapeHtml(item.workflowLabel || friendlyWorkflowLabel(status))}</b></div>
+        <div><span class="tiny muted">Foto</span><b>${escapeHtml(String(photos.length))}/${escapeHtml(String(item.requiredPhotoCount || photos.length || 0))}</b></div>
+        <div><span class="tiny muted">WASPANG</span><b>${escapeHtml(item.createdByName || item.createdBy || '-')}</b></div>
+      </div>
+      ${item.fieldNote ? `<div class="status-box neutral"><b>Catatan WASPANG:</b> ${escapeHtml(item.fieldNote)}</div>` : ''}
+      <div class="monitor-evidence-photo-grid">
+        ${photos.length ? photos.map((photo, index) => `
+          <button type="button" class="monitor-evidence-photo" data-monitor-photo-index="${index}">
+            ${photo.thumbnailBase64
+              ? `<img src="data:${escapeAttr(photo.thumbnailMimeType || 'image/jpeg')};base64,${escapeAttr(photo.thumbnailBase64)}" alt="${escapeAttr(photo.fileName || photo.photoId)}">`
+              : `<div class="monitor-evidence-thumb-loading">Memuat preview...</div><img class="hidden" data-monitor-thumb="1" data-evidence-id="${escapeAttr(item.evidenceId)}" data-photo-id="${escapeAttr(photo.photoId)}" alt="${escapeAttr(photo.fileName || photo.photoId)}">`}
+            <span><b>Foto ${index + 1}</b><small>GPS ${escapeHtml(formatNumber(photo.gpsAccuracy))} m • Jarak ${escapeHtml(formatNumber(photo.distanceToPlanM))} m</small></span>
+          </button>`).join('') : '<div class="empty">Belum ada foto evidence di server.</div>'}
+      </div>
+      ${decisionHtml}`;
+
+    body.querySelectorAll('[data-monitor-photo-index]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const photo = photos[Number(btn.dataset.monitorPhotoIndex || 0)];
+        if (photo) openMonitoringPhotoPEMS_(item.evidenceId, photo);
+      });
+    });
+    body.querySelectorAll('[data-monitor-thumb]').forEach(img => hydrateMonitoringThumbPEMS_(img));
+    body.querySelectorAll('[data-monitor-verify]').forEach(btn => {
+      btn.addEventListener('click', () => handleMonitoringDecisionPEMS_(btn, item.evidenceId));
+    });
+  } catch (err) {
+    body.innerHTML = `<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;
+  }
 }
 
 async function adminFetchPEMS_(cacheKey, path, options = {}) {

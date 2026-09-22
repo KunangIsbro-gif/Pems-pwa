@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-21-waspang-mobile-r13f-hf19';
+const CACHE_NAME = 'pems-v15-9-22-monitor-evidence-r13f-hf20';
 const STATIC_ASSETS = [
   './',
   './index.html',
