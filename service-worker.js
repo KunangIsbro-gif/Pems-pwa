@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-22-monitor-evidence-r13f-hf20';
+const CACHE_NAME = 'pems-v15-9-23-monitor-direct-full-r13f-hf21';
 const STATIC_ASSETS = [
   './',
   './index.html',
