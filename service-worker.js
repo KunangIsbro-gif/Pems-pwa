@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-28-actual-map-tap-hf27c';
+const CACHE_NAME = 'pems-v15-9-28-actual-map-tap-hf27d';
 const STATIC_ASSETS = [
   './',
   './index.html',

@@ -252,7 +252,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-actual-map-tap-hf27c');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-actual-map-tap-hf27d');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -1129,7 +1129,7 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
   });
   document.getElementById('fieldActualCoordBtn')?.addEventListener('click', () => {
     try {
-      setFieldActualPositionHF27CPEMS_(
+      setFieldActualPositionHF27DPEMS_(
         document.getElementById('fieldActualLatInput')?.value,
         document.getElementById('fieldActualLngInput')?.value,
         'MANUAL_COORD'
@@ -1145,7 +1145,7 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
   if (state.selectedSession) {
     await selectSession(state.selectedSession.sessionId, { keepSelection: true });
   } else {
-    // HF27C: AKTUAL is marked by free tap; PLAN is associated explicitly before capture.
+    // HF27D: AKTUAL is marked by free tap; PLAN is associated explicitly before capture.
     // Never auto-select the nearest point before capture.
     renderFieldPointInfoEmpty();
   }
@@ -1376,18 +1376,18 @@ function fieldPlanMapIconHF27BPEMS_(kind) {
     iconSize:[28,28], iconAnchor:[14,14]
   });
 }
-function fieldActualCoordValidHF27CPEMS_(lat,lng) {
+function fieldActualCoordValidHF27DPEMS_(lat,lng) {
   return lat !== '' && lng !== '' && lat != null && lng != null &&
     Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) &&
     Math.abs(Number(lat)) <= 90 && Math.abs(Number(lng)) <= 180;
 }
-function fieldActualDistanceHF27CPEMS_() {
+function fieldActualDistanceHF27DPEMS_() {
   const a = state.fieldActualPosition, p = state.selectedSession;
-  return a && p && fieldActualCoordValidHF27CPEMS_(p.latPlan,p.longPlan)
+  return a && p && fieldActualCoordValidHF27DPEMS_(p.latPlan,p.longPlan)
     ? haversineMeters(a.latitude,a.longitude,Number(p.latPlan),Number(p.longPlan)) : null;
 }
-function setFieldActualPositionHF27CPEMS_(lat,lng,source='MAP_TAP') {
-  if (!fieldActualCoordValidHF27CPEMS_(lat,lng)) throw new Error('Koordinat aktual tidak valid.');
+function setFieldActualPositionHF27DPEMS_(lat,lng,source='MAP_TAP') {
+  if (!fieldActualCoordValidHF27DPEMS_(lat,lng)) throw new Error('Koordinat aktual tidak valid.');
   const latitude=Number(lat), longitude=Number(lng);
   const previous=state.fieldActualPosition;
   // Never silently relocate a draft that already owns photographs.
@@ -1397,7 +1397,7 @@ function setFieldActualPositionHF27CPEMS_(lat,lng,source='MAP_TAP') {
     throw new Error('Draft ini sudah memiliki foto. Selesaikan draft sebelum memindahkan lokasi AKTUAL.');
   state.fieldActualPosition={latitude,longitude,source,actualToPlanM:null,selectedAt:new Date().toISOString()};
   state.fieldActualMapProject=state.selectedProjectId;
-  state.fieldActualPosition.actualToPlanM=fieldActualDistanceHF27CPEMS_();
+  state.fieldActualPosition.actualToPlanM=fieldActualDistanceHF27DPEMS_();
   const a=document.getElementById('fieldActualLatInput'), b=document.getElementById('fieldActualLngInput');
   if(a)a.value=latitude.toFixed(7);
   if(b)b.value=longitude.toFixed(7);
@@ -1425,7 +1425,7 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
     return;
   }
   if(fallback)fallback.classList.add('hidden');
-  const sessions=(state.workspace?.pointSessions||[]).filter(s=>fieldActualCoordValidHF27CPEMS_(s.latPlan,s.longPlan));
+  const sessions=(state.workspace?.pointSessions||[]).filter(s=>fieldActualCoordValidHF27DPEMS_(s.latPlan,s.longPlan));
   const gps=state.fieldGps;
   const actual=state.fieldActualMapProject===state.selectedProjectId ? state.fieldActualPosition : null;
   const reuse=state.fieldPlanMap && state.fieldMapScope===state.selectedProjectId &&
@@ -1434,7 +1434,7 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
     destroyFieldPlanMapHF27BPEMS_();
     const focus=actual || state.selectedSession && {latitude:Number(state.selectedSession.latPlan),longitude:Number(state.selectedSession.longPlan)} ||
       sessions[0] && {latitude:Number(sessions[0].latPlan),longitude:Number(sessions[0].longPlan)} || gps;
-    if(!focus || !fieldActualCoordValidHF27CPEMS_(focus.latitude,focus.longitude)) {
+    if(!focus || !fieldActualCoordValidHF27DPEMS_(focus.latitude,focus.longitude)) {
       node.innerHTML='<div class="field-map-offline">Tidak ada PLAN atau GPS valid. Pastikan project sudah dimuat.</div>';return;
     }
     const map=window.L.map(node,{zoomControl:true,attributionControl:true,tap:true}).setView([Number(focus.latitude),Number(focus.longitude)],18);
@@ -1444,7 +1444,7 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
       {maxZoom:20,attribution:'Tiles © Esri'}).addTo(map);
     // Free tap works BEFORE associating any PLAN point.
     map.on('click',e=>{
-      try{setFieldActualPositionHF27CPEMS_(e.latlng.lat,e.latlng.lng,'MAP_TAP');}
+      try{setFieldActualPositionHF27DPEMS_(e.latlng.lat,e.latlng.lng,'MAP_TAP');}
       catch(err){toast(humanError(err),'danger',5000);}
     });
     sessions.forEach(session=>{
@@ -1459,7 +1459,7 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
         // Tapping a PLAN marker is an explicit choice of both this PLAN reference
         // and the same location as the actual point (WASPANG may correct it).
         try{
-          setFieldActualPositionHF27CPEMS_(lat,lng,'MAP_TAP');
+          setFieldActualPositionHF27DPEMS_(lat,lng,'MAP_TAP');
           await selectSession(session.sessionId);
           const picker=document.getElementById('fieldPointSelect');
           if(picker)picker.value=session.sessionId;
@@ -1477,17 +1477,17 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
     try{marker.setIcon(fieldPlanMapIconHF27BPEMS_(state.selectedSession?.sessionId===id?'selected':'plan'));}catch(_){}
   });
   if(state.fieldPlanMapActualLayer){try{map.removeLayer(state.fieldPlanMapActualLayer);}catch(_){}state.fieldPlanMapActualLayer=null;}
-  if(actual && fieldActualCoordValidHF27CPEMS_(actual.latitude,actual.longitude)){
+  if(actual && fieldActualCoordValidHF27DPEMS_(actual.latitude,actual.longitude)){
     state.fieldPlanMapActualLayer=window.L.marker([actual.latitude,actual.longitude],{
       icon:fieldPlanMapIconHF27BPEMS_('actual'),title:'AKTUAL — dipilih WASPANG',draggable:true,bubblingMouseEvents:false
     }).addTo(map).bindTooltip('AKTUAL — geser untuk koreksi',{direction:'top',offset:[0,-8]});
     state.fieldPlanMapActualLayer.on('dragend',ev=>{const loc=ev.target.getLatLng();
-      try{setFieldActualPositionHF27CPEMS_(loc.lat,loc.lng,'MAP_TAP');}
+      try{setFieldActualPositionHF27DPEMS_(loc.lat,loc.lng,'MAP_TAP');}
       catch(err){toast(humanError(err),'danger',5000);}
     });
   }
   if(state.fieldPlanMapGpsLayer){try{map.removeLayer(state.fieldPlanMapGpsLayer);}catch(_){}state.fieldPlanMapGpsLayer=null;}
-  if(gps && fieldActualCoordValidHF27CPEMS_(gps.latitude,gps.longitude)){
+  if(gps && fieldActualCoordValidHF27DPEMS_(gps.latitude,gps.longitude)){
     const group=window.L.layerGroup();
     window.L.circle([gps.latitude,gps.longitude],{
       radius:Math.max(1,Number(gps.accuracy)||1),color:'#2563eb',weight:1,
@@ -1507,7 +1507,7 @@ function renderFieldActualInfoHF27BPEMS_() {
     node.innerHTML='<b>Belum ada posisi AKTUAL.</b> Ketuk bebas pada peta untuk menandai lokasi material terpasang. Tidak perlu pilih PLAN dulu.';
     return;
   }
-  const d=fieldActualDistanceHF27CPEMS_();
+  const d=fieldActualDistanceHF27DPEMS_();
   actual.actualToPlanM=d;
   node.className='field-actual-info success';
   node.innerHTML=`<b>✓ Posisi AKTUAL dipilih</b><br>${formatCoord(actual.latitude)}, ${formatCoord(actual.longitude)}`+
@@ -1552,8 +1552,38 @@ function renderFieldPointInfoEmpty() {
   const capture = document.getElementById('capturePanel');
 
   if (info) {
+    const sessions = sortedFieldSessionsPEMS_();
     info.classList.remove('hidden');
-    info.innerHTML = '<div class="empty">Pilih Titik Evidence Realisasi.</div>';
+    if (!sessions.length) {
+      info.innerHTML = '<div class="empty">Tidak ada Titik Evidence Realisasi pada project ini.</div>';
+    } else {
+      info.innerHTML = `
+        <div class="field-point-picker-head">
+          <b>Pilih Titik Evidence Realisasi</b>
+          <div class="tiny muted">Ketuk salah satu titik di bawah. Dropdown di atas tetap tersedia sebagai alternatif.</div>
+        </div>
+        <div class="field-point-quick-list">
+          ${sessions.map(session => {
+            const distance = fieldDistanceToSessionPEMS_(session);
+            const distanceText = Number.isFinite(distance)
+              ? (distance < 1000 ? `${Math.round(distance)} m` : `${(distance/1000).toFixed(1)} km`)
+              : '';
+            return `<button type="button" class="field-point-quick-btn" data-quick-session="${escapeAttr(session.sessionId)}">
+              <span><b>${escapeHtml(session.anchorLabel || session.sessionId)}</b><small>${escapeHtml(humanPointRolePEMS_(session.anchorRole))} • ${escapeHtml(humanPointStatusPEMS_(session.verifyStatus))}</small></span>
+              ${distanceText ? `<em>${escapeHtml(distanceText)}</em>` : '<em>pilih</em>'}
+            </button>`;
+          }).join('')}
+        </div>`;
+      info.querySelectorAll('[data-quick-session]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const sessionId = String(btn.getAttribute('data-quick-session') || '');
+          if (!sessionId) return;
+          const select = document.getElementById('fieldPointSelect');
+          if (select) select.value = sessionId;
+          await selectSession(sessionId);
+        });
+      });
+    }
   }
   if (material) {
     material.innerHTML = '<option value="">Pilih Material Evidence</option>';
@@ -1603,9 +1633,9 @@ async function selectSession(sessionId, options = {}) {
 
   state.selectedSession =
     (state.workspace?.pointSessions || []).find(s => s.sessionId === sessionId) || null;
-  // HF27C: keep the independent AKTUAL marker when associating/changing PLAN.
+  // HF27D: keep the independent AKTUAL marker when associating/changing PLAN.
   if (state.fieldActualPosition && state.fieldActualMapProject===state.selectedProjectId)
-    state.fieldActualPosition.actualToPlanM = fieldActualDistanceHF27CPEMS_();
+    state.fieldActualPosition.actualToPlanM = fieldActualDistanceHF27DPEMS_();
 
   if (!state.selectedSession) {
     renderFieldPointInfoEmpty();

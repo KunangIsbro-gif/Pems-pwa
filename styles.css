@@ -685,7 +685,7 @@ body.modal-open{overflow:hidden}
 .map-dot.actual{background:#f59e0b}.pems-map-marker.actual{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.22),0 3px 10px rgba(15,23,42,.38)}
 .field-actual-info{margin:8px 12px 0;padding:10px 12px;border-radius:12px;font-size:.78rem;line-height:1.45;border:1px solid #e2e8f0}.field-actual-info.warning{background:#fff7ed;border-color:#fed7aa;color:#9a3412}.field-actual-info.success{background:#f0fdf4;border-color:#bbf7d0;color:#166534}.field-actual-actions{padding:8px 12px 0}.warning-text{color:#b45309;margin-top:7px}
 
-/* HF27C: free-tap actual marker and manual coordinates fallback. */
+/* HF27D: free-tap actual marker and manual coordinates fallback. */
 .map-dot.plan,.pems-map-marker.plan{background:#94a3b8}
 .map-dot.actual,.pems-map-marker.actual{background:#16a34a}
 .field-actual-fallback{margin:8px 12px 12px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;font-size:.79rem}
@@ -693,3 +693,11 @@ body.modal-open{overflow:hidden}
 .field-actual-coord-inputs{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:10px 0}
 .field-actual-coord-inputs label{display:grid;gap:4px}
 @media(max-width:420px){.field-actual-coord-inputs{grid-template-columns:1fr}}
+
+/* HF27D - explicit mobile point picker: the old dashed empty box looked clickable but was not. */
+.field-point-picker-head{margin-bottom:10px}
+.field-point-quick-list{display:grid;gap:8px}
+.field-point-quick-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;border:1px solid #d7e1ec;background:#fff;border-radius:12px;padding:11px 12px;color:#132033;cursor:pointer}
+.field-point-quick-btn:hover,.field-point-quick-btn:focus{border-color:#1d4ed8;box-shadow:0 0 0 3px rgba(29,78,216,.08);outline:none}
+.field-point-quick-btn span{display:grid;gap:3px;min-width:0}.field-point-quick-btn b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.field-point-quick-btn small{font-size:11px;color:#64748b}.field-point-quick-btn em{font-size:12px;font-style:normal;font-weight:800;color:#0f4c81;white-space:nowrap}
+@media(max-width:640px){.field-point-quick-btn{padding:13px 12px}.field-point-quick-btn b{font-size:15px}.field-point-quick-btn small{font-size:12px}}
