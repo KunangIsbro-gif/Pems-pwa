@@ -75,6 +75,8 @@ const state = {
   fieldPlanMap: null,
   fieldPlanMapMarkers: new Map(),
   fieldPlanMapGpsLayer: null,
+  fieldActualPosition: null,
+  fieldPlanMapActualLayer: null,
   fieldShowAdditional: false,
   fieldDocuments: null,
   fieldDocumentsProjectId: '',
@@ -248,7 +250,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-map-first-hf27a');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-map-first-hf27b');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -1023,8 +1025,8 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
         <div class="field-map-first-card">
           <div class="field-map-first-head">
             <div>
-              <b>1. Pilih Titik Material di Peta</b>
-              <div class="tiny muted">Klik titik PLAN yang akan difoto. Posisi HP hanya sebagai referensi jarak, bukan otomatis posisi material.</div>
+              <b>1. Pilih Titik Referensi, lalu Tandai Posisi Aktual</b>
+              <div class="tiny muted">Klik titik PLAN sebagai referensi. Setelah itu tap bebas di peta pada posisi material yang benar-benar terpasang. GPS HP hanya metadata foto.</div>
             </div>
             <button id="fieldGpsBtn" type="button" class="btn field-gps-btn small" ${!navigator.geolocation ? 'disabled' : ''}>
               📍 POSISI SAYA
@@ -1034,9 +1036,12 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
           <div id="fieldPlanMapFallback" class="status-box neutral hidden">Peta belum dapat dimuat. Gunakan daftar titik di bawah.</div>
           <div class="field-map-legend">
             <span><i class="map-dot plan"></i>Titik PLAN</span>
-            <span><i class="map-dot selected"></i>Titik dipilih</span>
+            <span><i class="map-dot selected"></i>PLAN dipilih</span>
+            <span><i class="map-dot actual"></i>Posisi aktual</span>
             <span><i class="map-dot gps"></i>Posisi HP</span>
           </div>
+          <div id="fieldActualInfo" class="field-actual-info">Belum ada posisi aktual. Pilih titik PLAN lalu tap lokasi material di peta.</div>
+          <div class="field-actual-actions"><button id="fieldActualResetBtn" type="button" class="btn outline small">Hapus Posisi Aktual</button></div>
           <div id="fieldGpsInfo" class="tiny muted field-gps-info"></div>
         </div>
 
@@ -1097,15 +1102,17 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
   });
 
   document.getElementById('fieldGpsBtn')?.addEventListener('click', captureFieldPositionPEMS_);
+  document.getElementById('fieldActualResetBtn')?.addEventListener('click', () => { state.fieldActualPosition = null; renderFieldPlanMapHF27BPEMS_({ preserveView:true }); renderFieldActualInfoHF27BPEMS_(); renderCapturePanel(); });
 
   renderFieldProjectDocumentsPEMS_();
   renderFieldPointSelectPEMS_();
-  renderFieldPlanMapHF27APEMS_();
+  renderFieldPlanMapHF27BPEMS_();
+  renderFieldActualInfoHF27BPEMS_();
 
   if (state.selectedSession) {
     await selectSession(state.selectedSession.sessionId, { keepSelection: true });
   } else {
-    // HF27A LOCK: point must be explicitly chosen by WASPANG from map or list.
+    // HF27B LOCK: point must be explicitly chosen by WASPANG from map or list.
     // Never auto-select the nearest point before capture.
     renderFieldPointInfoEmpty();
   }
@@ -1329,8 +1336,8 @@ function fieldDistanceToSessionPEMS_(session, lat = state.fieldGps?.latitude, ln
 }
 
 
-function fieldPlanMapIconHF27APEMS_(kind) {
-  const cls = kind === 'gps' ? 'gps' : kind === 'selected' ? 'selected' : 'plan';
+function fieldPlanMapIconHF27BPEMS_(kind) {
+  const cls = kind === 'gps' ? 'gps' : kind === 'actual' ? 'actual' : kind === 'selected' ? 'selected' : 'plan';
   return window.L?.divIcon({
     className: 'pems-map-icon-wrap',
     html: `<span class="pems-map-marker ${cls}"></span>`,
@@ -1339,16 +1346,17 @@ function fieldPlanMapIconHF27APEMS_(kind) {
   });
 }
 
-function destroyFieldPlanMapHF27APEMS_() {
+function destroyFieldPlanMapHF27BPEMS_() {
   if (state.fieldPlanMap) {
     try { state.fieldPlanMap.remove(); } catch (_) {}
   }
   state.fieldPlanMap = null;
   state.fieldPlanMapMarkers = new Map();
   state.fieldPlanMapGpsLayer = null;
+  state.fieldPlanMapActualLayer = null;
 }
 
-function renderFieldPlanMapHF27APEMS_(options = {}) {
+function renderFieldPlanMapHF27BPEMS_(options = {}) {
   const node = document.getElementById('fieldPlanMap');
   const fallback = document.getElementById('fieldPlanMapFallback');
   if (!node) return;
@@ -1364,14 +1372,14 @@ function renderFieldPlanMapHF27APEMS_(options = {}) {
     Number.isFinite(Number(s.latPlan)) && Number.isFinite(Number(s.longPlan))
   );
   if (!sessions.length) {
-    destroyFieldPlanMapHF27APEMS_();
+    destroyFieldPlanMapHF27BPEMS_();
     node.innerHTML = '<div class="field-map-offline">Project belum memiliki koordinat PLAN yang dapat dipetakan.</div>';
     return;
   }
 
   const oldCenter = options.preserveView && state.fieldPlanMap ? state.fieldPlanMap.getCenter() : null;
   const oldZoom = options.preserveView && state.fieldPlanMap ? state.fieldPlanMap.getZoom() : null;
-  destroyFieldPlanMapHF27APEMS_();
+  destroyFieldPlanMapHF27BPEMS_();
 
   const selected = state.selectedSession;
   const gps = state.fieldGps;
@@ -1393,7 +1401,7 @@ function renderFieldPlanMapHF27APEMS_(options = {}) {
     const lat = Number(session.latPlan), lng = Number(session.longPlan);
     const isSelected = selected?.sessionId === session.sessionId;
     const marker = window.L.marker([lat, lng], {
-      icon: fieldPlanMapIconHF27APEMS_(isSelected ? 'selected' : 'plan'),
+      icon: fieldPlanMapIconHF27BPEMS_(isSelected ? 'selected' : 'plan'),
       keyboard: true,
       title: session.anchorLabel || session.sessionId
     }).addTo(map);
@@ -1421,15 +1429,54 @@ function renderFieldPlanMapHF27APEMS_(options = {}) {
       radius: acc, color: '#2563eb', weight: 1, fillColor: '#3b82f6', fillOpacity: 0.12
     }).addTo(map);
     state.fieldPlanMapGpsLayer = window.L.marker([glat, glng], {
-      icon: fieldPlanMapIconHF27APEMS_('gps'), title: 'Posisi HP WASPANG'
+      icon: fieldPlanMapIconHF27BPEMS_('gps'), title: 'Posisi HP WASPANG'
     }).addTo(map).bindTooltip('Posisi HP WASPANG', { direction: 'top', offset: [0, -8] });
     bounds.push([glat, glng]);
   }
+
+
+  // HF27B: user chooses the actual material coordinate by tapping freely on the map.
+  if (state.fieldActualPosition && Number.isFinite(Number(state.fieldActualPosition.latitude)) && Number.isFinite(Number(state.fieldActualPosition.longitude))) {
+    const alat = Number(state.fieldActualPosition.latitude), alng = Number(state.fieldActualPosition.longitude);
+    state.fieldPlanMapActualLayer = window.L.marker([alat, alng], {
+      icon: fieldPlanMapIconHF27BPEMS_('actual'), title: 'Posisi aktual material'
+    }).addTo(map).bindTooltip('Posisi aktual material', { direction:'top', offset:[0,-8] });
+    bounds.push([alat, alng]);
+  }
+  map.on('click', (ev) => {
+    if (!state.selectedSession) {
+      toast('Pilih titik PLAN referensi dulu, lalu tap posisi aktual material.', 'warning', 4500);
+      return;
+    }
+    const lat = Number(ev?.latlng?.lat), lng = Number(ev?.latlng?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const planLat = Number(state.selectedSession?.latPlan), planLng = Number(state.selectedSession?.longPlan);
+    const actualToPlanM = Number.isFinite(planLat) && Number.isFinite(planLng) ? haversineMeters(lat,lng,planLat,planLng) : null;
+    state.fieldActualPosition = { latitude:lat, longitude:lng, source:'MAP_TAP', actualToPlanM, selectedAt:new Date().toISOString() };
+    renderFieldActualInfoHF27BPEMS_();
+    renderFieldPlanMapHF27BPEMS_({ preserveView:true });
+    renderCapturePanel();
+  });
 
   if (!oldCenter && bounds.length > 1) {
     try { map.fitBounds(bounds, { padding: [30, 30], maxZoom: 19 }); } catch (_) {}
   }
   setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 80);
+}
+
+
+function renderFieldActualInfoHF27BPEMS_() {
+  const node = document.getElementById('fieldActualInfo');
+  if (!node) return;
+  const p = state.fieldActualPosition;
+  if (!p) {
+    node.className = 'field-actual-info warning';
+    node.innerHTML = '<b>Posisi aktual belum dipilih.</b> Pilih titik PLAN referensi lalu tap lokasi material di peta.';
+    return;
+  }
+  const d = Number(p.actualToPlanM);
+  node.className = 'field-actual-info success';
+  node.innerHTML = `<b>✓ Posisi aktual material dipilih</b><br><span>${formatCoord(p.latitude)}, ${formatCoord(p.longitude)}${Number.isFinite(d) ? ` • deviasi dari PLAN ${Math.round(d*10)/10} m` : ''}</span>`;
 }
 
 function renderFieldPointSelectPEMS_() {
@@ -1494,7 +1541,7 @@ async function captureFieldPositionPEMS_() {
     state.fieldGps = { ...gps, capturedAt: new Date().toISOString() };
     localStorage.setItem(LAST_GPS_KEY, JSON.stringify({ ...gps, cachedAt: new Date().toISOString() }));
     renderFieldPointSelectPEMS_();
-    renderFieldPlanMapHF27APEMS_({ preserveView: true });
+    renderFieldPlanMapHF27BPEMS_({ preserveView: true });
     if (state.selectedSession) renderRequirementsPanel();
     if (info) {
       const selectedDistance = state.selectedSession
@@ -1513,10 +1560,12 @@ async function captureFieldPositionPEMS_() {
 }
 
 async function selectSession(sessionId, options = {}) {
+  const prevSessionId = state.selectedSession?.sessionId || '';
   const sameSession = state.selectedSession?.sessionId === sessionId;
 
   state.selectedSession =
     (state.workspace?.pointSessions || []).find(s => s.sessionId === sessionId) || null;
+  if (prevSessionId && prevSessionId !== sessionId) state.fieldActualPosition = null;
 
   if (!state.selectedSession) {
     renderFieldPointInfoEmpty();
@@ -1524,7 +1573,7 @@ async function selectSession(sessionId, options = {}) {
   }
 
   renderFieldPointSelectPEMS_();
-  renderFieldPlanMapHF27APEMS_({ preserveView: true });
+  renderFieldPlanMapHF27BPEMS_({ preserveView: true });
 
   if (sameSession && state.requirements && options.keepSelection !== false) {
     renderRequirementsPanel();
@@ -2327,7 +2376,8 @@ async function renderCapturePanel() {
     )}
 
     <div class="toolbar" style="margin-top:12px">
-      <button id="captureBtn" class="btn primary" ${!hasPermission('evidence.capture') || locked || (target > 0 && totalKnown >= target) ? 'disabled' : ''}>Ambil Foto + GPS</button>
+      <button id="captureBtn" class="btn primary" ${!hasPermission('evidence.capture') || locked || !state.fieldActualPosition || (target > 0 && totalKnown >= target) ? 'disabled' : ''}>Ambil Foto + GPS</button>
+      ${!state.fieldActualPosition ? '<div class="tiny warning-text">Tandai posisi aktual material di peta untuk mengaktifkan kamera.</div>' : ''}
       <button id="syncNowBtn" class="btn secondary" ${!navigator.onLine || locked ? 'disabled' : ''}>Sync Queue</button>
       <button id="submitEvidenceBtn" class="btn success" ${!draft?.serverEvidenceId || !complete || locked ? 'disabled' : ''}>Submit Verifikasi</button>
     </div>
@@ -2538,9 +2588,14 @@ async function deleteCapturePhoto(photoLocalId) {
 
 function beginCapture() {
   if (!state.selectedRequirement || !state.selectedSession) return;
+  if (!state.fieldActualPosition) { toast('Tandai posisi aktual material di peta sebelum mengambil foto.', 'warning', 5000); return; }
   state.cameraContext = {
     qtyReal: document.getElementById('qtyRealInput')?.value || '',
-    fieldNote: document.getElementById('fieldNoteInput')?.value || ''
+    fieldNote: document.getElementById('fieldNoteInput')?.value || '',
+    actualLatitude: state.fieldActualPosition?.latitude,
+    actualLongitude: state.fieldActualPosition?.longitude,
+    actualPositionSource: state.fieldActualPosition?.source || 'MAP_TAP',
+    actualToPlanM: state.fieldActualPosition?.actualToPlanM
   };
   el.cameraInput.value = '';
   el.cameraInput.click();
@@ -2577,11 +2632,10 @@ async function onCameraFileSelected(event) {
         optimizePromise
       ]);
 
-    const pointDistance =
-      distanceToSelectedPlan(
-        gps.latitude,
-        gps.longitude
-      );
+    const actual = state.fieldActualPosition;
+    if (!actual) throw new Error('Posisi aktual material belum dipilih di peta.');
+    const pointDistance = distanceToSelectedPlan(actual.latitude, actual.longitude);
+    const photoToActualM = haversineMeters(gps.latitude, gps.longitude, actual.latitude, actual.longitude);
 
     const blockGps =
       Number(
@@ -2605,23 +2659,7 @@ async function onCameraFileSelected(event) {
         `GPS accuracy ${Math.round(gps.accuracy)} m > batas WASPANG ${blockGps} m. Ulangi GPS.`
       );
     }
-
-    const blockDistance = Number(
-      configNumber(
-        'POINT_DISTANCE_BLOCK_M',
-        100
-      )
-    );
-
-    if (
-      gpsPolicy === 'FIELD' &&
-      Number.isFinite(pointDistance) &&
-      pointDistance > blockDistance
-    ) {
-      throw new Error(
-        `Jarak ke titik plan ${Math.round(pointDistance)} m > batas WASPANG ${blockDistance} m. Datang lebih dekat ke titik sebelum ambil evidence.`
-      );
-    }
+    // HF27B: posisi aktual dipilih manual. Deviasi PLAN dicatat, bukan diblok.
 
     setCaptureStage(
       'Menyiapkan evidence lokal',
@@ -2668,13 +2706,12 @@ async function onCameraFileSelected(event) {
       gpsSource:
         gps.source,
       distanceToPlanM:
-        Number.isFinite(
-          pointDistance
-        )
-          ? Math.round(
-              pointDistance * 10
-            ) / 10
-          : null,
+        Number.isFinite(pointDistance) ? Math.round(pointDistance * 10) / 10 : null,
+      actualLatitude: actual.latitude,
+      actualLongitude: actual.longitude,
+      actualPositionSource: actual.source || 'MAP_TAP',
+      actualToPlanM: Number.isFinite(pointDistance) ? Math.round(pointDistance * 10) / 10 : null,
+      photoToActualM: Number.isFinite(photoToActualM) ? Math.round(photoToActualM * 10) / 10 : null,
       capturedAt:
         new Date().toISOString(),
       state:
@@ -2781,6 +2818,8 @@ async function getOrCreateCurrentDraft(ctx) {
   ) {
     existing.qtyReal = ctx.qtyReal;
     existing.fieldNote = ctx.fieldNote;
+    existing.actualLatitude = ctx.actualLatitude; existing.actualLongitude = ctx.actualLongitude;
+    existing.actualPositionSource = ctx.actualPositionSource || 'MAP_TAP'; existing.actualToPlanM = ctx.actualToPlanM;
     existing.pointId = existing.pointId || state.selectedSession?.anchorPointId || '';
     existing.planMatchRef = existing.planMatchRef || state.selectedSession?.anchorLabel || existing.anchorLabel || '';
     existing.updatedAt = new Date().toISOString();
@@ -2810,6 +2849,10 @@ async function getOrCreateCurrentDraft(ctx) {
     qtyPlan: r.qtyPlan,
     qtyReal: ctx.qtyReal,
     fieldNote: ctx.fieldNote,
+    actualLatitude: ctx.actualLatitude,
+    actualLongitude: ctx.actualLongitude,
+    actualPositionSource: ctx.actualPositionSource || 'MAP_TAP',
+    actualToPlanM: ctx.actualToPlanM,
     serverEvidenceId: '',
     serverPhotoCount: Number(r.photoCount || 0),
     workflow: 'DRAFT_LOCAL',
@@ -3264,6 +3307,11 @@ async function syncOneQueueItem(item) {
       gpsAccuracy: photo.gpsAccuracy,
       gpsSource: photo.gpsSource,
       distanceToPlanM: photo.distanceToPlanM,
+      actualLatitude: photo.actualLatitude ?? draft.actualLatitude,
+      actualLongitude: photo.actualLongitude ?? draft.actualLongitude,
+      actualPositionSource: photo.actualPositionSource || draft.actualPositionSource || 'MAP_TAP',
+      actualToPlanM: photo.actualToPlanM ?? draft.actualToPlanM,
+      photoToActualM: photo.photoToActualM,
       capturedAt: photo.capturedAt,
       fileName: photo.fileName,
       mimeType: photo.mimeType,
