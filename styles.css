@@ -684,3 +684,12 @@ body.modal-open{overflow:hidden}
 /* HF27B — actual material position chosen by map tap */
 .map-dot.actual{background:#f59e0b}.pems-map-marker.actual{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.22),0 3px 10px rgba(15,23,42,.38)}
 .field-actual-info{margin:8px 12px 0;padding:10px 12px;border-radius:12px;font-size:.78rem;line-height:1.45;border:1px solid #e2e8f0}.field-actual-info.warning{background:#fff7ed;border-color:#fed7aa;color:#9a3412}.field-actual-info.success{background:#f0fdf4;border-color:#bbf7d0;color:#166534}.field-actual-actions{padding:8px 12px 0}.warning-text{color:#b45309;margin-top:7px}
+
+/* HF27C: free-tap actual marker and manual coordinates fallback. */
+.map-dot.plan,.pems-map-marker.plan{background:#94a3b8}
+.map-dot.actual,.pems-map-marker.actual{background:#16a34a}
+.field-actual-fallback{margin:8px 12px 12px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;font-size:.79rem}
+.field-actual-fallback summary{cursor:pointer;font-weight:650}
+.field-actual-coord-inputs{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:10px 0}
+.field-actual-coord-inputs label{display:grid;gap:4px}
+@media(max-width:420px){.field-actual-coord-inputs{grid-template-columns:1fr}}
