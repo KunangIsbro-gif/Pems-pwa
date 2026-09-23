@@ -72,6 +72,9 @@ const state = {
   fieldDocumentsTimer: null,
   gpsWarmupPromise: null,
   fieldGps: null,
+  fieldPlanMap: null,
+  fieldPlanMapMarkers: new Map(),
+  fieldPlanMapGpsLayer: null,
   fieldShowAdditional: false,
   fieldDocuments: null,
   fieldDocumentsProjectId: '',
@@ -245,7 +248,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-27-r13f-hf26g');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-map-first-hf27a');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -1017,17 +1020,32 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
         <div id="fieldProjectDocumentBox" class="field-project-document-box hidden"></div>
         <input id="fieldBaComcaseInput" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" class="hidden">
 
+        <div class="field-map-first-card">
+          <div class="field-map-first-head">
+            <div>
+              <b>1. Pilih Titik Material di Peta</b>
+              <div class="tiny muted">Klik titik PLAN yang akan difoto. Posisi HP hanya sebagai referensi jarak, bukan otomatis posisi material.</div>
+            </div>
+            <button id="fieldGpsBtn" type="button" class="btn field-gps-btn small" ${!navigator.geolocation ? 'disabled' : ''}>
+              📍 POSISI SAYA
+            </button>
+          </div>
+          <div id="fieldPlanMap" class="field-plan-map" aria-label="Peta titik plan dan posisi HP"></div>
+          <div id="fieldPlanMapFallback" class="status-box neutral hidden">Peta belum dapat dimuat. Gunakan daftar titik di bawah.</div>
+          <div class="field-map-legend">
+            <span><i class="map-dot plan"></i>Titik PLAN</span>
+            <span><i class="map-dot selected"></i>Titik dipilih</span>
+            <span><i class="map-dot gps"></i>Posisi HP</span>
+          </div>
+          <div id="fieldGpsInfo" class="tiny muted field-gps-info"></div>
+        </div>
+
         <div class="field field-point-select-wrap">
-          <label>Titik Evidence Realisasi</label>
+          <label>Atau pilih dari daftar titik</label>
           <select id="fieldPointSelect" class="select"></select>
         </div>
 
         <div id="fieldPointInfo" class="field-point-info hidden"></div>
-
-        <button id="fieldGpsBtn" type="button" class="btn field-gps-btn" ${!navigator.geolocation ? 'disabled' : ''}>
-          📍 AMBIL POSISI SAYA
-        </button>
-        <div id="fieldGpsInfo" class="tiny muted field-gps-info"></div>
 
         <div class="field-material-picker">
           <h3>Material Evidence</h3>
@@ -1082,15 +1100,13 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
 
   renderFieldProjectDocumentsPEMS_();
   renderFieldPointSelectPEMS_();
+  renderFieldPlanMapHF27APEMS_();
 
   if (state.selectedSession) {
     await selectSession(state.selectedSession.sessionId, { keepSelection: true });
-  } else if (sessions.length) {
-    const sorted = sortedFieldSessionsPEMS_();
-    if (sorted[0]?.sessionId) {
-      await selectSession(sorted[0].sessionId);
-    }
   } else {
+    // HF27A LOCK: point must be explicitly chosen by WASPANG from map or list.
+    // Never auto-select the nearest point before capture.
     renderFieldPointInfoEmpty();
   }
 
@@ -1312,6 +1328,110 @@ function fieldDistanceToSessionPEMS_(session, lat = state.fieldGps?.latitude, ln
   return haversine(Number(lat), Number(lng), plat, plng);
 }
 
+
+function fieldPlanMapIconHF27APEMS_(kind) {
+  const cls = kind === 'gps' ? 'gps' : kind === 'selected' ? 'selected' : 'plan';
+  return window.L?.divIcon({
+    className: 'pems-map-icon-wrap',
+    html: `<span class="pems-map-marker ${cls}"></span>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  });
+}
+
+function destroyFieldPlanMapHF27APEMS_() {
+  if (state.fieldPlanMap) {
+    try { state.fieldPlanMap.remove(); } catch (_) {}
+  }
+  state.fieldPlanMap = null;
+  state.fieldPlanMapMarkers = new Map();
+  state.fieldPlanMapGpsLayer = null;
+}
+
+function renderFieldPlanMapHF27APEMS_(options = {}) {
+  const node = document.getElementById('fieldPlanMap');
+  const fallback = document.getElementById('fieldPlanMapFallback');
+  if (!node) return;
+  if (!window.L) {
+    if (fallback) fallback.classList.remove('hidden');
+    node.classList.add('map-unavailable');
+    node.innerHTML = '<div class="field-map-offline">Peta online belum tersedia. Pilih titik dari daftar.</div>';
+    return;
+  }
+  if (fallback) fallback.classList.add('hidden');
+
+  const sessions = (state.workspace?.pointSessions || []).filter(s =>
+    Number.isFinite(Number(s.latPlan)) && Number.isFinite(Number(s.longPlan))
+  );
+  if (!sessions.length) {
+    destroyFieldPlanMapHF27APEMS_();
+    node.innerHTML = '<div class="field-map-offline">Project belum memiliki koordinat PLAN yang dapat dipetakan.</div>';
+    return;
+  }
+
+  const oldCenter = options.preserveView && state.fieldPlanMap ? state.fieldPlanMap.getCenter() : null;
+  const oldZoom = options.preserveView && state.fieldPlanMap ? state.fieldPlanMap.getZoom() : null;
+  destroyFieldPlanMapHF27APEMS_();
+
+  const selected = state.selectedSession;
+  const gps = state.fieldGps;
+  const centerLat = Number(gps?.latitude ?? selected?.latPlan ?? sessions[0].latPlan);
+  const centerLng = Number(gps?.longitude ?? selected?.longPlan ?? sessions[0].longPlan);
+  const map = window.L.map(node, { zoomControl: true, attributionControl: true }).setView(
+    oldCenter ? [oldCenter.lat, oldCenter.lng] : [centerLat, centerLng],
+    Number.isFinite(oldZoom) ? oldZoom : 18
+  );
+  state.fieldPlanMap = map;
+
+  window.L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { maxZoom: 20, attribution: 'Tiles © Esri' }
+  ).addTo(map);
+
+  const bounds = [];
+  sessions.forEach(session => {
+    const lat = Number(session.latPlan), lng = Number(session.longPlan);
+    const isSelected = selected?.sessionId === session.sessionId;
+    const marker = window.L.marker([lat, lng], {
+      icon: fieldPlanMapIconHF27APEMS_(isSelected ? 'selected' : 'plan'),
+      keyboard: true,
+      title: session.anchorLabel || session.sessionId
+    }).addTo(map);
+    marker.bindTooltip(`${escapeHtml(session.anchorLabel || session.sessionId)} · ${escapeHtml(humanPointRolePEMS_(session.anchorRole))}`, {
+      direction: 'top', offset: [0, -8]
+    });
+    marker.on('click', async () => {
+      try {
+        await selectSession(session.sessionId);
+        const sel = document.getElementById('fieldPointSelect');
+        if (sel) sel.value = session.sessionId;
+        document.getElementById('fieldPointInfo')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (err) {
+        toast(humanError(err), 'danger', 5000);
+      }
+    });
+    state.fieldPlanMapMarkers.set(session.sessionId, marker);
+    bounds.push([lat, lng]);
+  });
+
+  if (gps && Number.isFinite(Number(gps.latitude)) && Number.isFinite(Number(gps.longitude))) {
+    const glat = Number(gps.latitude), glng = Number(gps.longitude);
+    const acc = Math.max(1, Number(gps.accuracy || 0));
+    window.L.circle([glat, glng], {
+      radius: acc, color: '#2563eb', weight: 1, fillColor: '#3b82f6', fillOpacity: 0.12
+    }).addTo(map);
+    state.fieldPlanMapGpsLayer = window.L.marker([glat, glng], {
+      icon: fieldPlanMapIconHF27APEMS_('gps'), title: 'Posisi HP WASPANG'
+    }).addTo(map).bindTooltip('Posisi HP WASPANG', { direction: 'top', offset: [0, -8] });
+    bounds.push([glat, glng]);
+  }
+
+  if (!oldCenter && bounds.length > 1) {
+    try { map.fitBounds(bounds, { padding: [30, 30], maxZoom: 19 }); } catch (_) {}
+  }
+  setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 80);
+}
+
 function renderFieldPointSelectPEMS_() {
   const select = document.getElementById('fieldPointSelect');
   if (!select) return;
@@ -1374,6 +1494,7 @@ async function captureFieldPositionPEMS_() {
     state.fieldGps = { ...gps, capturedAt: new Date().toISOString() };
     localStorage.setItem(LAST_GPS_KEY, JSON.stringify({ ...gps, cachedAt: new Date().toISOString() }));
     renderFieldPointSelectPEMS_();
+    renderFieldPlanMapHF27APEMS_({ preserveView: true });
     if (state.selectedSession) renderRequirementsPanel();
     if (info) {
       const selectedDistance = state.selectedSession
@@ -1403,6 +1524,7 @@ async function selectSession(sessionId, options = {}) {
   }
 
   renderFieldPointSelectPEMS_();
+  renderFieldPlanMapHF27APEMS_({ preserveView: true });
 
   if (sameSession && state.requirements && options.keepSelection !== false) {
     renderRequirementsPanel();

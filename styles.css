@@ -657,3 +657,26 @@ body.modal-open{overflow:hidden}
 /* HF23 WASPANG queue retry feedback */
 .queue-retry-box{margin-top:9px;padding:9px 11px;border-radius:12px;background:#eef6ff;border:1px solid #bfdbfe;color:#1e3a5f;font-size:12px;line-height:1.45}
 .queue-retry-box>div+div{margin-top:4px}
+
+
+/* HF27A — MAP FIRST FIELD FLOW (HF26G Word/PDF baseline untouched) */
+.field-map-first-card{margin:14px 0;border:1px solid var(--line);border-radius:16px;background:#fff;overflow:hidden}
+.field-map-first-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 13px;border-bottom:1px solid var(--line);background:#f8fafc}
+.field-map-first-head b{font-size:.92rem}
+.field-plan-map{height:420px;width:100%;background:#dbe3ea;position:relative;z-index:1}
+.field-plan-map.map-unavailable{height:180px;display:grid;place-items:center;background:#eef2f7}
+.field-map-offline{padding:18px;text-align:center;color:var(--muted);font-size:.85rem}
+.field-map-legend{display:flex;flex-wrap:wrap;gap:12px;padding:9px 12px;border-top:1px solid var(--line);font-size:.72rem;color:#475569;background:#fff}
+.field-map-legend span{display:inline-flex;align-items:center;gap:6px}
+.map-dot{width:11px;height:11px;border-radius:999px;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 1px rgba(15,23,42,.25)}
+.map-dot.plan{background:#16a34a}.map-dot.selected{background:#e11d48}.map-dot.gps{background:#2563eb}
+.pems-map-icon-wrap{background:transparent!important;border:none!important}
+.pems-map-marker{display:block;width:24px;height:24px;border-radius:999px;border:4px solid #fff;box-shadow:0 3px 10px rgba(15,23,42,.38)}
+.pems-map-marker.plan{background:#16a34a}.pems-map-marker.selected{background:#e11d48;transform:scale(1.14)}.pems-map-marker.gps{background:#2563eb}
+.field-gps-info{padding:0 12px 10px}
+@media(max-width:640px){
+  .field-map-first-head{align-items:flex-start;flex-direction:column}
+  .field-map-first-head .field-gps-btn{width:100%}
+  .field-plan-map{height:48vh;min-height:330px;max-height:520px}
+  .field-map-legend{gap:9px}
+}
