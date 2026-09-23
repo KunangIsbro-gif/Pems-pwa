@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-27-tif-word-output-r13f-hf26e';
+const CACHE_NAME = 'pems-v15-9-27-tif-word-output-r13f-hf26g';
 const STATIC_ASSETS = [
   './',
   './index.html',

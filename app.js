@@ -245,7 +245,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-27-r13f-hf26e');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-27-r13f-hf26g');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -379,7 +379,7 @@ async function bootAuthenticated() {
     let boot;
     if (navigator.onLine) {
       boot = await api('/bootstrap');
-      // HF26E: /bootstrap may temporarily return an empty PROJECTS cache
+      // HF26G: /bootstrap may temporarily return an empty PROJECTS cache
       // even while the master sheet contains active projects. Recheck via
       // the independent, role-scoped /projects route before caching zero.
       if (!Array.isArray(boot?.projects) || boot.projects.length === 0) {
@@ -393,7 +393,7 @@ async function bootAuthenticated() {
           }
         } catch (projectErr) {
           state.projectLoadError = 'Gagal memeriksa ulang project: ' + humanError(projectErr);
-          console.warn('HF26E project bootstrap recovery:', projectErr);
+          console.warn('HF26G project bootstrap recovery:', projectErr);
         }
       } else {
         state.projectLoadError = '';
@@ -496,13 +496,13 @@ async function bootOfflineWaspangPEMS_() {
   }
 }
 
-// HF26E - manual reload is a safe, non-destructive GET, keeping role filters.
-async function refreshProjectsHF26EPEMS_() {
+// HF26G - manual reload is a safe, non-destructive GET, keeping role filters.
+async function refreshProjectsHF26GPEMS_() {
   if (!navigator.onLine) {
     toast('Periksa koneksi internet dahulu.', 'warning', 5000);
     return;
   }
-  const btn = document.getElementById('refreshProjectsHF26EBtn');
+  const btn = document.getElementById('refreshProjectsHF26GBtn');
   try {
     if (btn) { btn.disabled = true; btn.textContent = 'Memeriksa project...'; }
     const fresh = await api('/projects', {maxAttempts:2, timeoutMs:30000});
@@ -533,7 +533,7 @@ async function refreshProjectsHF26EPEMS_() {
     toast(state.projectLoadError, 'danger', 8500);
     if (state.currentPage === 'home') await renderHome();
   } finally {
-    const latestBtn = document.getElementById('refreshProjectsHF26EBtn');
+    const latestBtn = document.getElementById('refreshProjectsHF26GBtn');
     if (latestBtn) { latestBtn.disabled = false; latestBtn.textContent = 'Muat Ulang Project'; }
   }
 }
@@ -805,7 +805,7 @@ async function renderHome() {
 
   el.content.innerHTML = `
     ${state.config.GPS_POLICY === 'DEV' ? '<div class="warning-strip"><b>DEV MODE:</b> GPS fallback laptop masih diizinkan. Ubah GPS_POLICY ke FIELD sebelum pilot WASPANG.</div>' : ''}
-    ${!projects.length ? `<div class="status-box warning" style="margin-bottom:14px"><b>Daftar project kosong.</b> ${escapeHtml(state.projectLoadError || 'Project belum diterima dari server untuk role ini.')} <button id="refreshProjectsHF26EBtn" class="btn secondary small" type="button" ${navigator.onLine ? '' : 'disabled'} style="margin-left:10px">Muat Ulang Project</button></div>` : ''}
+    ${!projects.length ? `<div class="status-box warning" style="margin-bottom:14px"><b>Daftar project kosong.</b> ${escapeHtml(state.projectLoadError || 'Project belum diterima dari server untuk role ini.')} <button id="refreshProjectsHF26GBtn" class="btn secondary small" type="button" ${navigator.onLine ? '' : 'disabled'} style="margin-left:10px">Muat Ulang Project</button></div>` : ''}
     <div class="grid kpi">
       ${kpiActionPEMS_('Project', projects.length, 'projects', 'Buka Pekerjaan')}
       ${kpiActionPEMS_('Queue Lokal', pending, 'queue', failed ? `${failed} gagal` : 'Buka Evidence')}
@@ -839,7 +839,7 @@ async function renderHome() {
       </div>` : ''}
   `;
 
-  document.getElementById('refreshProjectsHF26EBtn')?.addEventListener('click', refreshProjectsHF26EPEMS_);
+  document.getElementById('refreshProjectsHF26GBtn')?.addEventListener('click', refreshProjectsHF26GPEMS_);
   bindSelectSearchPEMS_('homeProjectSearch', 'homeProjectSelect');
   document.getElementById('homeProjectSelect')?.addEventListener('change', e => selectProject(e.target.value, false));
   document.getElementById('continueWorkBtn')?.addEventListener('click', async () => {
@@ -963,8 +963,8 @@ async function renderWork() {
 async function renderWorkCoreHF17PEMS_(renderSeq) {
   const projects = state.bootstrap?.projects || [];
   if (!projects.length) {
-    el.content.innerHTML = `<div class="status-box warning"><b>Project belum dapat dimuat.</b> ${escapeHtml(state.projectLoadError || 'Periksa koneksi atau assignment akun ini.')} <button id="refreshProjectsHF26EBtn" type="button" class="btn secondary small" ${navigator.onLine ? '' : 'disabled'}>Muat Ulang Project</button></div>`;
-    document.getElementById('refreshProjectsHF26EBtn')?.addEventListener('click', refreshProjectsHF26EPEMS_);
+    el.content.innerHTML = `<div class="status-box warning"><b>Project belum dapat dimuat.</b> ${escapeHtml(state.projectLoadError || 'Periksa koneksi atau assignment akun ini.')} <button id="refreshProjectsHF26GBtn" type="button" class="btn secondary small" ${navigator.onLine ? '' : 'disabled'}>Muat Ulang Project</button></div>`;
+    document.getElementById('refreshProjectsHF26GBtn')?.addEventListener('click', refreshProjectsHF26GPEMS_);
     return;
   }
 
@@ -4500,7 +4500,7 @@ async function renderAdmin() {
     const needConfig = section === 'config';
 
     let projectData = needProjects ? await adminFetchPEMS_('projects','/admin/projects') : (state.adminCache.projects || {projects:state.adminProjects||[],masterOptions:state.adminMasterOptions||{},canPublish:state.adminCanPublish});
-    // HF26E: never silently erase the Home project list when the Admin endpoint
+    // HF26G: never silently erase the Home project list when the Admin endpoint
     // transiently returns zero. Recheck the role-scoped GET /projects first.
     if (needProjects && !projectData.projects?.length) {
       try {
