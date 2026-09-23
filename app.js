@@ -24,6 +24,8 @@ const state = {
   sessionExpiresAt: '',
   user: null,
   bootstrap: null,
+  projectLoadError: '',
+  projectLastCheckAt: 0,
   config: {},
   currentPage: 'home',
   selectedProjectId: '',
@@ -243,7 +245,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-27-r13f-hf26');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-27-r13f-hf26a');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -377,6 +379,26 @@ async function bootAuthenticated() {
     let boot;
     if (navigator.onLine) {
       boot = await api('/bootstrap');
+      // HF26A: /bootstrap may temporarily return an empty PROJECTS cache
+      // even while the master sheet contains active projects. Recheck via
+      // the independent, role-scoped /projects route before caching zero.
+      if (!Array.isArray(boot?.projects) || boot.projects.length === 0) {
+        try {
+          const fresh = await api('/projects', {maxAttempts:2, timeoutMs:30000});
+          if (Array.isArray(fresh?.projects) && fresh.projects.length) {
+            boot.projects = fresh.projects;
+            state.projectLoadError = '';
+          } else {
+            state.projectLoadError = 'Server mengembalikan 0 project dari Bootstrap dan Projects. Periksa koneksi Gateway, deployment Apps Script, serta assignment.';
+          }
+        } catch (projectErr) {
+          state.projectLoadError = 'Gagal memeriksa ulang project: ' + humanError(projectErr);
+          console.warn('HF26A project bootstrap recovery:', projectErr);
+        }
+      } else {
+        state.projectLoadError = '';
+      }
+      state.projectLastCheckAt = Date.now();
       await cachePut('bootstrap', boot);
     } else {
       boot = await cacheGet('bootstrap');
@@ -471,6 +493,48 @@ async function bootOfflineWaspangPEMS_() {
   } catch (err) {
     console.warn('Offline WASPANG boot failed', err);
     return false;
+  }
+}
+
+// HF26A - manual reload is a safe, non-destructive GET, keeping role filters.
+async function refreshProjectsHF26APEMS_() {
+  if (!navigator.onLine) {
+    toast('Periksa koneksi internet dahulu.', 'warning', 5000);
+    return;
+  }
+  const btn = document.getElementById('refreshProjectsHF26ABtn');
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Memeriksa project...'; }
+    const fresh = await api('/projects', {maxAttempts:2, timeoutMs:30000});
+    if (!Array.isArray(fresh?.projects)) throw new Error('API /projects tidak mengembalikan daftar projects.');
+    let projects = fresh.projects;
+    if (!projects.length) {
+      const boot = await api('/bootstrap', {maxAttempts:2, timeoutMs:30000});
+      if (Array.isArray(boot?.projects) && boot.projects.length) projects = boot.projects;
+    }
+    state.projectLastCheckAt = Date.now();
+    if (projects.length) {
+      state.bootstrap.projects = projects;
+      state.adminCache.projects = null;
+      state.projectLoadError = '';
+      if (state.selectedProjectId && !projects.some(p => p.projectId === state.selectedProjectId)) {
+        state.selectedProjectId = '';
+        localStorage.removeItem(SELECTED_PROJECT_KEY);
+      }
+      await cachePut('bootstrap', state.bootstrap);
+      toast(`${projects.length} project berhasil dimuat dari server.`, 'success', 5500);
+    } else {
+      state.projectLoadError = 'Server masih mengembalikan 0 project. Cek 01_PROJECTS (PROJECT_ID/ACTIVE), URL Web App pada Worker, dan 11_ASSIGNMENTS untuk role FIELD.';
+      toast('Server masih mengembalikan 0 project. Tidak ada data yang dihapus.', 'warning', 7500);
+    }
+    await navigate(state.currentPage || 'home', {fromHash:true});
+  } catch (err) {
+    state.projectLoadError = 'Pemeriksaan project gagal: ' + humanError(err);
+    toast(state.projectLoadError, 'danger', 8500);
+    if (state.currentPage === 'home') await renderHome();
+  } finally {
+    const latestBtn = document.getElementById('refreshProjectsHF26ABtn');
+    if (latestBtn) { latestBtn.disabled = false; latestBtn.textContent = 'Muat Ulang Project'; }
   }
 }
 
@@ -741,6 +805,7 @@ async function renderHome() {
 
   el.content.innerHTML = `
     ${state.config.GPS_POLICY === 'DEV' ? '<div class="warning-strip"><b>DEV MODE:</b> GPS fallback laptop masih diizinkan. Ubah GPS_POLICY ke FIELD sebelum pilot WASPANG.</div>' : ''}
+    ${!projects.length ? `<div class="status-box warning" style="margin-bottom:14px"><b>Daftar project kosong.</b> ${escapeHtml(state.projectLoadError || 'Project belum diterima dari server untuk role ini.')} <button id="refreshProjectsHF26ABtn" class="btn secondary small" type="button" ${navigator.onLine ? '' : 'disabled'} style="margin-left:10px">Muat Ulang Project</button></div>` : ''}
     <div class="grid kpi">
       ${kpiActionPEMS_('Project', projects.length, 'projects', 'Buka Pekerjaan')}
       ${kpiActionPEMS_('Queue Lokal', pending, 'queue', failed ? `${failed} gagal` : 'Buka Evidence')}
@@ -774,6 +839,7 @@ async function renderHome() {
       </div>` : ''}
   `;
 
+  document.getElementById('refreshProjectsHF26ABtn')?.addEventListener('click', refreshProjectsHF26APEMS_);
   bindSelectSearchPEMS_('homeProjectSearch', 'homeProjectSelect');
   document.getElementById('homeProjectSelect')?.addEventListener('change', e => selectProject(e.target.value, false));
   document.getElementById('continueWorkBtn')?.addEventListener('click', async () => {
@@ -897,7 +963,8 @@ async function renderWork() {
 async function renderWorkCoreHF17PEMS_(renderSeq) {
   const projects = state.bootstrap?.projects || [];
   if (!projects.length) {
-    el.content.innerHTML = '<div class="empty">Belum ada project yang dapat diakses. Admin perlu cek role/assignment.</div>';
+    el.content.innerHTML = `<div class="status-box warning"><b>Project belum dapat dimuat.</b> ${escapeHtml(state.projectLoadError || 'Periksa koneksi atau assignment akun ini.')} <button id="refreshProjectsHF26ABtn" type="button" class="btn secondary small" ${navigator.onLine ? '' : 'disabled'}>Muat Ulang Project</button></div>`;
+    document.getElementById('refreshProjectsHF26ABtn')?.addEventListener('click', refreshProjectsHF26APEMS_);
     return;
   }
 
@@ -4432,7 +4499,30 @@ async function renderAdmin() {
     const needAssignments = section === 'assignments';
     const needConfig = section === 'config';
 
-    const projectData = needProjects ? await adminFetchPEMS_('projects','/admin/projects') : (state.adminCache.projects || {projects:state.adminProjects||[],masterOptions:state.adminMasterOptions||{},canPublish:state.adminCanPublish});
+    let projectData = needProjects ? await adminFetchPEMS_('projects','/admin/projects') : (state.adminCache.projects || {projects:state.adminProjects||[],masterOptions:state.adminMasterOptions||{},canPublish:state.adminCanPublish});
+    // HF26A: never silently erase the Home project list when the Admin endpoint
+    // transiently returns zero. Recheck the role-scoped GET /projects first.
+    if (needProjects && !projectData.projects?.length) {
+      try {
+        const again = await api('/projects', {maxAttempts:2, timeoutMs:30000});
+        if (Array.isArray(again?.projects) && again.projects.length) {
+          projectData = {...projectData, projects:again.projects};
+          state.adminCache.projects = projectData;
+          state.adminCacheAt.projects = Date.now();
+          state.adminStaleNotice = 'Daftar project dipulihkan dari endpoint /projects karena cache Admin kosong.';
+        } else if (state.bootstrap?.projects?.length) {
+          state.adminStaleNotice = 'Endpoint Admin mengembalikan 0 project. Data Home sebelumnya dipertahankan sambil memeriksa koneksi server.';
+          projectData = {...projectData, projects:state.bootstrap.projects};
+        }
+      } catch (projectErr) {
+        if (state.bootstrap?.projects?.length) {
+          projectData = {...projectData, projects:state.bootstrap.projects};
+          state.adminStaleNotice = 'Admin tidak dapat memperbarui daftar project; daftar sebelumnya tetap ditampilkan. ' + humanError(projectErr);
+        } else {
+          state.projectLoadError = humanError(projectErr);
+        }
+      }
+    }
     const masterData = needMaster ? await adminFetchPEMS_('master','/admin/master-data') : (state.adminCache.master || {items:state.adminMasterData||[],activeOptions:state.adminMasterOptions||{}});
     const usersData = needUsers ? await adminFetchPEMS_('users','/admin/users') : (state.adminCache.users || {users:[]});
     const assignData = needAssignments ? await adminFetchPEMS_('assignments','/admin/assignments') : (state.adminCache.assignments || {assignments:[]});
@@ -4449,7 +4539,7 @@ async function renderAdmin() {
     state.adminMasterOptions = masterOptions;
     state.adminMasterData = masterItems;
     state.adminCanPublish = canPublish;
-    if (state.bootstrap) state.bootstrap.projects = projects;
+    if (state.bootstrap && (projects.length || !state.bootstrap.projects?.length)) state.bootstrap.projects = projects;
 
     const tcBadge = p => {
       const tc = String(p.timeCritical || 'NO_SLA').toUpperCase();
