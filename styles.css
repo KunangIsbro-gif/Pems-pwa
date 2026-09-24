@@ -727,3 +727,13 @@ body.modal-open{overflow:hidden}
 .field-point-search-line-hf27i button{white-space:nowrap;flex:0 0 auto}
 .point-id-hint-hf27i{font-size:10px;font-weight:600;color:#64748b}
 @media(max-width:440px){.field-point-search-line-hf27i{flex-wrap:wrap}.field-point-search-line-hf27i button{font-size:11px}}
+
+/* HF27J evidence point remapping */
+.monitor-photo-remap-hf27j{
+  margin-top:12px;
+  padding:12px;
+  border:1px solid var(--border, #d8dee9);
+  border-radius:14px;
+  background:rgba(255,255,255,.72);
+}
+.monitor-photo-remap-hf27j .toolbar{display:flex;gap:8px;flex-wrap:wrap;}

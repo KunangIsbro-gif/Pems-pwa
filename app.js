@@ -4854,12 +4854,28 @@ async function openMonitoringPhotoPEMS_(item, result, photoIndex = 0) {
       </div>`
     : '';
 
+  const canRemapHF27J = (hasPermission('verification.reopen') || hasPermission('override')) && item?.projectId && item?.evidenceId;
+  const remapHtmlHF27J = canRemapHF27J
+    ? `<div class="monitor-photo-remap-hf27j" data-remap-root-hf27j>
+        <div class="section-head"><h3>Pindahkan Titik Evidence</h3><span class="badge info">HF27J</span></div>
+        <div class="tiny muted">Foto, GPS capture, dan status evidence tetap. Yang dikoreksi hanya hubungan evidence ke titik PLAN.</div>
+        <div class="tiny muted" style="margin-top:6px">Titik saat ini: <b>${escapeHtml(item?.sessionId || '-')}</b></div>
+        <div data-remap-panel-hf27j style="margin-top:10px">
+          <button type="button" class="btn outline small" data-remap-load-hf27j>Load daftar titik</button>
+        </div>
+      </div>`
+    : '';
+
   const fieldNoteHtml = item?.fieldNote
     ? `<div class="monitor-photo-note"><b>Catatan WASPANG:</b> ${escapeHtml(item.fieldNote)}</div>`
     : '';
 
-  el.photoModalActions.innerHTML = `${fieldNoteHtml}${navHtml}${decisionHtml}`;
-  el.photoModalActions.classList.toggle('hidden', !(fieldNoteHtml || navHtml || decisionHtml));
+  el.photoModalActions.innerHTML = `${fieldNoteHtml}${navHtml}${decisionHtml}${remapHtmlHF27J}`;
+  el.photoModalActions.classList.toggle('hidden', !(fieldNoteHtml || navHtml || decisionHtml || remapHtmlHF27J));
+
+  el.photoModalActions.querySelector('[data-remap-load-hf27j]')?.addEventListener('click', event => {
+    loadRemapPointOptionsHF27JPEMS_(event.currentTarget, item);
+  });
 
   el.photoModalActions.querySelector('[data-monitor-photo-prev]')?.addEventListener('click', () => {
     openMonitoringPhotoPEMS_(item, result, index - 1);
@@ -4870,6 +4886,78 @@ async function openMonitoringPhotoPEMS_(item, result, photoIndex = 0) {
   el.photoModalActions.querySelectorAll('[data-monitor-verify]').forEach(btn => {
     btn.addEventListener('click', () => handleMonitoringDecisionPEMS_(btn, item.evidenceId));
   });
+}
+
+
+async function loadRemapPointOptionsHF27JPEMS_(button, item) {
+  const panel = el.photoModalActions?.querySelector('[data-remap-panel-hf27j]');
+  if (!panel || !item?.projectId) return;
+  try {
+    setButtonLoadingPEMS_(button, true, 'Memuat titik...');
+    const result = await api(`/projects/${encodeURIComponent(item.projectId)}/point-options`, { timeoutMs:30000 });
+    const points = Array.isArray(result?.points) ? result.points : [];
+    if (!points.length) {
+      panel.innerHTML = '<div class="empty">Daftar titik project belum tersedia.</div>';
+      return;
+    }
+    const currentSession = String(item.sessionId || '');
+    panel.innerHTML = `
+      <div class="field"><label>Titik PLAN tujuan</label>
+        <select class="select" data-remap-select-hf27j>
+          <option value="">Pilih titik tujuan...</option>
+          ${points.map(point => {
+            const sid = String(point.sessionId || '');
+            const label = `${point.pointLabel || point.sourceCode || 'POINT'} [${point.suffix || sid.slice(-6)}] • ${point.pointRole || '-'}${sid === currentSession ? ' • SAAT INI' : ''}`;
+            return `<option value="${escapeAttr(sid)}" ${sid === currentSession ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+          }).join('')}
+        </select>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Alasan koreksi</label>
+        <input class="input" data-remap-reason-hf27j value="Wrong point selected during field capture" placeholder="Alasan koreksi titik">
+      </div>
+      <div class="toolbar" style="margin-top:10px">
+        <button type="button" class="btn warning" data-remap-confirm-hf27j>Simpan Koreksi Titik</button>
+      </div>`;
+    panel.querySelector('[data-remap-confirm-hf27j]')?.addEventListener('click', event => {
+      confirmRemapPointHF27JPEMS_(event.currentTarget, item);
+    });
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+    if (button) setButtonLoadingPEMS_(button, false);
+  }
+}
+
+async function confirmRemapPointHF27JPEMS_(button, item) {
+  const root = el.photoModalActions?.querySelector('[data-remap-root-hf27j]');
+  const sessionId = root?.querySelector('[data-remap-select-hf27j]')?.value || '';
+  const reason = root?.querySelector('[data-remap-reason-hf27j]')?.value || '';
+  if (!sessionId) {
+    toast('Pilih titik PLAN tujuan dulu.', 'warning');
+    return;
+  }
+  if (sessionId === String(item.sessionId || '')) {
+    toast('Titik tujuan masih sama dengan titik saat ini.', 'warning');
+    return;
+  }
+  const ok = window.confirm(`Pindahkan evidence ${item.itemLabel || item.evidenceId} ke titik ${sessionId.slice(-6)}?\n\nFoto, GPS capture, dan status VERIFIED tidak dihapus.`);
+  if (!ok) return;
+  try {
+    setButtonLoadingPEMS_(button, true, 'Menyimpan...');
+    const result = await api(`/evidence/${encodeURIComponent(item.evidenceId)}/remap-point`, {
+      method:'POST',
+      timeoutMs:45000,
+      body:{ sessionId, reason }
+    });
+    toast(result?.message || 'Pemetaan evidence berhasil dikoreksi.', 'success', 6000);
+    closePhotoModal();
+    closeMonitoringEvidencePEMS_();
+    await clearLiveCachesHF24PEMS_();
+    state.fieldStatusRefreshAtHF27I = 0;
+    await renderMonitoring({ force:true });
+  } catch (err) {
+    toast(humanError(err), 'danger', 7000);
+    setButtonLoadingPEMS_(button, false);
+  }
 }
 
 async function handleMonitoringDecisionPEMS_(button, evidenceId) {
