@@ -706,3 +706,24 @@ body.modal-open{overflow:hidden}
 .capture-queue-hf27h{padding:9px 12px;margin:8px 0 10px;border:1px solid #cbd5e1;border-left:4px solid #64748b;border-radius:10px;background:#f8fafc;color:#334155;font-size:12px;font-weight:650;line-height:1.5;overflow-wrap:anywhere}
 .capture-queue-hf27h.uploading{border-left-color:#2563eb;background:#eff6ff;color:#1e40af}
 .capture-queue-hf27h.hidden{display:none}
+
+/* HF27I — point/evidence status reconciliation + fast search/filter */
+.field-point-tools-hf27i{display:grid;gap:8px;margin:8px 0 10px}
+.field-point-filter-hf27i{display:flex;gap:7px;flex-wrap:wrap}
+.field-point-filter-hf27i button{appearance:none;border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:999px;padding:6px 9px;font:inherit;font-size:11px;font-weight:750;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.field-point-filter-hf27i button span{min-width:18px;text-align:center;border-radius:999px;background:#f1f5f9;padding:1px 5px;font-size:10px}
+.field-point-filter-hf27i button.active{border-color:#0f4c81;background:#eaf4ff;color:#0f4c81}
+.field-point-filter-hf27i button.active span{background:#fff}
+.field-point-quick-btn.status-verified{border-left:4px solid #16a34a}
+.field-point-quick-btn.status-waiting{border-left:4px solid #f59e0b}
+.field-point-quick-btn.status-revision{border-left:4px solid #dc2626}
+.field-point-quick-btn.status-in_progress{border-left:4px solid #2563eb}
+.field-point-quick-btn.status-draft{border-left:4px solid #94a3b8}
+@media(max-width:640px){.field-point-filter-hf27i{flex-wrap:nowrap;overflow-x:auto;padding-bottom:3px}.field-point-filter-hf27i button{white-space:nowrap;flex:0 0 auto}}
+
+/* HF27I final: search + update status without disturbing the selected evidence. */
+.field-point-search-line-hf27i{display:flex;align-items:center;gap:8px}
+.field-point-search-line-hf27i input{flex:1;min-width:0}
+.field-point-search-line-hf27i button{white-space:nowrap;flex:0 0 auto}
+.point-id-hint-hf27i{font-size:10px;font-weight:600;color:#64748b}
+@media(max-width:440px){.field-point-search-line-hf27i{flex-wrap:wrap}.field-point-search-line-hf27i button{font-size:11px}}

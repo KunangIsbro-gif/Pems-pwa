@@ -84,6 +84,10 @@ const state = {
   fieldMapScope: '',
   fieldActualMapProject: '',
   fieldShowAdditional: false,
+  fieldPointFilter: 'ALL',
+  fieldPointSearch: '',
+  fieldStatusRefreshAtHF27I: 0,
+  fieldStatusRefreshPromiseHF27I: null,
   fieldDocuments: null,
   fieldDocumentsProjectId: '',
   fieldDocumentUploading: false,
@@ -263,7 +267,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-load-sync-hf27h');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-point-status-hf27i');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -1072,6 +1076,13 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
 
         <div class="field field-point-select-wrap">
           <label>2. Hubungkan posisi AKTUAL ke titik PLAN / sesi material</label>
+          <div class="field-point-tools-hf27i">
+            <div class="field-point-search-line-hf27i">
+              <input id="fieldPointSearchHF27I" class="input" type="search" placeholder="Cari titik / material / ID sesi..." value="${escapeAttr(state.fieldPointSearch || '')}">
+              <button id="refreshPointStatusHF27I" type="button" class="btn outline small" ${!navigator.onLine ? 'disabled' : ''} title="Ambil status evidence terbaru dari server">↻ Status</button>
+            </div>
+            <div id="fieldPointFilterHF27I" class="field-point-filter-hf27i" aria-label="Filter status titik"></div>
+          </div>
           <select id="fieldPointSelect" class="select"></select>
         </div>
 
@@ -1108,6 +1119,8 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
     state.requirements = null;
     state.selectedRequirement = null;
     state.fieldShowAdditional = false;
+    state.fieldPointFilter = 'ALL';
+    state.fieldPointSearch = '';
     state.fieldActualPosition = null;
     state.fieldActualMapProject = '';
     destroyFieldPlanMapHF27BPEMS_();
@@ -1131,6 +1144,24 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
     await selectSession(sessionId);
   });
 
+  document.getElementById('fieldPointSearchHF27I')?.addEventListener('input', e => {
+    state.fieldPointSearch = String(e.target.value || '');
+    renderFieldPointFilterHF27IPEMS_();
+    renderFieldPointSelectPEMS_();
+    if (!state.selectedSession) renderFieldPointInfoEmpty();
+  });
+  document.getElementById('fieldPointFilterHF27I')?.addEventListener('click', e => {
+    const btn = e.target.closest('[data-point-filter-hf27i]');
+    if (!btn) return;
+    state.fieldPointFilter = String(btn.getAttribute('data-point-filter-hf27i') || 'ALL');
+    renderFieldPointFilterHF27IPEMS_();
+    renderFieldPointSelectPEMS_();
+    if (!state.selectedSession) renderFieldPointInfoEmpty();
+  });
+  document.getElementById('refreshPointStatusHF27I')?.addEventListener('click', () => {
+    refreshFieldPointStatusHF27IPEMS_({ quiet:false });
+  });
+
   document.getElementById('fieldGpsBtn')?.addEventListener('click', captureFieldPositionPEMS_);
   document.getElementById('fieldActualResetBtn')?.addEventListener('click', () => {
     state.fieldActualPosition = null;
@@ -1149,6 +1180,7 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
   });
 
   renderFieldProjectDocumentsPEMS_();
+  renderFieldPointFilterHF27IPEMS_();
   renderFieldPointSelectPEMS_();
   renderFieldPlanMapHF27BPEMS_();
   renderFieldActualInfoHF27BPEMS_();
@@ -1159,6 +1191,10 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
     // HF27G: AKTUAL is marked by free tap; PLAN is associated explicitly before capture.
     // Never auto-select the nearest point before capture.
     renderFieldPointInfoEmpty();
+  }
+  // HF27I: background status refresh only when stale. It never blocks the map/camera.
+  if (navigator.onLine && sessionIsUsable() && Date.now() - state.fieldStatusRefreshAtHF27I > 60000) {
+    refreshFieldPointStatusHF27IPEMS_({ quiet:true }).catch(() => {});
   }
 
   // HF17 PERFORMANCE: BA/COMCASE must never compete with workspace/requirements.
@@ -1352,15 +1388,38 @@ function humanPointRolePEMS_(role) {
 
 function humanPointStatusPEMS_(status) {
   const s = String(status || 'DRAFT').toUpperCase();
-  if (s === 'VERIFIED') return 'SELESAI';
-  if (s === 'IN_PROGRESS') return 'PROSES';
+  if (s === 'VERIFIED') return 'SELESAI / VERIFIED';
+  if (s === 'WAITING' || s === 'SUBMITTED' || s === 'PENDING_VERIFICATION') return 'MENUNGGU VERIFIKASI';
+  if (s === 'REVISION' || s === 'REJECTED' || s === 'NEED_REVISION') return 'REVISI';
+  if (s === 'IN_PROGRESS' || s === 'SYNCED') return 'PROSES';
   return 'BELUM MULAI';
 }
 
-function sortedFieldSessionsPEMS_() {
+function normalizePointStatusHF27IPEMS_(status) {
+  const s = String(status || 'DRAFT').toUpperCase();
+  if (s === 'VERIFIED') return 'VERIFIED';
+  if (['WAITING','SUBMITTED','PENDING_VERIFICATION'].includes(s)) return 'WAITING';
+  if (['REVISION','REJECTED','NEED_REVISION','REVISION_REQUESTED'].includes(s)) return 'REVISION';
+  if (['IN_PROGRESS','SYNCED'].includes(s)) return 'IN_PROGRESS';
+  return 'DRAFT';
+}
+
+function fieldSessionMatchesHF27IPEMS_(session) {
+  const filter = String(state.fieldPointFilter || 'ALL').toUpperCase();
+  const status = normalizePointStatusHF27IPEMS_(session?.verifyStatus);
+  if (filter !== 'ALL' && status !== filter) return false;
+  const q = String(state.fieldPointSearch || '').trim().toLowerCase();
+  if (!q) return true;
+  const hay = [session?.anchorLabel, session?.anchorRole, session?.sessionId, session?.pointId,
+    session?.anchorPointId, session?.anchorDesignator, session?.anchorSourceName,
+    ...(session?.members || []).flatMap(m => [m.pointId, m.pointLabel, m.designator, m.sourceName])]
+    .map(v => String(v || '').toLowerCase()).join(' ');
+  return hay.includes(q);
+}
+
+function allFieldSessionsPEMS_() {
   const sessions = [...(state.workspace?.pointSessions || [])];
   if (!state.fieldGps) return sessions;
-
   const { latitude, longitude } = state.fieldGps;
   return sessions.sort((a, b) => {
     const ad = fieldDistanceToSessionPEMS_(a, latitude, longitude);
@@ -1370,6 +1429,10 @@ function sortedFieldSessionsPEMS_() {
     if (Number.isFinite(bd)) return 1;
     return 0;
   });
+}
+
+function sortedFieldSessionsPEMS_() {
+  return allFieldSessionsPEMS_().filter(fieldSessionMatchesHF27IPEMS_);
 }
 
 function fieldDistanceToSessionPEMS_(session, lat = state.fieldGps?.latitude, lng = state.fieldGps?.longitude) {
@@ -1527,12 +1590,78 @@ function renderFieldActualInfoHF27BPEMS_() {
 }
 
 
+
+async function refreshFieldPointStatusHF27IPEMS_({ quiet=false } = {}) {
+  const projectId = String(state.selectedProjectId || '');
+  if (!projectId || !navigator.onLine || !sessionIsUsable()) {
+    if (!quiet) toast('Status baru bisa diperbarui ketika online.', 'warning', 4000);
+    return null;
+  }
+  if (state.fieldStatusRefreshPromiseHF27I) return state.fieldStatusRefreshPromiseHF27I;
+  const btn = document.getElementById('refreshPointStatusHF27I');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ Memuat...'; }
+  const promise = (async () => {
+    try {
+      // Fetch directly: force:true on loadWorkspace alone cannot bypass the existing
+      // server-side WORKSPACE cache. Backend HF27I revision marker handles freshness.
+      const fresh = await api(`/projects/${encodeURIComponent(projectId)}/workspace`);
+      if (state.selectedProjectId !== projectId) return fresh;
+      state.workspace = fresh;
+      state.workspaceMemory.set(projectId, fresh);
+      await cachePut(`workspace:${userCachePrefix()}:${projectId}`, fresh);
+      state.fieldStatusRefreshAtHF27I = Date.now();
+      const current = state.selectedSession?.sessionId || '';
+      if (current) {
+        state.selectedSession = (fresh.pointSessions || []).find(s => s.sessionId === current) || null;
+      }
+      if (state.currentPage === 'pekerjaan') {
+        renderFieldPointFilterHF27IPEMS_();
+        renderFieldPointSelectPEMS_();
+        if (!state.selectedSession) renderFieldPointInfoEmpty();
+        else if (state.requirements) {
+          // Update only the selected point's status badge, not the capture UI.
+          const badge = document.querySelector('#fieldPointInfo .field-point-head .badge');
+          if (badge) {
+            badge.textContent = humanPointStatusPEMS_(state.selectedSession.verifyStatus);
+            badge.className = `badge ${state.selectedSession.verifyStatus === 'VERIFIED' ? 'success' : state.selectedSession.verifyStatus === 'IN_PROGRESS' ? 'warning' : 'neutral'}`;
+          }
+        }
+      }
+      if (!quiet) toast('Status titik telah diperbarui dari server.', 'success', 3500);
+      return fresh;
+    } catch (err) {
+      if (!quiet) toast(humanError(err), 'danger', 5000);
+      return null;
+    } finally {
+      const button = document.getElementById('refreshPointStatusHF27I');
+      if (button) { button.disabled = false; button.textContent = '↻ Status'; }
+    }
+  })();
+  state.fieldStatusRefreshPromiseHF27I = promise;
+  try { return await promise; }
+  finally { if (state.fieldStatusRefreshPromiseHF27I === promise) state.fieldStatusRefreshPromiseHF27I = null; }
+}
+
+function renderFieldPointFilterHF27IPEMS_() {
+  const node = document.getElementById('fieldPointFilterHF27I');
+  if (!node) return;
+  const sessions = allFieldSessionsPEMS_();
+  const counts = { ALL:sessions.length, DRAFT:0, IN_PROGRESS:0, WAITING:0, VERIFIED:0, REVISION:0 };
+  sessions.forEach(s => { const k=normalizePointStatusHF27IPEMS_(s.verifyStatus); counts[k]=(counts[k]||0)+1; });
+  const options = [
+    ['ALL','Semua'],['DRAFT','Belum Mulai'],['IN_PROGRESS','Proses'],['WAITING','Menunggu'],['VERIFIED','Verified'],['REVISION','Revisi']
+  ];
+  node.innerHTML = options.map(([key,label]) => `<button type="button" data-point-filter-hf27i="${key}" class="${String(state.fieldPointFilter||'ALL').toUpperCase()===key?'active':''}">${label} <span>${counts[key]||0}</span></button>`).join('');
+}
+
 function renderFieldPointSelectPEMS_() {
   const select = document.getElementById('fieldPointSelect');
   if (!select) return;
 
   const sessions = sortedFieldSessionsPEMS_();
   const current = state.selectedSession?.sessionId || '';
+  const selectedSession = (state.workspace?.pointSessions || []).find(s => s.sessionId === current);
+  if (selectedSession && !sessions.some(s => s.sessionId === current)) sessions.unshift(selectedSession);
 
   if (!sessions.length) {
     select.innerHTML = '<option value="">Tidak ada Titik Evidence Realisasi</option>';
@@ -1567,7 +1696,7 @@ function renderFieldPointInfoEmpty() {
     const sessions = sortedFieldSessionsPEMS_();
     info.classList.remove('hidden');
     if (!sessions.length) {
-      info.innerHTML = '<div class="empty">Tidak ada Titik Evidence Realisasi pada project ini.</div>';
+      info.innerHTML = `<div class="empty">${(state.fieldPointSearch || state.fieldPointFilter !== 'ALL') ? 'Tidak ada titik yang cocok dengan pencarian/filter.' : 'Tidak ada Titik Evidence Realisasi pada project ini.'}</div>`;
     } else {
       info.innerHTML = `
         <div class="field-point-picker-head">
@@ -1580,8 +1709,8 @@ function renderFieldPointInfoEmpty() {
             const distanceText = Number.isFinite(distance)
               ? (distance < 1000 ? `${Math.round(distance)} m` : `${(distance/1000).toFixed(1)} km`)
               : '';
-            return `<button type="button" class="field-point-quick-btn" data-quick-session="${escapeAttr(session.sessionId)}">
-              <span><b>${escapeHtml(session.anchorLabel || session.sessionId)}</b><small>${escapeHtml(humanPointRolePEMS_(session.anchorRole))} • ${escapeHtml(humanPointStatusPEMS_(session.verifyStatus))}</small></span>
+            return `<button type="button" class="field-point-quick-btn status-${normalizePointStatusHF27IPEMS_(session.verifyStatus).toLowerCase()}" data-quick-session="${escapeAttr(session.sessionId)}">
+              <span><b>${escapeHtml(session.anchorLabel || session.sessionId)} <small class="point-id-hint-hf27i">[${escapeHtml(String(session.sessionId || '').slice(-6))}]</small></b><small>${escapeHtml(humanPointRolePEMS_(session.anchorRole))} • ${escapeHtml(humanPointStatusPEMS_(session.verifyStatus))}</small></span>
               ${distanceText ? `<em>${escapeHtml(distanceText)}</em>` : '<em>pilih</em>'}
             </button>`;
           }).join('')}
@@ -3972,6 +4101,7 @@ async function handlePhotoAdditionDecisionHF27GPEMS_(btn) {
   try {
     await api(`/verification/photos/${encodeURIComponent(photoId)}/${decision}`, { method:'POST', body:{ note } });
     toast(decision === 'approve' ? 'Foto tambahan disetujui.' : 'Foto tambahan ditolak. Foto lama tetap aman.', decision === 'approve' ? 'success' : 'warning', 4500);
+    state.fieldStatusRefreshAtHF27I = 0;
     await renderVerification();
   } catch (err) {
     toast(humanError(err), 'danger', 6000);
@@ -6822,6 +6952,7 @@ async function loadWorkspace(projectId, options = {}) {
         .then(async data => {
           state.workspace = data;
           state.workspaceMemory.set(projectId, data);
+          state.fieldStatusRefreshAtHF27I = Date.now();
           await cachePut(key, data);
           return data;
         })
