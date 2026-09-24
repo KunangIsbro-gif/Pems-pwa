@@ -41,6 +41,10 @@ const state = {
   syncing: false,
   syncProgress: { current: 0, total: 0, label: '' },
   syncRetryTimer: null,
+  syncLockWaitingHF27H: false,
+  syncElapsedTimerHF27H: null,
+  serverPhotoInflightHF27H: new Map(),
+  serverPhotoRetryHF27H: new Map(),
   offlinePack: { projectId: '', running: false, total: 0, done: 0, failed: 0 },
   offlinePackTimer: null,
   monitoringFocus: '',
@@ -243,6 +247,13 @@ function setupNetworkListeners() {
     toast('Koneksi kembali online. Memeriksa queue...', 'success');
     await runSyncQueue({ source:'online', retryFailed:false });
   });
+  // Reopen from background: Safari/Chrome may suspend timers. Resume durable local queue.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && navigator.onLine) runSyncQueue({ source:'resume', retryFailed:false });
+  });
+  window.addEventListener('pageshow', event => {
+    if (event.persisted && navigator.onLine) runSyncQueue({ source:'resume', retryFailed:false });
+  });
   window.addEventListener('offline', () => {
     updateNetworkUi();
     toast('Offline. Foto tetap disimpan di perangkat.', 'warning');
@@ -252,7 +263,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-actual-map-tap-hf27e');
+    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-load-sync-hf27h');
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -1129,7 +1140,7 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
   });
   document.getElementById('fieldActualCoordBtn')?.addEventListener('click', () => {
     try {
-      setFieldActualPositionHF27EPEMS_(
+      setFieldActualPositionHF27GPEMS_(
         document.getElementById('fieldActualLatInput')?.value,
         document.getElementById('fieldActualLngInput')?.value,
         'MANUAL_COORD'
@@ -1145,7 +1156,7 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
   if (state.selectedSession) {
     await selectSession(state.selectedSession.sessionId, { keepSelection: true });
   } else {
-    // HF27E: AKTUAL is marked by free tap; PLAN is associated explicitly before capture.
+    // HF27G: AKTUAL is marked by free tap; PLAN is associated explicitly before capture.
     // Never auto-select the nearest point before capture.
     renderFieldPointInfoEmpty();
   }
@@ -1376,18 +1387,18 @@ function fieldPlanMapIconHF27BPEMS_(kind) {
     iconSize:[28,28], iconAnchor:[14,14]
   });
 }
-function fieldActualCoordValidHF27EPEMS_(lat,lng) {
+function fieldActualCoordValidHF27GPEMS_(lat,lng) {
   return lat !== '' && lng !== '' && lat != null && lng != null &&
     Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) &&
     Math.abs(Number(lat)) <= 90 && Math.abs(Number(lng)) <= 180;
 }
-function fieldActualDistanceHF27EPEMS_() {
+function fieldActualDistanceHF27GPEMS_() {
   const a = state.fieldActualPosition, p = state.selectedSession;
-  return a && p && fieldActualCoordValidHF27EPEMS_(p.latPlan,p.longPlan)
+  return a && p && fieldActualCoordValidHF27GPEMS_(p.latPlan,p.longPlan)
     ? haversine(a.latitude,a.longitude,Number(p.latPlan),Number(p.longPlan)) : null;
 }
-function setFieldActualPositionHF27EPEMS_(lat,lng,source='MAP_TAP') {
-  if (!fieldActualCoordValidHF27EPEMS_(lat,lng)) throw new Error('Koordinat aktual tidak valid.');
+function setFieldActualPositionHF27GPEMS_(lat,lng,source='MAP_TAP') {
+  if (!fieldActualCoordValidHF27GPEMS_(lat,lng)) throw new Error('Koordinat aktual tidak valid.');
   const latitude=Number(lat), longitude=Number(lng);
   const previous=state.fieldActualPosition;
   // Never silently relocate a draft that already owns photographs.
@@ -1397,7 +1408,7 @@ function setFieldActualPositionHF27EPEMS_(lat,lng,source='MAP_TAP') {
     throw new Error('Draft ini sudah memiliki foto. Selesaikan draft sebelum memindahkan lokasi AKTUAL.');
   state.fieldActualPosition={latitude,longitude,source,actualToPlanM:null,selectedAt:new Date().toISOString()};
   state.fieldActualMapProject=state.selectedProjectId;
-  state.fieldActualPosition.actualToPlanM=fieldActualDistanceHF27EPEMS_();
+  state.fieldActualPosition.actualToPlanM=fieldActualDistanceHF27GPEMS_();
   const a=document.getElementById('fieldActualLatInput'), b=document.getElementById('fieldActualLngInput');
   if(a)a.value=latitude.toFixed(7);
   if(b)b.value=longitude.toFixed(7);
@@ -1425,7 +1436,7 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
     return;
   }
   if(fallback)fallback.classList.add('hidden');
-  const sessions=(state.workspace?.pointSessions||[]).filter(s=>fieldActualCoordValidHF27EPEMS_(s.latPlan,s.longPlan));
+  const sessions=(state.workspace?.pointSessions||[]).filter(s=>fieldActualCoordValidHF27GPEMS_(s.latPlan,s.longPlan));
   const gps=state.fieldGps;
   const actual=state.fieldActualMapProject===state.selectedProjectId ? state.fieldActualPosition : null;
   const reuse=state.fieldPlanMap && state.fieldMapScope===state.selectedProjectId &&
@@ -1434,7 +1445,7 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
     destroyFieldPlanMapHF27BPEMS_();
     const focus=actual || state.selectedSession && {latitude:Number(state.selectedSession.latPlan),longitude:Number(state.selectedSession.longPlan)} ||
       sessions[0] && {latitude:Number(sessions[0].latPlan),longitude:Number(sessions[0].longPlan)} || gps;
-    if(!focus || !fieldActualCoordValidHF27EPEMS_(focus.latitude,focus.longitude)) {
+    if(!focus || !fieldActualCoordValidHF27GPEMS_(focus.latitude,focus.longitude)) {
       node.innerHTML='<div class="field-map-offline">Tidak ada PLAN atau GPS valid. Pastikan project sudah dimuat.</div>';return;
     }
     const map=window.L.map(node,{zoomControl:true,attributionControl:true,tap:true}).setView([Number(focus.latitude),Number(focus.longitude)],18);
@@ -1444,7 +1455,7 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
       {maxZoom:20,attribution:'Tiles © Esri'}).addTo(map);
     // Free tap works BEFORE associating any PLAN point.
     map.on('click',e=>{
-      try{setFieldActualPositionHF27EPEMS_(e.latlng.lat,e.latlng.lng,'MAP_TAP');}
+      try{setFieldActualPositionHF27GPEMS_(e.latlng.lat,e.latlng.lng,'MAP_TAP');}
       catch(err){toast(humanError(err),'danger',5000);}
     });
     sessions.forEach(session=>{
@@ -1456,7 +1467,7 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
       marker.bindTooltip(`${escapeHtml(session.anchorLabel||session.sessionId)} · ${escapeHtml(humanPointRolePEMS_(session.anchorRole))}`,
         {direction:'top',offset:[0,-8]});
       marker.on('click',async()=>{
-        // HF27E: PLAN is only a reference. Never overwrite the free-tap AKTUAL marker.
+        // HF27G: PLAN is only a reference. Never overwrite the free-tap AKTUAL marker.
         try{
           await selectSession(session.sessionId);
           const picker=document.getElementById('fieldPointSelect');
@@ -1476,17 +1487,17 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
     try{marker.setIcon(fieldPlanMapIconHF27BPEMS_(state.selectedSession?.sessionId===id?'selected':'plan'));}catch(_){}
   });
   if(state.fieldPlanMapActualLayer){try{map.removeLayer(state.fieldPlanMapActualLayer);}catch(_){}state.fieldPlanMapActualLayer=null;}
-  if(actual && fieldActualCoordValidHF27EPEMS_(actual.latitude,actual.longitude)){
+  if(actual && fieldActualCoordValidHF27GPEMS_(actual.latitude,actual.longitude)){
     state.fieldPlanMapActualLayer=window.L.marker([actual.latitude,actual.longitude],{
       icon:fieldPlanMapIconHF27BPEMS_('actual'),title:'AKTUAL — dipilih WASPANG',draggable:true,bubblingMouseEvents:false
     }).addTo(map).bindTooltip('AKTUAL — geser untuk koreksi',{direction:'top',offset:[0,-8]});
     state.fieldPlanMapActualLayer.on('dragend',ev=>{const loc=ev.target.getLatLng();
-      try{setFieldActualPositionHF27EPEMS_(loc.lat,loc.lng,'MAP_TAP');}
+      try{setFieldActualPositionHF27GPEMS_(loc.lat,loc.lng,'MAP_TAP');}
       catch(err){toast(humanError(err),'danger',5000);}
     });
   }
   if(state.fieldPlanMapGpsLayer){try{map.removeLayer(state.fieldPlanMapGpsLayer);}catch(_){}state.fieldPlanMapGpsLayer=null;}
-  if(gps && fieldActualCoordValidHF27EPEMS_(gps.latitude,gps.longitude)){
+  if(gps && fieldActualCoordValidHF27GPEMS_(gps.latitude,gps.longitude)){
     const group=window.L.layerGroup();
     window.L.circle([gps.latitude,gps.longitude],{
       radius:Math.max(1,Number(gps.accuracy)||1),color:'#2563eb',weight:1,
@@ -1506,7 +1517,7 @@ function renderFieldActualInfoHF27BPEMS_() {
     node.innerHTML='<b>Belum ada posisi AKTUAL.</b> Ketuk bebas pada peta untuk menandai lokasi material terpasang. Tidak perlu pilih PLAN dulu.';
     return;
   }
-  const d=fieldActualDistanceHF27EPEMS_();
+  const d=fieldActualDistanceHF27GPEMS_();
   actual.actualToPlanM=d;
   node.className='field-actual-info success';
   node.innerHTML=`<b>✓ Posisi AKTUAL dipilih</b><br>${formatCoord(actual.latitude)}, ${formatCoord(actual.longitude)}`+
@@ -1634,9 +1645,9 @@ async function selectSession(sessionId, options = {}) {
 
   state.selectedSession =
     (state.workspace?.pointSessions || []).find(s => s.sessionId === sessionId) || null;
-  // HF27E: keep the independent AKTUAL marker when associating/changing PLAN.
+  // HF27G: keep the independent AKTUAL marker when associating/changing PLAN.
   if (state.fieldActualPosition && state.fieldActualMapProject===state.selectedProjectId)
-    state.fieldActualPosition.actualToPlanM = fieldActualDistanceHF27EPEMS_();
+    state.fieldActualPosition.actualToPlanM = fieldActualDistanceHF27GPEMS_();
 
   if (!state.selectedSession) {
     renderFieldPointInfoEmpty();
@@ -2134,6 +2145,39 @@ async function getServerPhotosForEvidence(evidenceId) {
   }
 }
 
+// HF27H: prefetch only once per evidence; redraw only when the same material is still selected.
+function primeCaptureServerPhotosHF27H_(evidenceId, projectId, sessionId, projectMaterialId) {
+  if (!navigator.onLine || state.serverPhotoCache.has(evidenceId) || state.serverPhotoInflightHF27H.has(evidenceId)) return;
+  if (Date.now() < Number(state.serverPhotoRetryHF27H.get(evidenceId) || 0)) return;
+  const job = (async () => {
+    try {
+      const photos = await getServerPhotosForEvidence(evidenceId);
+      if (!state.serverPhotoCache.has(evidenceId)) {
+        // Empty/error result is retried later; avoid hammering a slow connection.
+        state.serverPhotoRetryHF27H.set(evidenceId, Date.now() + 45000);
+        return;
+      }
+      if (state.currentPage !== 'pekerjaan' || state.selectedProjectId !== projectId ||
+          state.selectedSession?.sessionId !== sessionId ||
+          state.selectedRequirement?.projectMaterialId !== projectMaterialId) return;
+      // Never wipe a typed note or quantity when the background metadata arrives.
+      const qty = document.getElementById('qtyRealInput');
+      const note = document.getElementById('fieldNoteInput');
+      const oldQty = qty?.value, oldNote = note?.value;
+      await renderCapturePanel();
+      if (qty && document.getElementById('qtyRealInput') && oldQty !== undefined)
+        document.getElementById('qtyRealInput').value = oldQty;
+      if (note && document.getElementById('fieldNoteInput') && oldNote !== undefined)
+        document.getElementById('fieldNoteInput').value = oldNote;
+    } catch (err) {
+      state.serverPhotoRetryHF27H.set(evidenceId, Date.now() + 45000);
+      console.warn('HF27H photo prefetch', err);
+    }
+  })();
+  state.serverPhotoInflightHF27H.set(evidenceId, job);
+  job.finally(() => state.serverPhotoInflightHF27H.delete(evidenceId));
+}
+
 function serverPhotoCardHtml(photo, index, locked, evidenceId) {
   const key = `${evidenceId}|${photo.photoId}`;
   return `
@@ -2281,12 +2325,53 @@ async function deleteServerCapturePhoto(evidenceId, photoId) {
   }
 }
 
+function isAdditionalPhotoDraftHF27GPEMS_(draft) {
+  return !!draft && (
+    draft.addPhotoMode === true ||
+    String(draft.workflow || '').toUpperCase() === 'ADD_PHOTO'
+  );
+}
+
+function canStartAdditionalPhotoHF27GPEMS_(r, draft) {
+  const workflow = String(r?.workflowStatus || r?.verifyStatus || '').toUpperCase();
+  const evidenceId = String(r?.evidenceItemId || draft?.serverEvidenceId || '').trim();
+  return workflow === 'VERIFIED' && !!evidenceId && hasPermission('evidence.capture');
+}
+
+function beginAdditionalPhotoCaptureHF27GPEMS_() {
+  if (!state.selectedRequirement || !state.selectedSession) return;
+  if (!state.fieldActualPosition) {
+    toast('Tandai posisi aktual material di peta sebelum menambah foto.', 'warning', 5000);
+    return;
+  }
+  const r = state.selectedRequirement;
+  const baseEvidenceId = String(r.evidenceItemId || '').trim();
+  if (!baseEvidenceId) {
+    toast('Evidence VERIFIED belum memiliki Evidence ID server.', 'warning', 5000);
+    return;
+  }
+  state.cameraContext = {
+    qtyReal: document.getElementById('qtyRealInput')?.value || r.qtyReal || '',
+    fieldNote: document.getElementById('fieldNoteInput')?.value || r.fieldNote || '',
+    actualLatitude: state.fieldActualPosition?.latitude,
+    actualLongitude: state.fieldActualPosition?.longitude,
+    actualPositionSource: state.fieldActualPosition?.source || 'MAP_TAP',
+    actualToPlanM: state.fieldActualPosition?.actualToPlanM,
+    addPhotoMode: true,
+    serverEvidenceId: baseEvidenceId
+  };
+  el.cameraInput.value = '';
+  el.cameraInput.click();
+}
+
 async function renderCapturePanel() {
   const panel = document.getElementById('capturePanel');
   if (!panel || !state.selectedRequirement || !state.selectedSession) return;
   await refreshLocalState();
   const r = state.selectedRequirement;
   const draft = findCurrentDraft();
+  const addPhotoMode = isAdditionalPhotoDraftHF27GPEMS_(draft);
+  const verifiedBase = canStartAdditionalPhotoHF27GPEMS_(r, draft);
 
   const localPhotos = draft
     ? state.draftsPhotos?.filter?.(
@@ -2294,8 +2379,11 @@ async function renderCapturePanel() {
       ) || []
     : [];
 
-  const actualLocal =
-    await photoCountForDraft(draft?.draftId);
+  const actualLocal = {
+    total: localPhotos.length,
+    unsynced: localPhotos.filter(p => p.state !== 'SYNCED').length,
+    synced: localPhotos.filter(p => p.state === 'SYNCED').length
+  };
 
   // IMPORTANT:
   // A revision draft (V2+) must be isolated from its parent V1.
@@ -2307,12 +2395,11 @@ async function renderCapturePanel() {
       ? String(draft.serverEvidenceId || '').trim()
       : String(r.evidenceItemId || '').trim();
 
-  const serverPhotos =
-    serverEvidenceId
-      ? await getServerPhotosForEvidence(
-          serverEvidenceId
-        )
-      : [];
+  // HF27H: paint the capture screen from local/cache data immediately.
+  // Server thumbnails arrive afterwards, without blocking GPS/camera controls.
+  const serverPhotos = serverEvidenceId
+    ? (state.serverPhotoCache.get(serverEvidenceId) || [])
+    : [];
 
   const localServerIds = new Set(
     localPhotos
@@ -2362,7 +2449,7 @@ async function renderCapturePanel() {
 
   const locked =
     ['SUBMITTED','VERIFIED','REJECTED']
-      .includes(activeWorkflow);
+      .includes(activeWorkflow) && !addPhotoMode;
 
   const activeStatusLabel =
     friendlyWorkflowLabel(activeWorkflow || (complete ? 'SYNCED' : 'DRAFT_LOCAL'));
@@ -2386,6 +2473,7 @@ async function renderCapturePanel() {
       </div>
     </div>
 
+    <div id="captureQueueHF27H" class="capture-queue-hf27h" role="status" aria-live="polite"></div>
     <div id="captureProcess" class="capture-process ${state.captureStage.active ? '' : 'hidden'}">
       <div class="capture-process-head">
         <span id="captureStageLabel">${escapeHtml(state.captureStage.label || 'Memproses...')}</span>
@@ -2402,6 +2490,13 @@ async function renderCapturePanel() {
         Parent: ${escapeHtml(draft.parentEvidenceId)}<br>
         Alasan: ${escapeHtml(draft.revisionReason || 'Perlu perbaikan evidence')}<br>
         <span class="tiny">Foto versi sebelumnya tetap tersimpan sebagai histori dan tidak ikut dihitung pada revisi ini.</span>
+      </div>
+    ` : ''}
+
+    ${addPhotoMode ? `
+      <div class="status-box warning">
+        <b>MODE TAMBAH FOTO</b><br>
+        Foto lama tetap tersimpan. Foto baru akan masuk <b>Menunggu Verifikasi Foto</b> dan tidak mengubah status VERIFIED evidence utama.
       </div>
     ` : ''}
 
@@ -2443,19 +2538,21 @@ async function renderCapturePanel() {
       </div>
     ` : (
       serverCount > 0
-        ? `<div class="status-box warning"><b>Foto sudah tersimpan di server (${serverCount}/${target})</b>, tetapi metadata preview belum berhasil dimuat. Gunakan Sync/refresh saat online.</div>`
+        ? `<div class="status-box neutral"><b>Foto server ${serverCount}/${target}</b> · ${navigator.onLine ? 'Memuat preview di belakang layar; kamera tetap bisa dipakai.' : 'Metadata belum dimuat karena offline.'}</div>`
         : ''
     )}
 
     <div class="toolbar" style="margin-top:12px">
-      <button id="captureBtn" class="btn primary" ${!hasPermission('evidence.capture') || locked || !state.fieldActualPosition || (target > 0 && totalKnown >= target) ? 'disabled' : ''}>Ambil Foto + GPS</button>
+      ${verifiedBase && !addPhotoMode ? `<button id="addPhotoBtn" class="btn primary" ${!state.fieldActualPosition ? 'disabled' : ''}>+ Tambah Foto</button>` : ''}
+      <button id="captureBtn" class="btn primary" ${!hasPermission('evidence.capture') || locked || !state.fieldActualPosition || (!addPhotoMode && target > 0 && totalKnown >= target) ? 'disabled' : ''}>${addPhotoMode ? 'Ambil Foto Tambahan + GPS' : 'Ambil Foto + GPS'}</button>
       ${!state.fieldActualPosition ? '<div class="tiny warning-text">Tandai posisi aktual material di peta untuk mengaktifkan kamera.</div>' : ''}
-      <button id="syncNowBtn" class="btn secondary" ${!navigator.onLine || locked ? 'disabled' : ''}>Sync Queue</button>
-      <button id="submitEvidenceBtn" class="btn success" ${!draft?.serverEvidenceId || !complete || locked ? 'disabled' : ''}>Submit Verifikasi</button>
+      <button id="syncNowBtn" class="btn secondary" ${!navigator.onLine || (locked && !addPhotoMode) ? 'disabled' : ''}>Sync Queue</button>
+      <button id="submitEvidenceBtn" class="btn success" ${addPhotoMode || !draft?.serverEvidenceId || !complete || locked ? 'disabled' : ''}>Submit Verifikasi</button>
     </div>
-    <div id="captureHint" class="small muted">${locked ? 'Evidence sudah SUBMITTED/terkunci. Perubahan berikutnya harus melalui Revision/Reopen.' : (navigator.onLine ? 'Online: foto tetap disimpan lokal dahulu, lalu auto-sync.' : 'Offline: foto aman di IndexedDB dan masuk queue.')}</div>
+    <div id="captureHint" class="small muted">${addPhotoMode ? 'Foto tambahan disimpan lokal dulu lalu auto-sync. Evidence utama tetap VERIFIED.' : (locked ? 'Evidence sudah terkunci. Gunakan + Tambah Foto untuk menambah foto tanpa menimpa foto lama.' : (navigator.onLine ? 'Online: foto tetap disimpan lokal dahulu, lalu auto-sync.' : 'Offline: foto aman di IndexedDB dan masuk queue.'))}</div>
   `;
 
+  document.getElementById('addPhotoBtn')?.addEventListener('click', beginAdditionalPhotoCaptureHF27GPEMS_);
   document.getElementById('captureBtn')?.addEventListener('click', () => beginCapture());
   document.getElementById('syncNowBtn')?.addEventListener('click', runSyncQueue);
   document.getElementById('submitEvidenceBtn')?.addEventListener('click', submitCurrentEvidence);
@@ -2478,6 +2575,10 @@ async function renderCapturePanel() {
   });
 
   hydrateServerPhotoPreviews(panel).catch(() => {});
+  updateCaptureSyncStatusHF27H_();
+  if (serverEvidenceId && !state.serverPhotoCache.has(serverEvidenceId)) {
+    primeCaptureServerPhotosHF27H_(serverEvidenceId, state.selectedProjectId, state.selectedSession?.sessionId, r.projectMaterialId);
+  }
 
   panel.querySelectorAll('[data-delete-server-photo]').forEach(btn => {
     btn.addEventListener('click', () =>
@@ -2661,13 +2762,17 @@ async function deleteCapturePhoto(photoLocalId) {
 function beginCapture() {
   if (!state.selectedRequirement || !state.selectedSession) return;
   if (!state.fieldActualPosition) { toast('Tandai posisi aktual material di peta sebelum mengambil foto.', 'warning', 5000); return; }
+  const activeDraft = findCurrentDraft();
+  const addPhotoMode = isAdditionalPhotoDraftHF27GPEMS_(activeDraft);
   state.cameraContext = {
     qtyReal: document.getElementById('qtyRealInput')?.value || '',
     fieldNote: document.getElementById('fieldNoteInput')?.value || '',
     actualLatitude: state.fieldActualPosition?.latitude,
     actualLongitude: state.fieldActualPosition?.longitude,
     actualPositionSource: state.fieldActualPosition?.source || 'MAP_TAP',
-    actualToPlanM: state.fieldActualPosition?.actualToPlanM
+    actualToPlanM: state.fieldActualPosition?.actualToPlanM,
+    addPhotoMode: addPhotoMode,
+    serverEvidenceId: addPhotoMode ? String(activeDraft?.serverEvidenceId || state.selectedRequirement?.evidenceItemId || '') : ''
   };
   el.cameraInput.value = '';
   el.cameraInput.click();
@@ -2805,6 +2910,8 @@ async function onCameraFileSelected(event) {
         draft.draftId,
       state:
         'WAITING',
+      phase: 'TERSIMPAN_LOKAL',
+      fileBytes: optimized.blob.size,
       attempts:
         0,
       lastError:
@@ -2831,7 +2938,8 @@ async function onCameraFileSelected(event) {
       false
     );
 
-    await renderCapturePanel();
+    // Camera is released after IndexedDB writes. Preview/server calls do not block it.
+    renderCapturePanel().catch(err => console.warn('HF27H capture preview:', err));
 
     toast(
       `Foto tersimpan lokal. GPS ${Math.round(gps.accuracy)} m${
@@ -2876,6 +2984,50 @@ async function onCameraFileSelected(event) {
 
 async function getOrCreateCurrentDraft(ctx) {
   const existing = findCurrentDraft();
+
+  if (ctx?.addPhotoMode) {
+    if (existing && isAdditionalPhotoDraftHF27GPEMS_(existing)) {
+      existing.actualLatitude = ctx.actualLatitude;
+      existing.actualLongitude = ctx.actualLongitude;
+      existing.actualPositionSource = ctx.actualPositionSource || 'MAP_TAP';
+      existing.actualToPlanM = ctx.actualToPlanM;
+      existing.updatedAt = new Date().toISOString();
+      await idbPut(STORE_DRAFTS, existing);
+      return existing;
+    }
+    const r = state.selectedRequirement;
+    const baseEvidenceId = String(ctx.serverEvidenceId || r?.evidenceItemId || '').trim();
+    if (!baseEvidenceId) throw new Error('Evidence VERIFIED tujuan Tambah Foto tidak ditemukan.');
+    const draft = {
+      draftId: `LPA-${crypto.randomUUID?.() || uid()}`,
+      projectId: state.selectedProjectId,
+      sessionId: state.selectedSession.sessionId,
+      anchorLabel: state.selectedSession.anchorLabel,
+      pointId: state.selectedSession.anchorPointId || '',
+      planMatchRef: state.selectedSession.anchorLabel || '',
+      projectMaterialId: r.projectMaterialId,
+      materialId: r.materialId,
+      designator: r.designator,
+      materialName: r.materialName,
+      category: r.category || '', unit: r.unit || '', source: r.source || '',
+      mappingStatus: r.mappingStatus || '', mappingProfile: state.requirements?.mappingProfile || '',
+      requirementCode: r.requirementCode,
+      requiredPhotoCount: Math.max(0, Number(r.evidenceRequired || 0)),
+      qtyPlan: r.qtyPlan, qtyReal: ctx.qtyReal, fieldNote: ctx.fieldNote,
+      actualLatitude: ctx.actualLatitude, actualLongitude: ctx.actualLongitude,
+      actualPositionSource: ctx.actualPositionSource || 'MAP_TAP', actualToPlanM: ctx.actualToPlanM,
+      serverEvidenceId: baseEvidenceId, serverPhotoCount: Number(r.photoCount || 0),
+      workflow: 'ADD_PHOTO', addPhotoMode: true, baseWorkflow: 'VERIFIED',
+      parentEvidenceId: '', revisionReason: '',
+      assignmentId: assignmentForCurrentPoint()?.assignmentId || '',
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    await idbPut(STORE_DRAFTS, draft);
+    state.activeDraftId = draft.draftId;
+    localStorage.setItem(ACTIVE_DRAFT_KEY, draft.draftId);
+    await refreshLocalState();
+    return draft;
+  }
   if (
     existing &&
     ![
@@ -3165,11 +3317,16 @@ function queueIsRetryableErrorPEMS_(err) {
 }
 
 function scheduleQueueRetryPEMS_(delayMs) {
+  const delay = Math.max(750, Number(delayMs || 30000));
+  const due = Date.now() + delay;
+  if (state.syncRetryTimer && state.syncRetryDueHF27H && state.syncRetryDueHF27H <= due) return;
   if (state.syncRetryTimer) clearTimeout(state.syncRetryTimer);
+  state.syncRetryDueHF27H = due;
   state.syncRetryTimer = setTimeout(() => {
     state.syncRetryTimer = null;
+    state.syncRetryDueHF27H = 0;
     if (navigator.onLine && sessionIsUsable()) runSyncQueue({ source:'retry', retryFailed:false });
-  }, Math.max(10_000, Number(delayMs || 30_000)));
+  }, delay);
 }
 
 function updateSyncUiPEMS_() {
@@ -3182,6 +3339,56 @@ function updateSyncUiPEMS_() {
   }
   btn.disabled = !navigator.onLine;
   btn.textContent = !navigator.onLine ? 'Menunggu Koneksi' : (sessionIsUsable() ? 'Coba Sinkronkan Lagi' : 'Login & Sinkronkan');
+}
+
+function updateCaptureSyncStatusHF27H_() {
+  const el = document.getElementById('captureQueueHF27H');
+  if (!el) return;
+  const draft = findCurrentDraft();
+  if (!draft) { el.classList.add('hidden'); return; }
+  const items = (state.queue || []).filter(q => q.draftId === draft.draftId);
+  if (!items.length) { el.classList.add('hidden'); return; }
+  const sending = items.find(q => q.state === 'SYNCING');
+  const waiting = items.filter(q => q.state === 'WAITING').length;
+  const failed = items.filter(q => q.state === 'FAILED').length;
+  const item = sending || items.find(q => q.state === 'WAITING') || items[0];
+  let label = 'Foto aman di perangkat';
+  if (sending) {
+    const seconds = Math.max(0, Math.round((Date.now() - new Date(sending.startedAt || sending.updatedAt || Date.now()).getTime())/1000));
+    label = `${sending.phase === 'MENYIAPKAN' ? 'Menyiapkan foto' : 'Mengirim foto ke server'} · ${seconds} dtk`;
+  } else if (failed && !waiting) label = 'Butuh tindakan: cek error dan coba ulang';
+  else if (!navigator.onLine) label = 'Offline · otomatis lanjut saat internet kembali';
+  else if (!sessionIsUsable()) label = 'Menunggu login untuk sinkronisasi';
+  else if (item?.nextAttemptAt && Date.parse(item.nextAttemptAt) > Date.now()) {
+    const delay = Math.max(1, Math.ceil((Date.parse(item.nextAttemptAt)-Date.now())/1000));
+    label = `Menunggu retry · sekitar ${delay} dtk`;
+  } else label = 'Foto dalam antrean upload';
+  el.classList.remove('hidden');
+  el.classList.toggle('uploading', !!sending);
+  const counters = `${sending ? 1 : 0} mengirim · ${waiting} menunggu${failed ? ` · ${failed} gagal` : ''}`;
+  el.textContent = `${label}  |  ${counters}`;
+}
+
+function touchQueueStatusHF27H_(item) {
+  const idx = (state.queue || []).findIndex(q => q.queueId === item.queueId);
+  if (idx >= 0) state.queue[idx] = {...item};
+  else state.queue.push({...item});
+  updateQueueBadge();
+}
+
+function planNextQueueWakeHF27H_(all) {
+  if (!navigator.onLine || !sessionIsUsable()) return;
+  const now = Date.now();
+  const due = (all || []).filter(q => q.state === 'WAITING').map(q => {
+    const t = Date.parse(q.nextAttemptAt || '');
+    return Number.isFinite(t) ? t : now;
+  });
+  // If another tab or a past page held an interrupted sync, recover it after TTL.
+  (all || []).filter(q => q.state === 'SYNCING').forEach(q => {
+    const age = Date.parse(q.updatedAt || q.createdAt || '');
+    if (Number.isFinite(age)) due.push(age + 90000);
+  });
+  if (due.length) scheduleQueueRetryPEMS_(Math.max(900, Math.min(...due) - now + 250));
 }
 
 async function retryDraftFailedPEMS_(draftId) {
@@ -3203,6 +3410,21 @@ async function retryDraftFailedPEMS_(draftId) {
 }
 
 async function runSyncQueue(options = {}) {
+  if (state.syncing || state.syncLockWaitingHF27H) return;
+  if (navigator.locks?.request && navigator.onLine && sessionIsUsable()) {
+    state.syncLockWaitingHF27H = true;
+    try {
+      await navigator.locks.request('PEMS_V15_PHOTO_QUEUE_UPLOAD', {mode:'exclusive', ifAvailable:true}, async lock => {
+        if (!lock) return; // Other PEMS tab is the uploader. This tab retains all photos.
+        await runSyncQueueOwnedHF27H_(options);
+      });
+    } finally { state.syncLockWaitingHF27H = false; }
+  } else {
+    await runSyncQueueOwnedHF27H_(options);
+  }
+}
+
+async function runSyncQueueOwnedHF27H_(options = {}) {
   const manual = String(options.source || '').startsWith('manual');
   const retryFailed = options.retryFailed === true;
 
@@ -3237,13 +3459,15 @@ async function runSyncQueue(options = {}) {
     .concat(failed.sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))));
 
   if (!items.length) {
-    if (manual) toast('Tidak ada foto yang perlu dikirim sekarang.', 'success', 3000);
+    planNextQueueWakeHF27H_(all); // Honor persisted backoff after app reload.
+    if (manual) toast(all.some(q=>q.state==='WAITING') ? 'Foto aman, menunggu jadwal retry.' : 'Tidak ada foto yang perlu dikirim sekarang.', 'neutral', 3000);
     updateSyncUiPEMS_();
     return;
   }
 
   state.syncing = true;
   state.syncProgress = { current:0, total:items.length, label:'' };
+  state.syncElapsedTimerHF27H = setInterval(updateCaptureSyncStatusHF27H_, 1000);
   updateQueueBadge();
   updateSyncUiPEMS_();
 
@@ -3257,13 +3481,17 @@ async function runSyncQueue(options = {}) {
       updateSyncUiPEMS_();
       try {
         item.state = 'SYNCING';
+        item.phase = 'MENYIAPKAN';
+        item.startedAt = new Date().toISOString();
         item.attempts = Number(item.attempts || 0) + 1;
         item.updatedAt = new Date().toISOString();
         await idbPut(STORE_QUEUE, item);
-        updateQueueBadge();
+        touchQueueStatusHF27H_(item);
 
         await syncOneQueueItem(item);
         await idbDelete(STORE_QUEUE, item.queueId);
+        state.queue = state.queue.filter(q => q.queueId !== item.queueId);
+        updateQueueBadge();
         successCount++;
       } catch (err) {
         const msg = humanError(err);
@@ -3274,6 +3502,7 @@ async function runSyncQueue(options = {}) {
           item.state = 'WAITING';
           item.nextAttemptAt = '';
           await idbPut(STORE_QUEUE, item);
+          touchQueueStatusHF27H_(item);
           clearSession();
           toast('Session habis. Queue lokal aman; login online sekali untuk lanjut sync.', 'warning', 6500);
           showLogin('Session habis. Login kembali; queue lokal tidak hilang.');
@@ -3281,10 +3510,13 @@ async function runSyncQueue(options = {}) {
         }
 
         if (queueIsRetryableErrorPEMS_(err)) {
-          const delay = queueRetryDelayMsPEMS_(item.attempts);
+          const uncertain = err?.networkError; // Server may have completed after gateway timeout.
+          const delay = Math.max(queueRetryDelayMsPEMS_(item.attempts), uncertain ? 45000 : 0);
           item.state = 'WAITING';
+          item.phase = uncertain ? 'MEMASTIKAN_STATUS' : 'MENUNGGU_RETRY';
           item.nextAttemptAt = new Date(Date.now()+delay).toISOString();
           await idbPut(STORE_QUEUE, item);
+          touchQueueStatusHF27H_(item);
           stoppedForNetwork = true;
           scheduleQueueRetryPEMS_(delay);
           // If server/network is currently slow, do not burn the rest of the queue.
@@ -3293,16 +3525,21 @@ async function runSyncQueue(options = {}) {
 
         // Permanent validation / permission errors are isolated and NEVER block newer photos.
         item.state = 'FAILED';
+        item.phase = 'PERLU_TINDAKAN';
         item.nextAttemptAt = '';
         await idbPut(STORE_QUEUE, item);
+        touchQueueStatusHF27H_(item);
         console.warn('Queue item failed permanently', item.queueId, err);
         continue;
       }
     }
   } finally {
+    if (state.syncElapsedTimerHF27H) clearInterval(state.syncElapsedTimerHF27H);
+    state.syncElapsedTimerHF27H = null;
     state.syncing = false;
     state.syncProgress = { current:0, total:0, label:'' };
     await refreshLocalState();
+    planNextQueueWakeHF27H_(state.queue);
     updateQueueBadge();
     updateSyncUiPEMS_();
     if (state.currentPage === 'evidence') await renderEvidence();
@@ -3356,9 +3593,14 @@ async function syncOneQueueItem(item) {
     }
   }
   const base64 = await blobToBase64(photo.blob);
+  // Do not show a fake percentage: HTTP JSON upload exposes only pending/completed.
+  item.phase = 'MENGIRIM';
+  item.updatedAt = new Date().toISOString();
+  await idbPut(STORE_QUEUE, item);
+  touchQueueStatusHF27H_(item);
   const result = await api('/evidence/sync-photo', {
     method: 'POST',
-    timeoutMs: 45000,
+    timeoutMs: 65000, // field connection; timed-out uploads are retried with the SAME photoLocalId.
     maxAttempts: 1,
     body: {
       projectId: draft.projectId,
@@ -3397,6 +3639,7 @@ async function syncOneQueueItem(item) {
       parentEvidenceId: draft.parentEvidenceId || '',
       revisionReason: draft.revisionReason || '',
       serverEvidenceId: draft.serverEvidenceId || '',
+      addPhotoMode: !!draft.addPhotoMode,
       requiredPhotoCount: Number(draft.requiredPhotoCount || 1),
       requirementCode: draft.requirementCode || 'MATERIAL',
       pointId: draft.pointId || '',
@@ -3420,7 +3663,8 @@ async function syncOneQueueItem(item) {
   draft.serverEvidenceId = result.evidenceItemId;
   draft.serverPhotoCount = Number(result.photoCount || draft.serverPhotoCount || 0);
   draft.requiredPhotoCount = Number(result.requiredPhotoCount || draft.requiredPhotoCount || 1);
-  draft.workflow = 'SYNCED';
+  draft.workflow = draft.addPhotoMode ? 'ADD_PHOTO' : 'SYNCED';
+  draft.lastPhotoStatus = result.photoStatus || draft.lastPhotoStatus || '';
   draft.updatedAt = new Date().toISOString();
   await idbPut(STORE_DRAFTS, draft);
 
@@ -3428,6 +3672,7 @@ async function syncOneQueueItem(item) {
   photo.serverPhotoId = result.photoId || '';
   photo.serverEvidenceId = result.evidenceItemId || '';
   photo.duplicateHashOf = result.duplicateHashOf || '';
+  photo.photoStatus = result.photoStatus || (draft.addPhotoMode ? 'PENDING_VERIFICATION' : 'DRAFT');
   photo.syncedAt = new Date().toISOString();
   await idbPut(STORE_PHOTOS, photo);
 }
@@ -3468,7 +3713,8 @@ async function reconcileLocalEvidenceStatusesHF24PEMS_(options = {}) {
     const st = map.get(serverId);
     if (!st) continue;
     const serverWorkflow = String(st.workflowStatus || '').toUpperCase();
-    if (serverWorkflow && serverWorkflow !== String(draft.workflow || '').toUpperCase()) {
+    const isAddPhotoDraft = isAdditionalPhotoDraftHF27GPEMS_(draft);
+    if (!isAddPhotoDraft && serverWorkflow && serverWorkflow !== String(draft.workflow || '').toUpperCase()) {
       draft.workflow = serverWorkflow;
       updated++;
     }
@@ -3479,11 +3725,11 @@ async function reconcileLocalEvidenceStatusesHF24PEMS_(options = {}) {
     draft.workflowLabel = st.workflowLabel || draft.workflowLabel || '';
     draft.serverVerifiedAt = st.verifiedAt || draft.serverVerifiedAt || '';
     draft.serverSubmittedAt = st.submittedAt || draft.serverSubmittedAt || '';
-    draft.locked = !!st.locked || workflowIsClosedHF24PEMS_(serverWorkflow);
+    draft.locked = isAddPhotoDraft ? false : (!!st.locked || workflowIsClosedHF24PEMS_(serverWorkflow));
     draft.updatedAt = new Date().toISOString();
     await idbPut(STORE_DRAFTS, draft);
 
-    if (workflowIsClosedHF24PEMS_(serverWorkflow)) {
+    if (!isAddPhotoDraft && workflowIsClosedHF24PEMS_(serverWorkflow)) {
       queue.filter(q => q.draftId === draft.draftId).forEach(q => queueToDelete.push(q.queueId));
     }
   }
@@ -3662,14 +3908,22 @@ async function renderVerification() {
     return;
   }
   try {
-    const data = await api('/verification/queue');
+    const [data, additions] = await Promise.all([
+      api('/verification/queue'),
+      api('/verification/photo-additions')
+    ]);
     state.verificationQueue = data.items || [];
+    state.photoAdditionQueue = additions.items || [];
     el.content.innerHTML = `
-      <div class="toolbar"><span class="badge warning">${state.verificationQueue.length} waiting</span><button id="refreshVerification" class="btn ghost small">Refresh</button></div>
+      <div class="toolbar"><span class="badge warning">${state.verificationQueue.length} evidence waiting</span><span class="badge neutral">${state.photoAdditionQueue.length} foto tambahan</span><button id="refreshVerification" class="btn ghost small">Refresh</button></div>
+      ${state.photoAdditionQueue.length ? `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>Menunggu Verifikasi Foto Tambahan</h2><div class="tiny muted">Evidence utama tetap VERIFIED. Hanya foto tambahan yang diputuskan.</div></div></div><div class="list">${state.photoAdditionQueue.map(photoAdditionCardHF27GHtml_).join('')}</div></div>` : ''}
       <div class="list">${state.verificationQueue.length ? state.verificationQueue.map(verificationCardHtml).join('') : '<div class="empty">Tidak ada evidence menunggu verifikasi.</div>'}</div>
     `;
     document.getElementById('refreshVerification')?.addEventListener('click', renderVerification);
     el.content.querySelectorAll('[data-verify]').forEach(btn => btn.addEventListener('click', () => handleVerificationAction(btn)));
+    el.content.querySelectorAll('[data-photo-addition-decision]').forEach(btn => {
+      btn.addEventListener('click', () => handlePhotoAdditionDecisionHF27GPEMS_(btn));
+    });
     el.content.querySelectorAll('[data-verifier-photo-open]').forEach(btn => {
       btn.addEventListener('click', () =>
         openVerifierPhotoModal(
@@ -3681,6 +3935,47 @@ async function renderVerification() {
     hydrateVerifierPhotoPreviews();
   } catch (err) {
     el.content.innerHTML = `<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;
+  }
+}
+
+function photoAdditionCardHF27GHtml_(item) {
+  const p = item.photo || {};
+  const ev = item.evidence || {};
+  return `<div class="list-item" style="align-items:flex-start">
+    <div style="min-width:0;flex:1">
+      <div class="item-title">${escapeHtml(ev.itemLabel || ev.designator || ev.evidenceId || 'Evidence')}</div>
+      <div class="item-sub">${escapeHtml(ev.evidenceId || '')} • ${escapeHtml(ev.projectId || '')} • Foto ${escapeHtml(String(p.photoNo || '-'))}</div>
+      <div class="tiny muted">GPS ${escapeHtml(formatNumber(p.gpsAccuracy))} m • Ke titik ${escapeHtml(formatNumber(p.distanceToPlanM))} m • ${escapeHtml(formatDate(p.capturedAt))}</div>
+      <button type="button" class="verifier-inline-preview" data-verifier-photo-open="1" data-evidence-id="${escapeAttr(ev.evidenceId || '')}" data-photo-id="${escapeAttr(p.photoId || '')}" aria-label="Lihat foto tambahan">
+        ${p.thumbnailBase64 ? `<img class="verifier-photo-thumb" loading="lazy" src="data:${escapeAttr(p.thumbnailMimeType || 'image/jpeg')};base64,${escapeAttr(p.thumbnailBase64)}" alt="${escapeAttr(p.fileName || p.photoId || 'Foto tambahan')}">` : `<div class="verifier-photo-loading" data-verifier-photo-loading="${escapeAttr(ev.evidenceId || '')}|${escapeAttr(p.photoId || '')}">Memuat preview...</div><img class="hidden" data-verifier-photo-img="${escapeAttr(ev.evidenceId || '')}|${escapeAttr(p.photoId || '')}" alt="Foto tambahan">`}
+      </button>
+      <div class="field" style="margin-top:8px"><label>Catatan Verifier</label><input class="input" data-photo-add-note="${escapeAttr(p.photoId || '')}" placeholder="Opsional; wajib bila ditolak"></div>
+    </div>
+    <div style="display:grid;gap:8px;justify-items:end">
+      <span class="badge warning">PENDING FOTO</span>
+      <button class="btn success small" data-photo-addition-decision="approve" data-photo-id="${escapeAttr(p.photoId || '')}">Approve Foto</button>
+      <button class="btn danger small" data-photo-addition-decision="reject" data-photo-id="${escapeAttr(p.photoId || '')}">Reject Foto</button>
+    </div>
+  </div>`;
+}
+
+async function handlePhotoAdditionDecisionHF27GPEMS_(btn) {
+  const photoId = String(btn.dataset.photoId || '').trim();
+  const decision = String(btn.dataset.photoAdditionDecision || '').trim().toLowerCase();
+  if (!photoId || !['approve','reject'].includes(decision)) return;
+  const note = el.content.querySelector(`[data-photo-add-note="${cssEscape(photoId)}"]`)?.value || '';
+  if (decision === 'reject' && !String(note).trim()) {
+    toast('Catatan wajib untuk Reject Foto.', 'warning', 4500);
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await api(`/verification/photos/${encodeURIComponent(photoId)}/${decision}`, { method:'POST', body:{ note } });
+    toast(decision === 'approve' ? 'Foto tambahan disetujui.' : 'Foto tambahan ditolak. Foto lama tetap aman.', decision === 'approve' ? 'success' : 'warning', 4500);
+    await renderVerification();
+  } catch (err) {
+    toast(humanError(err), 'danger', 6000);
+    btn.disabled = false;
   }
 }
 
@@ -3905,7 +4200,10 @@ async function openVerifierPhotoModal(
       item =>
         String(item.photoId) ===
         String(photoId)
-    );
+    ) ||
+    state.photoAdditionQueue?.find(
+      item => String(item?.photo?.photoId || '') === String(photoId)
+    )?.photo;
 
   try {
     const url =
@@ -5725,6 +6023,12 @@ async function renderOutput() {
         <div class="card compact">
           <h3>KML / KMZ Realisasi</h3>
           <div class="small muted">Generate 3 file dari VERIFIED Material Evidence. Grouping mengikuti material: Tiang, ODP, ODC, Closure, Slack, Aksesoris/Helical/Corong, Riser, Splicing, dst.</div>
+          <label for="outputKmlPhotoSelection" style="display:block;margin-top:10px">Foto dalam KML/KMZ</label>
+          <select id="outputKmlPhotoSelection" class="input" style="margin-top:4px">
+            <option value="PRIMARY">Standar — foto tambahan terbaru yang sudah APPROVED</option>
+            <option value="ALL_VERIFIED">Arsip — semua foto yang sudah VERIFIED</option>
+          </select>
+          <div class="small muted" style="margin-top:5px">Foto pending/rejected tidak masuk kedua pilihan. Word/PDF selalu memakai pilihan standar.</div>
           <button id="generateKmlKmzBtn" class="btn primary full" style="margin-top:12px" type="button" disabled>Generate 3 Output KML/KMZ</button>
         </div>
         <div class="card compact">
@@ -5761,7 +6065,7 @@ async function renderOutput() {
         <div id="outputFilesList" class="small muted" style="margin-top:10px">Belum dibaca.</div>
       </div>
 
-      <div class="status-box neutral" style="margin-top:14px"><b>Rule:</b> satu Point Session boleh punya beberapa material. Generator membaca latest <b>VERIFIED Material Evidence</b>; setiap material menjadi placemark di folder kategorinya. KML/KMZ PHOTO membawa foto tertanam, KML NONPHOTO tanpa foto. Akses semua file KML/KMZ/Word/PDF disinkronkan untuk user output PEMS dan tidak dibuat public.</div>
+      <div class="status-box neutral" style="margin-top:14px"><b>Rule HF27G:</b> setelah Tambah Foto disetujui, foto terbaru menjadi utama Word/PDF/KML standar. Foto lama tersimpan sebagai arsip. Foto pending/rejected tidak ikut generator. Satu Point Session boleh punya beberapa material. Generator membaca latest <b>VERIFIED Material Evidence</b>; setiap material menjadi placemark di folder kategorinya. KML/KMZ PHOTO membawa foto tertanam, KML NONPHOTO tanpa foto. Akses semua file KML/KMZ/Word/PDF disinkronkan untuk user output PEMS dan tidak dibuat public.</div>
     </div>`;
 
   document.getElementById('outputReportModeSelect')?.addEventListener('change', () => {
@@ -6011,14 +6315,16 @@ async function generateOutputKmlKmzPEMS_() {
     toast('Belum ada VERIFIED evidence dengan koordinat valid.', 'warning', 6000);
     return;
   }
-  if (!window.confirm(`Generate ${mode} 3 output (KMZ + PHOTO, KML + PHOTO, KML NONPHOTO) dari ${Number(status.eligiblePointCount||0)} VERIFIED material evidence?`)) return;
+  const photoSelection = String(document.getElementById('outputKmlPhotoSelection')?.value || 'PRIMARY');
+  const photoLabel = photoSelection === 'ALL_VERIFIED' ? 'ARSIP SEMUA FOTO VERIFIED' : 'FOTO UTAMA TERBARU APPROVED';
+  if (!window.confirm(`Generate ${mode} 3 output (KMZ + PHOTO, KML + PHOTO, KML NONPHOTO) dari ${Number(status.eligiblePointCount||0)} VERIFIED material evidence dengan pilihan ${photoLabel}?`)) return;
 
   state.outputGenerating = true;
   try {
     setButtonLoadingPEMS_(btn, true, 'Generating 3 output...');
     const data = await api(`/outputs/projects/${encodeURIComponent(projectId)}/kml-kmz`, {
       method:'POST',
-      body:{ mode, note:'Output Center R13D Material Evidence Triple Output' },
+      body:{ mode, photoSelection, note:'Output Center HF27G Photo Policy' },
       timeoutMs:120000,
       maxAttempts:1
     });
@@ -7121,14 +7427,10 @@ async function optimizePhoto(file) {
       5.5
     );
 
-  const targetMb =
-    Math.min(
-      hardMaxMb,
-      configNumber(
-        'PHOTO_UPLOAD_TARGET_MB',
-        1.8
-      )
-    );
+  const verySlow = ['slow-2g','2g'].includes(String(navigator.connection?.effectiveType || '').toLowerCase());
+  const targetMb = Math.min(hardMaxMb, verySlow
+    ? configNumber('PHOTO_UPLOAD_SLOW_MB', 1.4)
+    : configNumber('PHOTO_UPLOAD_TARGET_MB', 1.8));
 
   const maxBytes =
     targetMb *
@@ -7200,9 +7502,13 @@ function getDeviceId() {
 }
 
 async function refreshLocalState() {
-  state.drafts = await idbGetAll(STORE_DRAFTS);
-  state.queue = await idbGetAll(STORE_QUEUE);
-  state.draftsPhotos = await idbGetAll(STORE_PHOTOS);
+  // Independent IndexedDB reads in parallel: less waiting on slow mobile storage.
+  const [drafts, queue, photos] = await Promise.all([
+    idbGetAll(STORE_DRAFTS), idbGetAll(STORE_QUEUE), idbGetAll(STORE_PHOTOS)
+  ]);
+  state.drafts = drafts;
+  state.queue = queue;
+  state.draftsPhotos = photos;
   updateQueueBadge();
 }
 
@@ -7223,6 +7529,7 @@ function updateQueueBadge() {
   const failed = (state.queue || []).filter(q => q.state === 'FAILED').length;
   el.queueBadge.textContent = failed ? `Queue ${pending} • Failed ${failed}` : `Queue ${pending}`;
   el.queueBadge.className = `badge ${failed ? 'danger' : pending ? 'warning' : 'success'}`;
+  updateCaptureSyncStatusHF27H_();
 }
 
 

@@ -701,3 +701,8 @@ body.modal-open{overflow:hidden}
 .field-point-quick-btn:hover,.field-point-quick-btn:focus{border-color:#1d4ed8;box-shadow:0 0 0 3px rgba(29,78,216,.08);outline:none}
 .field-point-quick-btn span{display:grid;gap:3px;min-width:0}.field-point-quick-btn b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.field-point-quick-btn small{font-size:11px;color:#64748b}.field-point-quick-btn em{font-size:12px;font-style:normal;font-weight:800;color:#0f4c81;white-space:nowrap}
 @media(max-width:640px){.field-point-quick-btn{padding:13px 12px}.field-point-quick-btn b{font-size:15px}.field-point-quick-btn small{font-size:12px}}
+
+/* HF27H: compact live queue state; updates without re-rendering map/preview. */
+.capture-queue-hf27h{padding:9px 12px;margin:8px 0 10px;border:1px solid #cbd5e1;border-left:4px solid #64748b;border-radius:10px;background:#f8fafc;color:#334155;font-size:12px;font-weight:650;line-height:1.5;overflow-wrap:anywhere}
+.capture-queue-hf27h.uploading{border-left-color:#2563eb;background:#eff6ff;color:#1e40af}
+.capture-queue-hf27h.hidden{display:none}
