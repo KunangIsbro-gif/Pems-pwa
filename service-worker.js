@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-28-evidence-remap-hf27j';
+const CACHE_NAME = 'pems-v15-9-28-evidence-remap-hf27j-cosmic';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -6,6 +6,9 @@ const STATIC_ASSETS = [
   './config.js',
   './app.js',
   './manifest.webmanifest',
+  './cosmic-theme.css',
+  './cosmic-fx.css',
+  './cosmic-fx.js',
   './proactive-bridge.js'
 ];
 

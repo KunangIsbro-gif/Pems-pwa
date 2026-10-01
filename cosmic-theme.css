@@ -1,0 +1,16 @@
+/* PEMS V15 — Cosmic Theme (gelap). Dimuat setelah styles.css */
+:root{color-scheme:dark;--bg:#080f1f;--card:#121e34;--line:#29425f;--text:#eaf4ff;--muted:#92a6c5;--navy:#132a48;--navy-2:#1c3d73;--shadow:0 12px 35px rgba(0,0,0,.45)}
+html,body{background:radial-gradient(ellipse at top right,#152e52,#080f1f 65%) fixed;color:var(--text)}
+.login-card{box-shadow:0 0 45px rgba(86,130,255,.22),var(--shadow);border:1px solid #29425f}
+.sidebar{border-right:1px solid #29425f}
+.input,input,select,textarea{color:var(--text)}
+input::placeholder,textarea::placeholder{color:#6f87aa}
+select option{background:#121e34;color:#eaf4ff}
+.input:focus,input:focus,select:focus,textarea:focus{outline:none;border-color:#39d9ed!important;box-shadow:0 0 0 3px rgba(57,217,237,.18)}
+a,.inline-link{color:#7fd8ff}
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) saturate(.6) brightness(.8)}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#132238;color:#eaf4ff}
+.leaflet-container{background:#0b1626}
+[style*="background:#e2e8f0"]{background:#1a2a44!important}
+[style*="background:#0f766e"]{background:linear-gradient(90deg,#5682ff,#39d9ed)!important}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#29425f;border-radius:9px}::-webkit-scrollbar-track{background:#0b1626}
