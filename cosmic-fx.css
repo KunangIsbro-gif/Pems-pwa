@@ -177,4 +177,17 @@ button:not(:disabled):hover .t-lid{transform:rotate(-32deg) translate(-1px,-1px)
 #reportJobStatus.status-box.warning::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,transparent,#5682ff,#a855f7,#39d9ed,transparent);background-size:200% 100%;animation:fx-sweep 1.6s linear infinite}
 @keyframes fx-sweep{to{background-position:-200% 0}}
 
+/* Posisi Saya: ikon target mencari lokasi */
+.g-sweep,.g-ripple,.g-ticks{transform-origin:12px 12px}
+.field-gps-btn:not(:disabled):hover .g-ticks{animation:gps-lock 1.6s ease-in-out infinite}
+.field-gps-btn.is-searching::before{opacity:1;animation:cosmic-drift 1.1s linear infinite alternate}
+.field-gps-btn.is-searching .g-sweep{opacity:.6;animation:gps-spin 1.1s linear infinite}
+.field-gps-btn.is-searching .g-ripple{animation:gps-ripple 1.3s ease-out infinite}
+.field-gps-btn.is-searching .g-ticks{animation:gps-lock 1.1s ease-in-out infinite}
+.field-gps-btn.gps-locked .g-ticks{animation:gps-snap .45s ease-out}
+@keyframes gps-spin{to{transform:rotate(360deg)}}
+@keyframes gps-ripple{0%{transform:scale(.35);opacity:.9}100%{transform:scale(1.6);opacity:0}}
+@keyframes gps-lock{0%,100%{transform:scale(1.14)}50%{transform:scale(.84)}}
+@keyframes gps-snap{0%{transform:scale(1.6)}100%{transform:scale(1)}}
+
 }

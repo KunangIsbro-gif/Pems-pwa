@@ -8,9 +8,16 @@ input::placeholder,textarea::placeholder{color:#6f87aa}
 select option{background:#121e34;color:#eaf4ff}
 .input:focus,input:focus,select:focus,textarea:focus{outline:none;border-color:#39d9ed!important;box-shadow:0 0 0 3px rgba(57,217,237,.18)}
 a,.inline-link{color:#7fd8ff}
-.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) saturate(.6) brightness(.8)}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#132238;color:#eaf4ff}
 .leaflet-container{background:#0b1626}
 [style*="background:#e2e8f0"]{background:#1a2a44!important}
 [style*="background:#0f766e"]{background:linear-gradient(90deg,#5682ff,#39d9ed)!important}
 ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#29425f;border-radius:9px}::-webkit-scrollbar-track{background:#0b1626}
+.field-gps-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.gps-ico{width:1.3em;height:1.3em;flex:none}
+.field-gps-btn.is-searching:disabled{opacity:1}
+.gps-locked .g-ring{stroke:#46e3ad}.gps-locked .g-dot{fill:#46e3ad}
+.leaflet-control-layers{background:#132238!important;color:#eaf4ff;border:1px solid #29425f!important;border-radius:12px!important;box-shadow:0 8px 24px rgba(0,0,0,.45)!important}
+.leaflet-control-layers-list{padding:6px 10px}
+.leaflet-control-layers label{display:flex;align-items:center;gap:6px;font-weight:800;font-size:12px;margin:3px 0;cursor:pointer}
+.leaflet-control-zoom a{background:#132238;color:#eaf4ff;border-color:#29425f}

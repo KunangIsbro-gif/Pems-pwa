@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-28-evidence-remap-hf27j-cosmic';
+const CACHE_NAME = 'pems-v15-9-28-evidence-remap-hf27j-cosmic2';
 const STATIC_ASSETS = [
   './',
   './index.html',

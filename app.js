@@ -1051,7 +1051,7 @@ async function renderWorkCoreHF17PEMS_(renderSeq) {
               <div class="tiny muted">Ketuk di mana saja pada peta untuk memberi marker hijau AKTUAL, lalu hubungkan ke titik PLAN. GPS HP biru hanya metadata foto.</div>
             </div>
             <button id="fieldGpsBtn" type="button" class="btn field-gps-btn small" ${!navigator.geolocation ? 'disabled' : ''}>
-              📍 POSISI SAYA
+              ${GPS_ICON_PEMS_}POSISI SAYA
             </button>
           </div>
           <div id="fieldPlanMap" class="field-plan-map" aria-label="Peta titik plan dan posisi HP"></div>
@@ -1514,8 +1514,21 @@ function renderFieldPlanMapHF27BPEMS_(options={}) {
     const map=window.L.map(node,{zoomControl:true,attributionControl:true,tap:true}).setView([Number(focus.latitude),Number(focus.longitude)],18);
     state.fieldPlanMap=map;
     state.fieldMapScope=state.selectedProjectId;
-    window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      {maxZoom:20,attribution:'Tiles © Esri'}).addTo(map);
+    // Tipe peta: HYBRID (satelit + jalan + label) dan ROAD (peta jalan). Pilihan diingat per perangkat.
+    const esriImg=window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:20,maxNativeZoom:19,attribution:'Tiles © Esri'});
+    const esriRoads=window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:20,maxNativeZoom:18});
+    const esriLabels=window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:20,maxNativeZoom:18});
+    const hybridLayer=window.L.layerGroup([esriImg,esriRoads,esriLabels]);
+    const roadLayer=window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom:20,maxNativeZoom:19,attribution:'© OpenStreetMap contributors'});
+    let mapType='hybrid';
+    try{mapType=localStorage.getItem('pems_field_map_type')==='road'?'road':'hybrid';}catch(_){}
+    (mapType==='road'?roadLayer:hybridLayer).addTo(map);
+    window.L.control.layers({'Hybrid':hybridLayer,'Road':roadLayer},null,{position:'topright',collapsed:false}).addTo(map);
+    map.on('baselayerchange',ev=>{try{localStorage.setItem('pems_field_map_type',ev.name==='Road'?'road':'hybrid');}catch(_){}});
     // Free tap works BEFORE associating any PLAN point.
     map.on('click',e=>{
       try{setFieldActualPositionHF27GPEMS_(e.latlng.lat,e.latlng.lng,'MAP_TAP');}
@@ -1735,14 +1748,30 @@ function renderFieldPointInfoEmpty() {
   if (capture) capture.innerHTML = '';
 }
 
+const GPS_ICON_PEMS_ = '<svg class="gps-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle class="g-ripple" cx="12" cy="12" r="7.5" opacity="0"/><path class="g-sweep" d="M12 12V4.5A7.5 7.5 0 0 1 19.5 12z" fill="currentColor" stroke="none" opacity="0"/><circle class="g-ring" cx="12" cy="12" r="7.5"/><g class="g-ticks"><path d="M12 1.8v3.6M12 18.6v3.6M1.8 12h3.6M18.6 12h3.6"/></g><circle class="g-dot" cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/></svg>';
+
+function flyToGpsPEMS_(gps) {
+  const map = state.fieldPlanMap;
+  if (!map || !gps) return;
+  const target = [gps.latitude, gps.longitude];
+  const fancy = !!(window.matchMedia && window.matchMedia('(min-width: 900px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)').matches);
+  const zoom = Math.max(map.getZoom(), 18);
+  try {
+    map.invalidateSize();
+    if (fancy) map.flyTo(target, zoom, { duration: 1.4 });
+    else map.setView(target, zoom, { animate: false });
+  } catch (_) {}
+}
+
 async function captureFieldPositionPEMS_() {
   const btn = document.getElementById('fieldGpsBtn');
   const info = document.getElementById('fieldGpsInfo');
   if (!btn) return;
 
-  const oldText = btn.textContent;
+  const oldHtml = btn.innerHTML;
   btn.disabled = true;
-  btn.textContent = '📍 MENGAMBIL POSISI...';
+  btn.classList.add('is-searching');
+  btn.innerHTML = GPS_ICON_PEMS_ + 'MENCARI POSISI…';
   if (info) info.textContent = 'Meminta GPS perangkat...';
 
   try {
@@ -1751,6 +1780,9 @@ async function captureFieldPositionPEMS_() {
     localStorage.setItem(LAST_GPS_KEY, JSON.stringify({ ...gps, cachedAt: new Date().toISOString() }));
     renderFieldPointSelectPEMS_();
     renderFieldPlanMapHF27BPEMS_({ preserveView: true });
+    flyToGpsPEMS_(gps);
+    btn.classList.add('gps-locked');
+    setTimeout(() => btn.classList.remove('gps-locked'), 1400);
     if (state.selectedSession) renderRequirementsPanel();
     if (info) {
       const selectedDistance = state.selectedSession
@@ -1764,7 +1796,8 @@ async function captureFieldPositionPEMS_() {
     toast(humanError(err), 'danger', 6000);
   } finally {
     btn.disabled = false;
-    btn.textContent = oldText;
+    btn.classList.remove('is-searching');
+    btn.innerHTML = oldHtml;
   }
 }
 
