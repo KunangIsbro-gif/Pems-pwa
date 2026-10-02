@@ -46,13 +46,24 @@
 
 
   var TRASH = '<svg class="trash-ico" viewBox="0 0 24 24" aria-hidden="true"><g class="t-lid"><rect x="4" y="5" width="16" height="2.4" rx="1"/><rect x="9" y="2.6" width="6" height="2.4" rx="1"/></g><path class="t-bin" d="M6 8.6h12l-1 11.2a1.6 1.6 0 0 1-1.6 1.4H8.6A1.6 1.6 0 0 1 7 19.8z"/><rect class="t-p t-p1" x="9" y="0" width="2.4" height="3" rx=".5"/><rect class="t-p t-p2" x="13" y="0" width="2.4" height="3" rx=".5"/></svg>';
+  function sceneBOQ() {
+    var rows = [.2, .6, 1.0, 1.4, 1.8].map(function (d, i) {
+      return '<div class="fx-boq-r" style="--d:' + d + 's"><i style="width:' + (92 - i * 9) + '%"></i><u></u><em></em></div>';
+    }).join("");
+    return '<div class="fx-boq"><div class="fx-boq-h"><b>RINCIAN BIAYA</b><span>BOQ</span></div>' + rows +
+      '<div class="fx-boq-t"><span>Σ TOTAL</span><b></b></div></div>';
+  }
   var JOBS = {
     generateKmlKmzBtn:  { kind: "KMZ",     title: "🗺 GENERATE KML / KMZ",   msg: "Menggambar jalur peta…",         ok: "✓ Selesai" },
     generateWordPdfBtn: { kind: "WORDPDF", title: "📄 GENERATE WORD + PDF", msg: "Menulis dokumen, lalu mencetak…", ok: "✓ Job dikirim — berjalan di background" }
   };
-  var wrap = null, loop = null, running = null, flip = false;
+  JOBS.uploadBoqPlanBtn = { kind: "BOQ", title: "📊 UPLOAD BOQ PLAN", msg: "Menyusun rincian biaya…", ok: "✓ BOQ tersimpan" };
+  JOBS.uploadKmlPlanBtn = { kind: "KMZ", title: "🗺 UPLOAD KML / KMZ", msg: "Memetakan jalur…", ok: "✓ KML/KMZ tersimpan" };
+  var wrap = null, loop = null, running = null, flip = false, watchdog = null;
 
   function target() {
+    var pid = document.getElementById("prjProjectId");
+    if (pid && pid.value) return pid.value;
     var s = document.getElementById("outputProjectSelect");
     return s && s.selectedOptions && s.selectedOptions[0] ? s.selectedOptions[0].text : "Project";
   }
@@ -60,12 +71,13 @@
     if (!wrap) return;
     var s;
     if (JOBS[running].kind === "KMZ") s = sceneKMZ();
+    else if (JOBS[running].kind === "BOQ") s = sceneBOQ();
     else { flip = !flip; s = flip ? sceneWORD(target()) : scenePDF(); }
     wrap.querySelector(".fx-stage").innerHTML = s;
   }
   function start(id) {
     if (wrap) wrap.remove();
-    clearInterval(loop);
+    clearInterval(loop); clearInterval(watchdog);
     running = id;
     var j = JOBS[id];
     wrap = document.createElement("div");
@@ -75,10 +87,15 @@
     document.body.appendChild(wrap);
     render();
     loop = setInterval(render, 3300);
+    // Halaman bisa dirender ulang saat proses selesai (tombol diganti), jadi pantau tombolnya
+    watchdog = setInterval(function () {
+      var b = document.getElementById(id);
+      if (running === id && (!b || !b.classList.contains("is-loading"))) finish();
+    }, 500);
   }
   function finish() {
     var w = wrap, j = JOBS[running];
-    clearInterval(loop); loop = null; wrap = null; running = null;
+    clearInterval(loop); clearInterval(watchdog); loop = null; wrap = null; running = null;
     if (!w) return;
     setTimeout(function () {
       var t = document.getElementById("toast");

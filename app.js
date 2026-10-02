@@ -4151,11 +4151,22 @@ async function handlePhotoAdditionDecisionHF27GPEMS_(btn) {
   }
 }
 
+function projectNamePEMS_(projectId) {
+  const id = String(projectId || '');
+  const lists = [state.bootstrap?.projects, state.monitoring?.projects, state.workspace?.projects].filter(Array.isArray);
+  for (const list of lists) {
+    const p = list.find(x => String(x.projectId || '') === id);
+    if (p) return String(p.detailProject || p.projectName || p.lop || '').trim();
+  }
+  return '';
+}
+
 function verificationCardHtml(ev) {
   const photos = ev.photos || [];
+  const projectName = String(ev.projectName || ev.detailProject || '').trim() || projectNamePEMS_(ev.projectId);
   return `
     <div class="card">
-      <div class="section-head"><div><h3>${escapeHtml(ev.itemLabel || ev.designator || ev.evidenceId)}</h3><div class="small muted">${escapeHtml(ev.evidenceId)} • V${Number(ev.versionNo || 1)} • ${escapeHtml(ev.projectId)} • ${escapeHtml(ev.sessionId || '-')}</div></div><span class="badge warning">SUBMITTED</span></div>
+      <div class="section-head"><div><h3>${escapeHtml(ev.itemLabel || ev.designator || ev.evidenceId)}</h3><div class="verif-project">Project: <b>${escapeHtml(projectName || ev.projectId || '-')}</b></div><div class="small muted">${escapeHtml(ev.evidenceId)} • V${Number(ev.versionNo || 1)} • ${escapeHtml(ev.projectId)} • ${escapeHtml(ev.sessionId || '-')}</div></div><span class="badge warning">SUBMITTED</span></div>
       <div class="grid three">
         <div><div class="tiny muted">GPS Accuracy</div><b>${formatNumber(ev.gpsAccuracy)} m</b></div>
         <div><div class="tiny muted">Distance to Plan</div><b>${formatNumber(ev.distanceToPlanM)} m</b></div>
@@ -4568,10 +4579,7 @@ async function renderMonitoring(options = {}) {
     ? recentItemsBase.filter(item => String(item.createdBy || '').toLowerCase() === userFilter)
     : recentItemsBase;
 
-  const byUser =
-    userFilter
-      ? (data.byUser || []).filter(user => String(user.email || '').toLowerCase() === userFilter)
-      : (data.byUser || []);
+  const byUser = (data.byUser || []);
 
   const projectOptions = (data.projects || state.bootstrap?.projects || []).slice();
 
@@ -4639,34 +4647,16 @@ async function renderMonitoring(options = {}) {
     </div>
 
     <div class="grid kpi" style="margin-top:16px">
-      ${metricCards.map(row =>
-        kpi(row[0], row[1], row[2])
-      ).join('')}
+      ${metricCards.map((row, i) => monitorKpiPEMS_(row, ['', 'SUBMITTED', 'NEED_REVISION', 'VERIFIED'][i], focusStatus)).join('')}
     </div>
 
-    ${!isField ? `
-      <div class="card" style="margin-top:16px">
-        <div class="section-head"><h2>Filter Monitoring</h2><span class="badge info">LOP / User</span></div>
-        <div class="grid two">
-          <div class="field"><label>Project / LOP</label><select id="monitorProjectFilter" class="input">
-            <option value="">Semua Project / LOP</option>
-            ${projectOptions.map(p => { const pid = String(p.projectId || ''); const label = [pid, p.detailProject || p.projectName].filter(Boolean).join(' — '); return `<option value="${escapeAttr(pid)}" ${pid === String(state.monitoringProjectFilter || '') ? 'selected' : ''}>${escapeHtml(label)}</option>`; }).join('')}
-          </select></div>
-          <div class="field"><label>User / WASPANG</label><select id="monitorUserFilter" class="input">
-            <option value="">Semua User</option>
-            ${(data.byUser || []).map(user => { const email = String(user.email || '').toLowerCase(); return `<option value="${escapeAttr(email)}" ${email === String(state.monitoringUserFilter || '').toLowerCase() ? 'selected' : ''}>${escapeHtml(user.name || email)} — ${escapeHtml(email)}</option>`; }).join('')}
-          </select></div>
-        </div>
-      </div>
-    ` : ''}
-
-    <div class="grid ${isField ? 'two' : 'two'}" style="margin-top:16px">
+    <div style="margin-top:16px">
       <div class="card">
         <div class="section-head">
           <h2>Perlu Tindakan</h2>
           <span class="badge ${actionItems.length ? 'warning' : 'success'}">${actionItems.length || 0}</span>
         </div>
-        <div class="list">
+        <div class="list monitoring-actions-row">
           ${actionItems.length
             ? actionItems.map(item => `
               <button class="list-item clickable monitoring-action" data-monitor-page="${escapeAttr(item.page || 'monitoring')}">
@@ -4681,17 +4671,6 @@ async function renderMonitoring(options = {}) {
         </div>
       </div>
 
-      <div class="card">
-        <h2>Arti Status</h2>
-        <div class="status-definition-grid">
-          ${Object.entries(data.statusDefinitions || {}).map(([key, label]) => `
-            <div class="status-definition">
-              <span class="badge ${workflowBadge(key)}">${escapeHtml(key)}</span>
-              <span>${escapeHtml(label)}</span>
-            </div>
-          `).join('') || '<div class="empty">Belum ada definisi status.</div>'}
-        </div>
-      </div>
     </div>
 
     <div class="card" style="margin-top:16px">
@@ -4729,43 +4708,50 @@ async function renderMonitoring(options = {}) {
       </div>
     </div>
 
-    ${!isField && byUser.length ? `
+    ${!isField ? `
       <div class="card" style="margin-top:16px">
         <div class="section-head">
-          <h2>Progress per User</h2>
+          <div><h2>Progress per User</h2><div class="tiny muted">Klik baris user untuk memfilter daftar evidence di atas.</div></div>
           <span class="badge info">${byUser.length} user</span>
         </div>
+        <div class="monitor-toolbar">
+          <div class="field"><label>Cari user</label><input id="monitorUserSearch" class="input" type="search" placeholder="Nama atau email…" value="${escapeAttr(state.monitoringSearch || '')}"></div>
+          <div class="field"><label>Project / LOP</label><select id="monitorProjectFilter" class="input">
+            <option value="">Semua Project / LOP</option>
+            ${projectOptions.map(p => { const pid = String(p.projectId || ''); const label = [pid, p.detailProject || p.projectName].filter(Boolean).join(' — '); return `<option value="${escapeAttr(pid)}" ${pid === String(state.monitoringProjectFilter || '') ? 'selected' : ''}>${escapeHtml(label)}</option>`; }).join('')}
+          </select></div>
+        </div>
         <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Total</th>
-                <th>Waiting</th>
-                <th>Revision</th>
-                <th>Verified</th>
-                <th>Rejected</th>
-              </tr>
-            </thead>
+          <table class="monitor-user-table">
+            <thead><tr><th>User</th><th>Total</th><th>Waiting</th><th>Revision</th><th>Verified</th><th>Rejected</th><th>Progress</th></tr></thead>
             <tbody>
-              ${byUser.map(user => `
-                <tr>
-                  <td>
-                    <b>${escapeHtml(user.name || user.email)}</b>
-                    <div class="tiny muted">${escapeHtml(user.email)}</div>
-                  </td>
+              ${byUser.length ? byUser.map(user => { const total = Number(user.total || 0), ver = Number(user.verified || 0), pct = total ? Math.round(ver * 100 / total) : 0, em = String(user.email || '').toLowerCase(); return `
+                <tr class="clickable${em === userFilter ? ' selected' : ''}" data-monitor-user="${escapeAttr(em)}" data-q="${escapeAttr((String(user.name || '') + ' ' + em).toLowerCase())}">
+                  <td><b>${escapeHtml(user.name || user.email)}</b><div class="tiny muted">${escapeHtml(user.email)}</div></td>
                   <td>${escapeHtml(String(user.total || 0))}</td>
                   <td>${escapeHtml(String(user.submitted || 0))}</td>
                   <td>${escapeHtml(String(user.needRevision || 0))}</td>
                   <td>${escapeHtml(String(user.verified || 0))}</td>
                   <td>${escapeHtml(String(user.rejected || 0))}</td>
-                </tr>
-              `).join('')}
+                  <td><div class="mini-progress"><i style="width:${pct}%"></i></div><span class="tiny muted">${pct}%</span></td>
+                </tr>`; }).join('') : '<tr><td colspan="7"><div class="empty">Belum ada data user.</div></td></tr>'}
             </tbody>
           </table>
         </div>
       </div>
     ` : ''}
+      <div class="card status-legend-small" style="margin-top:16px">
+        <h3>Arti Status</h3>
+        <div class="status-definition-grid">
+          ${Object.entries(data.statusDefinitions || {}).map(([key, label]) => `
+            <div class="status-definition">
+              <span class="badge ${workflowBadge(key)}">${escapeHtml(key)}</span>
+              <span>${escapeHtml(label)}</span>
+            </div>
+          `).join('') || '<div class="empty">Belum ada definisi status.</div>'}
+        </div>
+      </div>
+
   `;
 
   document.getElementById('monitorProjectFilter')?.addEventListener('change', async event => {
@@ -4780,6 +4766,28 @@ async function renderMonitoring(options = {}) {
   });
 
   document.getElementById('monitorClearFocus')?.addEventListener('click', () => { state.monitoringFocus=''; renderMonitoring(); });
+  el.content.querySelectorAll('[data-monitor-focus]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      state.monitoringFocus = String(btn.dataset.monitorFocus || '');
+      await renderMonitoring();
+      document.querySelector('.monitoring-evidence-list')?.scrollIntoView({ behavior:'smooth', block:'start' });
+    });
+  });
+  const monitorSearch = document.getElementById('monitorUserSearch');
+  const applyMonitorSearch = () => {
+    const q = String(monitorSearch?.value || '').trim().toLowerCase();
+    state.monitoringSearch = q;
+    el.content.querySelectorAll('.monitor-user-table tbody tr[data-q]').forEach(tr => tr.classList.toggle('hidden', !!q && !tr.dataset.q.includes(q)));
+  };
+  monitorSearch?.addEventListener('input', applyMonitorSearch);
+  applyMonitorSearch();
+  el.content.querySelectorAll('[data-monitor-user]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const em = String(tr.dataset.monitorUser || '');
+      state.monitoringUserFilter = state.monitoringUserFilter === em ? '' : em;
+      renderMonitoring({ force:false });
+    });
+  });
 
   el.content.querySelectorAll('[data-monitor-page]').forEach(btn => {
     btn.addEventListener('click', () =>
@@ -5507,7 +5515,7 @@ async function renderAdmin() {
         <div class="card"><div class="section-head"><h2>Daftar Project</h2><span class="badge info">${projects.length} project</span></div>
           <div class="field" style="margin:12px 0"><label>Cari Project</label><input id="adminProjectSearch" class="input" placeholder="Cari PID, stakeholder, detail pekerjaan, STO..."></div>
           <div class="table-wrap"><table><thead><tr><th>PID</th><th>Stakeholder</th><th>Detail Pekerjaan / STO</th><th>Plan File</th><th>Plan Review</th><th>Admin / PM Review</th><th>Setup</th><th>Status</th><th>SLA</th><th>Time of Critical</th><th>Aksi</th></tr></thead><tbody>
-            ${projects.length ? projects.map(p=>{ const pub=adminProjectPublishStatePEMS_(p); return `<tr data-project-row data-search="${escapeAttr([p.projectId,p.stakeholder,p.projectType,p.detailProject||p.lop,p.sto,p.statusProject,p.setupStatus].filter(Boolean).join(' ').toLowerCase())}">
+            ${projects.length ? projects.map(p=>{ const pub=adminProjectPublishStatePEMS_(p); return `<tr data-project-row data-pid="${escapeAttr(p.projectId)}" class="project-row-click" data-search="${escapeAttr([p.projectId,p.stakeholder,p.projectType,p.detailProject||p.lop,p.sto,p.statusProject,p.setupStatus].filter(Boolean).join(' ').toLowerCase())}">
               <td><b>${escapeHtml(p.projectId)}</b></td>
               <td>${escapeHtml(p.stakeholder || '-')}<div class="tiny muted">${escapeHtml(p.projectType || '-')}</div></td>
               <td><b>${escapeHtml(p.detailProject || p.lop || '-')}</b><div class="tiny muted">STO: ${escapeHtml(p.sto || '-')}</div></td>
@@ -5646,6 +5654,12 @@ async function renderAdmin() {
     document.getElementById('prjStatusProject')?.addEventListener('change', updateAdminProjectSlaPreview);
     document.getElementById('uploadBoqPlanBtn')?.addEventListener('click', () => uploadAdminPlanFile('BOQ'));
     document.getElementById('uploadKmlPlanBtn')?.addEventListener('click', () => uploadAdminPlanFile('KML'));
+    el.content.querySelectorAll('tr[data-project-row][data-pid]').forEach(row => {
+      row.addEventListener('click', ev => {
+        if (ev.target.closest('a,button,input,select,textarea')) return;
+        openProjectInfoPEMS_(row.dataset.pid, projects);
+      });
+    });
     document.getElementById('publishProjectBtn')?.addEventListener('click', () => publishAdminProjectPEMS_(value('prjProjectId'), document.getElementById('publishProjectBtn')));
     document.getElementById('runPlanReviewBtn')?.addEventListener('click', runAdminPlanReviewPEMS_);
     document.getElementById('loadBoqMappingBtn')?.addEventListener('click', loadAdminBoqMappingPEMS_);
@@ -5928,6 +5942,54 @@ function adminFileToBase64(file) {
     };
     reader.readAsArrayBuffer(file);
   });
+}
+
+function projectInfoModalPEMS_() {
+  let m = document.getElementById('projectInfoModal');
+  if (m) return m;
+  m = document.createElement('div');
+  m.id = 'projectInfoModal';
+  m.className = 'monitor-evidence-modal hidden';
+  m.setAttribute('role', 'dialog');
+  m.setAttribute('aria-modal', 'true');
+  m.innerHTML = `<div class="monitor-evidence-card pinfo-card"><div class="monitor-evidence-head"><div><b id="pinfoTitle">Project</b><div id="pinfoSub" class="tiny muted"></div></div><button id="pinfoClose" type="button" class="btn ghost small">Tutup</button></div><div id="pinfoBody" class="monitor-evidence-body"></div></div>`;
+  document.body.appendChild(m);
+  const close = () => { m.classList.add('hidden'); document.body.classList.remove('modal-open'); };
+  m.querySelector('#pinfoClose').addEventListener('click', close);
+  m.addEventListener('click', e => { if (e.target === m) close(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  return m;
+}
+
+async function openProjectInfoPEMS_(projectId, projects) {
+  const p = (projects || []).find(x => String(x.projectId) === String(projectId)) || { projectId };
+  const m = projectInfoModalPEMS_();
+  m.querySelector('#pinfoTitle').textContent = `${p.projectId} — ${p.detailProject || p.lop || 'Project'}`;
+  m.querySelector('#pinfoSub').textContent = [p.stakeholder, p.sto ? `STO ${p.sto}` : ''].filter(Boolean).join(' • ');
+  const body = m.querySelector('#pinfoBody');
+  body.innerHTML = '<div class="empty">Memuat progres project…</div>';
+  m.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  let st = null;
+  try { st = await api(`/monitoring?projectId=${encodeURIComponent(projectId)}`, { timeoutMs: 20000, maxAttempts: 1 }); } catch (_) {}
+  const total = Number(st?.evidenceTotal || 0), ver = Number(st?.verified || 0);
+  const wait = Number(st?.waitingVerification || 0), rev = Number(st?.needRevision || 0);
+  const pct = total ? Math.round(ver * 100 / total) : 0;
+  const sla = (p.slaDays === '' || p.slaDays == null) ? '-' : `${Number(p.elapsedDays || 0)} / ${Number(p.slaDays)} hari${p.slaUsagePct === '' || p.slaUsagePct == null ? '' : ` (${p.slaUsagePct}%)`}`;
+  const row = (k, v) => `<div class="pinfo-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(String(v ?? '-'))}</b></div>`;
+  body.innerHTML = `
+    <div class="pinfo-grid">
+      <div class="pinfo-ringbox">
+        <svg class="pinfo-ring" viewBox="0 0 120 120"><circle class="pr-bg" cx="60" cy="60" r="50"/><circle class="pr-fg" cx="60" cy="60" r="50" pathLength="100" style="--pct:${pct}"/><text x="60" y="67" text-anchor="middle" class="pr-txt">${pct}%</text></svg>
+        <div class="tiny muted">Evidence verified dari semua evidence yang sudah diambil</div>
+      </div>
+      <div class="pinfo-stats">
+        ${row('Evidence terambil', total)}${row('Verified', ver)}${row('Menunggu verifikasi', wait)}${row('Perlu revisi', rev)}
+        <div class="pinfo-sep"></div>
+        ${row('Status project', p.statusProject || '-')}${row('Setup', p.setupStatus || 'DRAFT')}${row('SLA berjalan', sla)}${row('Time of critical', p.timeCriticalLabel || '-')}
+      </div>
+    </div>
+    ${st ? '' : '<div class="status-box warning" style="margin-top:12px">Data evidence project belum bisa dimuat dari server.</div>'}`;
 }
 
 async function uploadAdminPlanFile(kind) {
@@ -6862,16 +6924,100 @@ async function syncOutputDriveAccessPEMS_() {
   }
 }
 
-async function renderAudit() {
-  if (!hasPermission('audit.read')) { el.content.innerHTML='<div class="empty">Tidak memiliki hak audit.</div>'; return; }
-  if (!navigator.onLine) { el.content.innerHTML='<div class="empty">Audit Log dibaca dari server.</div>'; return; }
-  try {
-    const data = await api('/audit?limit=80');
-    const items = data.items || [];
-    el.content.innerHTML = `<div class="card"><h2>Audit Terbaru</h2><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Nama User</th><th>Role</th><th>Action</th><th>Entity</th><th>Reason</th></tr></thead><tbody>${items.map(a=>`<tr><td>${formatDate(a.CREATED_AT)}</td><td><b>${escapeHtml(a.USER_NAME || a.USER_EMAIL || 'SYSTEM')}</b><div class="tiny muted">${escapeHtml(a.USER_EMAIL || '')}</div></td><td>${escapeHtml(a.ROLE)}</td><td>${escapeHtml(a.ACTION)}</td><td>${escapeHtml(a.ENTITY_ID)}</td><td>${escapeHtml(a.REASON)}</td></tr>`).join('')}</tbody></table></div></div>`;
-  } catch(err){el.content.innerHTML=`<div class="status-box danger">${escapeHtml(humanError(err))}</div>`;}
+function auditDatePEMS_(v) {
+  if (!v) return null;
+  let d = new Date(v);
+  if (isNaN(d)) d = new Date(String(v).replace(' ', 'T'));
+  return isNaN(d) ? null : d;
 }
 
+function auditChartsHtmlPEMS_(base, from, to) {
+  const now = new Date();
+  const key = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const valid = base.filter(x => x.d);
+  const today = valid.filter(x => key(x.d) === key(now)).length;
+  const month = valid.filter(x => x.d.getFullYear() === now.getFullYear() && x.d.getMonth() === now.getMonth()).length;
+  const year = valid.filter(x => x.d.getFullYear() === now.getFullYear()).length;
+  const end = to || now;
+  const start = from || new Date(end.getFullYear(), end.getMonth(), end.getDate() - 29);
+  const days = [];
+  for (let t = new Date(start.getFullYear(), start.getMonth(), start.getDate()); t <= end && days.length < 370; t.setDate(t.getDate() + 1)) days.push(new Date(t));
+  const cnt = {};
+  valid.forEach(x => { const k = key(x.d); cnt[k] = (cnt[k] || 0) + 1; });
+  const series = days.map(d => cnt[key(d)] || 0);
+  const W = 640, H = 170, P = 26, max = Math.max(1, ...series);
+  const step = series.length > 1 ? (W - 2 * P) / (series.length - 1) : 0;
+  const pts = series.map((v, i) => [P + i * step, H - P - (v / max) * (H - 2 * P)]);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
+  const area = pts.length ? `${line} L${pts[pts.length - 1][0].toFixed(1)} ${H - P} L${pts[0][0].toFixed(1)} ${H - P} Z` : '';
+  const fmtD = d => d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+  const dots = series.length <= 62 ? pts.map((p, i) => `<circle class="ac-dot" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3"><title>${fmtD(days[i])}: ${series[i]}</title></circle>`).join('') : '';
+  const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const months = Array(12).fill(0);
+  valid.forEach(x => { if (x.d.getFullYear() === now.getFullYear()) months[x.d.getMonth()]++; });
+  const mmax = Math.max(1, ...months), bw = (W - 2 * P) / 12;
+  const bars = months.map((v, i) => {
+    const h = (v / mmax) * (H - 2 * P - 8), x = P + i * bw;
+    return `<rect class="ac-bar" style="--i:${i}" x="${(x + 6).toFixed(1)}" y="${(H - P - h).toFixed(1)}" width="${(bw - 12).toFixed(1)}" height="${h.toFixed(1)}" rx="4"><title>${MN[i]}: ${v}</title></rect><text class="ac-lbl" x="${(x + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${MN[i]}</text>`;
+  }).join('');
+  const kpiCard = (label, v) => `<div class="card kpi-card"><div class="value" data-countup="${v}">${v}</div><div class="label">${label}</div></div>`;
+  return `
+    <div class="audit-kpis" style="margin-top:16px">${kpiCard('Hari ini', today)}${kpiCard('Bulan ini', month)}${kpiCard('Tahun ini', year)}</div>
+    <div class="grid two" style="margin-top:16px">
+      <div class="card"><div class="section-head"><h3>Timeline harian</h3><span class="tiny muted">${fmtD(days[0] || start)} – ${fmtD(days[days.length - 1] || end)} • maks ${max}</span></div>
+        <svg class="audit-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Grafik timeline harian">
+          <line class="ac-axis" x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}"/>
+          <path class="ac-area" d="${area}"/><path class="ac-line" pathLength="1" d="${line}"/>${dots}
+        </svg></div>
+      <div class="card"><div class="section-head"><h3>Per bulan — ${now.getFullYear()}</h3><span class="tiny muted">maks ${mmax}</span></div>
+        <svg class="audit-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Grafik per bulan">
+          <line class="ac-axis" x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}"/>${bars}
+        </svg></div>
+    </div>`;
+}
+
+async function renderAudit() {
+  if (!hasPermission('audit.read')) { el.content.innerHTML = '<div class="empty">Tidak memiliki hak audit.</div>'; return; }
+  if (!navigator.onLine) { el.content.innerHTML = '<div class="empty">Audit Log dibaca dari server.</div>'; return; }
+  try {
+    let data;
+    try { data = await api('/audit?limit=500'); } catch (_) { data = await api('/audit?limit=80'); }
+    const all = (data.items || []).map(a => ({ a, d: auditDatePEMS_(a.CREATED_AT) }));
+    const actions = Array.from(new Set(all.map(x => String(x.a.ACTION || '')).filter(Boolean))).sort();
+    el.content.innerHTML = `
+      <div class="card">
+        <div class="section-head"><div><h2>Audit Log</h2><div class="tiny muted">${all.length} catatan terbaru dari server. Grafik dan filter bekerja pada catatan ini.</div></div></div>
+        <div class="audit-filters">
+          <div class="field"><label>Dari tanggal</label><input id="auditFrom" class="input" type="date"></div>
+          <div class="field"><label>Sampai tanggal</label><input id="auditTo" class="input" type="date"></div>
+          <div class="field"><label>Nama / email user</label><input id="auditUser" class="input" type="search" placeholder="Cari user…"></div>
+          <div class="field"><label>Action (jenis kunjungan)</label><select id="auditAction" class="input"><option value="">Semua action</option>${actions.map(x => `<option value="${escapeAttr(x)}">${escapeHtml(x)}</option>`).join('')}</select></div>
+          <div class="field audit-reset"><button id="auditReset" type="button" class="btn ghost">Reset filter</button></div>
+        </div>
+      </div>
+      <div id="auditCharts"></div>
+      <div class="card" style="margin-top:16px"><div class="section-head"><h2>Catatan Audit</h2><span id="auditCount" class="badge info"></span></div>
+        <div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Nama User</th><th>Role</th><th>Action</th><th>Entity</th><th>Reason</th></tr></thead><tbody id="auditBody"></tbody></table></div></div>`;
+    const $ = id => document.getElementById(id);
+    const paint = () => {
+      const from = $('auditFrom').value ? new Date(`${$('auditFrom').value}T00:00:00`) : null;
+      const to = $('auditTo').value ? new Date(`${$('auditTo').value}T23:59:59`) : null;
+      const q = $('auditUser').value.trim().toLowerCase();
+      const act = $('auditAction').value;
+      const base = all.filter(x => (!q || `${x.a.USER_NAME || ''} ${x.a.USER_EMAIL || ''}`.toLowerCase().includes(q)) && (!act || String(x.a.ACTION || '') === act));
+      const rows = base.filter(x => !x.d || ((!from || x.d >= from) && (!to || x.d <= to)));
+      $('auditCharts').innerHTML = auditChartsHtmlPEMS_(base, from, to);
+      $('auditCount').textContent = `${rows.length} catatan`;
+      $('auditBody').innerHTML = rows.length
+        ? rows.slice(0, 200).map(({ a }) => `<tr><td>${formatDate(a.CREATED_AT)}</td><td><b>${escapeHtml(a.USER_NAME || a.USER_EMAIL || 'SYSTEM')}</b><div class="tiny muted">${escapeHtml(a.USER_EMAIL || '')}</div></td><td>${escapeHtml(a.ROLE)}</td><td>${escapeHtml(a.ACTION)}</td><td>${escapeHtml(a.ENTITY_ID)}</td><td>${escapeHtml(a.REASON)}</td></tr>`).join('')
+        : '<tr><td colspan="6"><div class="empty">Tidak ada catatan untuk filter ini.</div></td></tr>';
+    };
+    ['auditFrom', 'auditTo', 'auditAction'].forEach(id => $(id).addEventListener('change', paint));
+    $('auditUser').addEventListener('input', paint);
+    $('auditReset').addEventListener('click', () => { ['auditFrom', 'auditTo', 'auditUser', 'auditAction'].forEach(id => { $(id).value = ''; }); paint(); });
+    paint();
+  } catch (err) { el.content.innerHTML = `<div class="status-box danger">${escapeHtml(humanError(err))}</div>`; }
+}
 function renderSettings() {
   const isField = isWaspangRolePEMS_(state.user?.role);
 
@@ -8155,6 +8301,10 @@ function projectSelectHtml(projects, selected, id) {
   return `<select id="${escapeAttr(id)}" class="select">${projects.map(p=>`<option value="${escapeAttr(p.projectId)}" ${p.projectId===selected?'selected':''}>${escapeHtml(adminProjectLabelPEMS_(p))}</option>`).join('')}</select>`;
 }
 function kpi(label,value,sub='') { return `<div class="card kpi-card"><div class="value">${escapeHtml(String(value ?? 0))}</div><div class="label">${escapeHtml(label)}${sub?` • ${escapeHtml(sub)}`:''}</div></div>`; }
+function monitorKpiPEMS_(row, key, activeKey) {
+  const active = key && key === String(activeKey || '') ? ' active' : '';
+  return `<button type="button" class="card kpi-card kpi-action${active}" data-monitor-focus="${escapeAttr(key)}"><div class="value">${escapeHtml(String(row[1] ?? 0))}</div><div class="label">${escapeHtml(row[0])}${row[2] ? ` • ${escapeHtml(row[2])}` : ''}</div></button>`;
+}
 function kpiActionPEMS_(label,value,action,sub='') { return `<button type="button" class="card kpi-card kpi-action" data-home-kpi="${escapeAttr(action)}"><div class="value">${escapeHtml(String(value ?? 0))}</div><div class="label">${escapeHtml(label)}${sub?` • ${escapeHtml(sub)}`:''}</div></button>`; }
 function handleHomeKpiPEMS_(action) {
   if (action === 'projects') { navigate('pekerjaan'); return; }

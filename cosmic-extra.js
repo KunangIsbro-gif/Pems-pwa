@@ -60,4 +60,12 @@
       } else if (toastEl.classList.contains("danger") || toastEl.classList.contains("warning")) lastSave = null;
     }).observe(toastEl, { attributes: true, attributeFilter: ["class"] });
   }
+
+  // Audit: angka KPI menghitung naik
+  function countUp(elm) {
+    if (elm.dataset.counted) return; elm.dataset.counted = "1";
+    var to = Number(elm.getAttribute("data-countup")) || 0, t0 = performance.now();
+    (function tick(t) { var p = Math.min(1, (t - t0) / 900); elm.textContent = Math.round(to * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(tick); })(t0);
+  }
+  new MutationObserver(function () { document.querySelectorAll("[data-countup]").forEach(countUp); }).observe(document.body, { childList: true, subtree: true });
 })();

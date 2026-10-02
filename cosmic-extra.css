@@ -63,4 +63,27 @@
   @keyframes ic-check{from{stroke-dashoffset:16}to{stroke-dashoffset:0}}
   @keyframes ic-halo{from{transform:scale(.4);opacity:.9}to{transform:scale(1.7);opacity:0}}
   @keyframes ic-helmet{0%{transform:translateY(-5px)}60%{transform:translateY(1px)}100%{transform:none}}
+
+  /* BOQ: menyusun rincian biaya */
+  .fx-boq{width:220px;height:100px;margin:6px auto 0;padding:8px 12px;border-radius:6px;background:#10213a;border:1px solid #29425f;overflow:hidden}
+  .fx-boq-h{display:flex;justify-content:space-between;color:#92a6c5;font:800 9px/1 'Segoe UI',Arial,sans-serif;letter-spacing:2px;margin-bottom:6px}
+  .fx-boq-r{display:grid;grid-template-columns:1fr 26px 54px;gap:6px;align-items:center;height:11px;margin:4px 0;animation:boq-in .4s ease var(--d) both}
+  .fx-boq-r i,.fx-boq-r u,.fx-boq-r em{display:block;height:5px;border-radius:3px;background:#6fa8ff}
+  .fx-boq-r u{background:#a855f7}.fx-boq-r em{background:#39d9ed;transform-origin:left;animation:boq-bar .5s ease calc(var(--d) + .2s) both}
+  .fx-boq-t{display:flex;justify-content:space-between;align-items:center;margin-top:7px;padding-top:6px;border-top:1px dashed #29425f;color:#eaf4ff;font:900 11px 'Segoe UI',Arial,sans-serif;animation:boq-in .4s ease 2s both}
+  .fx-boq-t b{display:block;width:60px;height:8px;border-radius:4px;background:linear-gradient(90deg,#46e3ad,#39d9ed,#46e3ad);background-size:200% 100%;animation:boq-shine 1.2s linear infinite}
+  @keyframes boq-in{from{opacity:0;transform:translateY(8px)}}
+  @keyframes boq-bar{from{transform:scaleX(0)}}
+  @keyframes boq-shine{to{background-position:-200% 0}}
+
+  /* Audit & popup project */
+  .ac-line{stroke-dasharray:1;animation:ac-draw 1.4s ease both}.ac-area{animation:ac-fade 1.4s ease both}
+  .ac-dot{animation:ac-fade 1.6s ease both}
+  .ac-bar{transform-box:fill-box;transform-origin:bottom;animation:ac-grow .7s ease calc(var(--i) * 60ms) both}
+  .pr-fg{animation:pr-fill 1s ease both}
+  tr.project-row-click:hover{box-shadow:inset 3px 0 0 #39d9ed,0 0 18px rgba(86,130,255,.25)}
+  @keyframes ac-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+  @keyframes ac-fade{from{opacity:0}to{opacity:1}}
+  @keyframes ac-grow{from{transform:scaleY(0)}}
+  @keyframes pr-fill{from{stroke-dashoffset:100}}
 }
