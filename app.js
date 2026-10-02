@@ -267,7 +267,7 @@ function setupNetworkListeners() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    await navigator.serviceWorker.register('./service-worker.js?v=v15-9-28-point-status-hf27i');
+    await navigator.serviceWorker.register('./service-worker.js?v=' + encodeURIComponent(APP_VERSION));
   } catch (err) {
     console.warn('SW registration failed', err);
   }
@@ -3927,11 +3927,20 @@ function draftHistoryCardHtmlHF24PEMS_(draft) {
   </div>`;
 }
 
-async function renderEvidence() {
-  await refreshLocalState();
-  if (navigator.onLine && sessionIsUsable()) {
-    await reconcileLocalEvidenceStatusesHF24PEMS_({ force:false });
+async function renderEvidence(options = {}) {
+  try {
     await refreshLocalState();
+  } catch (err) {
+    console.warn('Evidence: gagal membaca data lokal', err);
+    el.content.innerHTML = '<div class="card"><div class="status-box danger">Data lokal Evidence gagal dibaca. Muat ulang halaman, lalu coba lagi.</div></div>';
+    return;
+  }
+  // Tampilkan data lokal dulu; sinkron status ke server berjalan di latar belakang.
+  // (Sebelumnya halaman menunggu server sampai 30 detik sebelum menampilkan apa pun.)
+  if (!options.skipReconcile && navigator.onLine && sessionIsUsable()) {
+    reconcileLocalEvidenceStatusesHF24PEMS_({ force:false }).then(async res => {
+      if (res && res.updated && state.currentPage === 'evidence') await renderEvidence({ skipReconcile: true });
+    }).catch(() => {});
   }
 
   const drafts = state.drafts.slice().sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));

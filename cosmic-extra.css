@@ -1,0 +1,66 @@
+/* PEMS V15 — ikon tombol (semua perangkat) + efek tambahan (desktop saja) */
+.btn-ico{width:1.2em;height:1.2em;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;margin-right:.45em;vertical-align:-.22em;overflow:visible}
+.btn-ico .ic-check{opacity:0}
+.btn-ico .ic-halo{opacity:0;stroke:#46e3ad}
+
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  :root{--cosmic-layers:radial-gradient(1px 1px at 12% 30%,#fff 50%,transparent 51%),radial-gradient(1.5px 1.5px at 38% 72%,#bfe9ff 50%,transparent 51%),radial-gradient(1px 1px at 64% 22%,#fff 50%,transparent 51%),radial-gradient(1.5px 1.5px at 82% 64%,#d9c7ff 50%,transparent 51%),radial-gradient(1px 1px at 93% 18%,#fff 50%,transparent 51%),linear-gradient(120deg,rgba(86,130,255,.30),rgba(168,85,247,.24),rgba(57,217,237,.30),rgba(86,130,255,.30))}
+
+  /* 1. Login: sinyal jaringan */
+  .fx-signal{display:flex;align-items:flex-end;justify-content:center;gap:5px;height:34px;margin:4px auto 12px}
+  .fx-signal i{width:6px;border-radius:3px;background:linear-gradient(#39d9ed,#5682ff);transform-origin:bottom;animation:fx-wave 1.5s ease-in-out infinite;box-shadow:0 0 8px rgba(57,217,237,.45)}
+  .fx-signal i:nth-child(1){height:9px}.fx-signal i:nth-child(2){height:15px;animation-delay:.12s}.fx-signal i:nth-child(3){height:21px;animation-delay:.24s}
+  .fx-signal i:nth-child(4){height:27px;animation-delay:.36s}.fx-signal i:nth-child(5){height:34px;animation-delay:.48s}
+  @keyframes fx-wave{0%,100%{opacity:.22;transform:scaleY(.5)}40%{opacity:1;transform:scaleY(1)}}
+
+  /* 2. Loader halaman: orbit planet */
+  .fx-load{display:grid;justify-items:center;gap:16px;padding:56px 0}
+  .fx-orbit{position:relative;width:84px;height:84px}
+  .fx-orbit i{position:absolute;border-radius:50%}
+  .fx-ring{inset:-10px;border:1px solid #29425f}
+  .fx-planet{inset:26px;background:radial-gradient(circle at 35% 30%,#fb7185,#e11d48 55%,#7f1d3a);box-shadow:0 0 24px rgba(225,29,72,.6);animation:fx-breathe 1.8s ease-in-out infinite}
+  .fx-moon{inset:0;animation:fx-spin 1.5s linear infinite}
+  .fx-moon::after{content:"";position:absolute;top:-4px;left:50%;width:8px;height:8px;margin-left:-4px;border-radius:50%;background:#39d9ed;box-shadow:0 0 10px #39d9ed}
+  .fx-moon.m2{inset:-10px;animation-duration:2.6s;animation-direction:reverse}
+  .fx-moon.m2::after{background:#a855f7;box-shadow:0 0 10px #a855f7}
+  .fx-load-txt{color:#92a6c5;font-weight:800;letter-spacing:4px;font-size:12px}
+  .fx-load-txt span{display:inline-block;animation:fx-blink-dots 1.2s steps(4) infinite;width:1.4em;overflow:hidden;vertical-align:bottom;text-align:left}
+  @keyframes fx-spin{to{transform:rotate(360deg)}}
+  @keyframes fx-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
+  @keyframes fx-blink-dots{0%{width:0}100%{width:1.4em}}
+
+  /* 3. Kartu Home */
+  .kpi-action{position:relative;isolation:isolate;overflow:hidden;cursor:pointer;transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease}
+  .kpi-action::before,.kpi-action::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none}
+  .kpi-action::before{z-index:-1;opacity:0;transition:opacity .3s;background:var(--cosmic-layers);background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,300% 300%;background-position:0 0,0 0,0 0,0 0,0 0,0% 50%}
+  .kpi-action::after{opacity:0;background:linear-gradient(115deg,transparent 38%,rgba(255,255,255,.32) 50%,transparent 62%);background-size:250% 100%;background-position:150% 0}
+  .kpi-action:hover{transform:translateY(-5px);border-color:#7fd8ff;box-shadow:0 0 0 1px rgba(127,216,255,.5),0 14px 34px rgba(0,0,0,.45),0 0 30px rgba(86,130,255,.45)}
+  .kpi-action:hover::before{opacity:1;animation:cosmic-drift 4s linear infinite alternate,cosmic-twinkle 2.4s ease-in-out infinite}
+  .kpi-action:hover::after{animation:kpi-sweep .9s ease}
+  .kpi-action:hover .value{text-shadow:0 0 18px rgba(127,216,255,.85)}
+  .kpi-action:active{transform:translateY(-1px) scale(.985)}
+  @keyframes kpi-sweep{from{opacity:1;background-position:150% 0}to{opacity:1;background-position:-50% 0}}
+
+  /* 4. Penghitung status Pekerjaan */
+  [data-point-filter-hf27i]{--c:#7fd8ff;position:relative;isolation:isolate;overflow:hidden;transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease}
+  [data-point-filter-hf27i="DRAFT"]{--c:#a9bbd4}[data-point-filter-hf27i="IN_PROGRESS"]{--c:#5682ff}[data-point-filter-hf27i="WAITING"]{--c:#ffb84d}
+  [data-point-filter-hf27i="VERIFIED"]{--c:#46e3ad}[data-point-filter-hf27i="REVISION"]{--c:#ff6b6b}
+  [data-point-filter-hf27i]::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .3s;background:var(--cosmic-layers);background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,300% 300%;background-position:0 0,0 0,0 0,0 0,0 0,0% 50%}
+  [data-point-filter-hf27i]:hover,[data-point-filter-hf27i].active{border-color:var(--c);box-shadow:0 0 0 1px var(--c),0 0 20px color-mix(in srgb,var(--c) 55%,transparent)}
+  [data-point-filter-hf27i]:hover{transform:translateY(-3px)}
+  [data-point-filter-hf27i]:hover::before,[data-point-filter-hf27i].active::before{opacity:.9;animation:cosmic-drift 5s linear infinite alternate,cosmic-twinkle 3s ease-in-out infinite}
+  [data-point-filter-hf27i] span{font-weight:900}
+  [data-point-filter-hf27i].active span,[data-point-filter-hf27i]:hover span{color:var(--c);text-shadow:0 0 12px var(--c)}
+  [data-point-filter-hf27i]:active{transform:scale(.95)}
+
+  /* 7. Admin: animasi "tersimpan" */
+  .fx-saved{box-shadow:0 0 0 2px rgba(70,227,173,.75),0 0 28px rgba(70,227,173,.5)!important}
+  .fx-saved .btn-ico{animation:ic-pop .6s ease}
+  .fx-saved .ic-check{opacity:1;stroke:#46e3ad;stroke-dasharray:16;animation:ic-check .6s .15s ease both}
+  .fx-saved .ic-halo{transform-box:fill-box;transform-origin:center;animation:ic-halo .9s ease-out}
+  .fx-saved .ic-helmet{fill:#ffb84d;stroke:#ffb84d;animation:ic-helmet .7s ease}
+  @keyframes ic-pop{0%{transform:scale(1)}40%{transform:scale(1.4) rotate(-8deg)}100%{transform:scale(1)}}
+  @keyframes ic-check{from{stroke-dashoffset:16}to{stroke-dashoffset:0}}
+  @keyframes ic-halo{from{transform:scale(.4);opacity:.9}to{transform:scale(1.7);opacity:0}}
+  @keyframes ic-helmet{0%{transform:translateY(-5px)}60%{transform:translateY(1px)}100%{transform:none}}
+}

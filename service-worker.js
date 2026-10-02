@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pems-v15-9-28-evidence-remap-hf27j-cosmic2';
+const CACHE_NAME = 'pems-v15-9-28-evidence-remap-hf27j-cosmic3';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,14 @@ const STATIC_ASSETS = [
   './app.js',
   './manifest.webmanifest',
   './cosmic-theme.css',
+  './cosmic-extra.css',
+  './cosmic-extra.js',
+  './error-reporter.js',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-maskable-512.png',
+  './apple-touch-icon.png',
+  './favicon-32.png',
   './cosmic-fx.css',
   './cosmic-fx.js',
   './proactive-bridge.js'
