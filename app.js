@@ -170,6 +170,18 @@ const NAV_LABEL = {
   monitoring: 'Monitoring', admin: 'Admin', output: 'Output', audit: 'Audit', settings: 'Settings'
 };
 
+const NAV_ICON = {
+  home: 'house',
+  pekerjaan: 'briefcase-business',
+  evidence: 'camera',
+  verifikasi: 'badge-check',
+  monitoring: 'chart-no-axes-combined',
+  admin: 'shield-check',
+  output: 'file-output',
+  audit: 'history',
+  settings: 'settings'
+};
+
 init();
 
 async function init() {
@@ -614,7 +626,12 @@ function openMobileMorePEMS_(menus) {
       <div class="mobile-more-head"><b>Menu Lainnya</b><button type="button" class="btn ghost small" data-more-close="1">Tutup</button></div>
       <div class="mobile-more-grid">
         ${extras.map(key => `<a class="mobile-more-item ${state.currentPage === key ? 'active' : ''}" href="${escapeAttr(routeForPEMS_(key))}" data-more-nav="${escapeAttr(key)}">
-          <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
+          <span class="mobile-more-icon">
+  <i data-lucide="${escapeAttr(NAV_ICON[key] || 'circle')}"></i>
+</span>
+<span>
+  ${escapeHtml(NAV_LABEL[key] || key)}
+</span>
           ${notificationCountForPage(key) ? `<span class="nav-count">${escapeHtml(String(notificationCountForPage(key)))}</span>` : ''}
         </a>`).join('')}
       </div>
@@ -661,22 +678,58 @@ function renderNavigation() {
         return `
           <div class="nav-group ${state.adminMenuOpen ? 'open' : ''}">
             <button class="nav-btn nav-admin-toggle ${state.currentPage === 'admin' ? 'active' : ''}" data-admin-toggle="1">
-              <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
-              <span class="nav-admin-chevron">${state.adminMenuOpen ? '▾' : '▸'}</span>
-            </button>
+
+  <span class="nav-icon">
+    <i data-lucide="${escapeAttr(NAV_ICON[key] || 'shield-check')}"></i>
+  </span>
+
+  <span class="nav-label">
+    ${escapeHtml(NAV_LABEL[key] || key)}
+  </span>
+
+  <span class="nav-admin-chevron">
+    <i data-lucide="${state.adminMenuOpen ? 'chevron-down' : 'chevron-right'}"></i>
+  </span>
+
+</button>
             <div class="admin-subnav ${state.adminMenuOpen ? '' : 'hidden'}">
               ${adminSubItems.map(([section, label]) => `
-                <a class="admin-subnav-btn ${state.currentPage === 'admin' && state.adminSection === section ? 'active' : ''}" href="${escapeAttr(routeForPEMS_('admin', section))}" data-admin-section="${escapeAttr(section)}">
-                  ${escapeHtml(label)}
-                </a>
+                <a class="admin-subnav-btn ${state.currentPage === 'admin' && state.adminSection === section ? 'active' : ''}"
+   href="${escapeAttr(routeForPEMS_('admin', section))}"
+   data-admin-section="${escapeAttr(section)}">
+
+  <span class="admin-subnav-icon">
+    <i data-lucide="${
+      ({
+        'project-setup': 'folder-cog',
+        'project-list': 'folder-kanban',
+        'proactive-import': 'download',
+        'master-data': 'database',
+        'users': 'users',
+        'config': 'sliders-horizontal',
+        'assignments': 'user-check'
+      })[section] || 'circle'
+    }"></i>
+  </span>
+
+  <span>${escapeHtml(label)}</span>
+
+</a>
               `).join('')}
             </div>
           </div>`;
       }
       return `<a class="nav-btn" href="${escapeAttr(routeForPEMS_(key))}" data-nav="${escapeAttr(key)}">
-        <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
-        ${count ? `<span class="nav-count">${escapeHtml(String(count))}</span>` : ''}
-      </a>`;
+  <span class="nav-icon">
+    <i data-lucide="${escapeAttr(NAV_ICON[key] || 'circle')}"></i>
+  </span>
+
+  <span class="nav-label">
+    ${escapeHtml(NAV_LABEL[key] || key)}
+  </span>
+
+  ${count ? `<span class="nav-count">${escapeHtml(String(count))}</span>` : ''}
+</a>`;
     }).join('');
   };
 
@@ -688,7 +741,12 @@ function renderNavigation() {
     container.innerHTML = primary.map(key => {
       const count = notificationCountForPage(key);
       return `<a class="nav-btn mobile-nav-btn ${state.currentPage === key ? 'active' : ''}" href="${escapeAttr(routeForPEMS_(key))}" data-nav="${escapeAttr(key)}">
-        <span>${escapeHtml(NAV_LABEL[key] || key)}</span>
+        <span class="mobile-nav-icon">
+  <i data-lucide="${escapeAttr(NAV_ICON[key] || 'circle')}"></i>
+</span>
+<span class="mobile-nav-label">
+  ${escapeHtml(NAV_LABEL[key] || key)}
+</span>
         ${count ? `<span class="nav-count">${escapeHtml(String(count))}</span>` : ''}
       </a>`;
     }).join('') + (extras.length ? `
@@ -700,6 +758,9 @@ function renderNavigation() {
 
   renderSidebar(el.sideNav);
   renderBottom(el.bottomNav);
+  if (window.lucide) {
+  window.lucide.createIcons();
+}
 
   document.querySelectorAll('[data-nav]').forEach(btn =>
     btn.addEventListener('click', (event) => {
